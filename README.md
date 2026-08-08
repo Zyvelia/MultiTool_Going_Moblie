@@ -10,9 +10,22 @@ control the desktop app's own playback.
 ## 1. Get this building on GitHub (no Mac needed)
 
 1. Create a new **private** GitHub repo (e.g. `music-remote`).
-2. Push everything in this folder to it:
+2. Push with the included script — from PowerShell, inside this folder:
+   ```powershell
+   .\push_to_github.ps1 -RepoUrl "https://github.com/<you>/music-remote.git"
    ```
-   cd music_remote
+   The first run will pop a browser window to sign in to GitHub if you
+   haven't already (via Git Credential Manager, which ships with Git
+   for Windows). Every run after that, just:
+   ```powershell
+   .\push_to_github.ps1
+   ```
+   and it'll commit + push whatever changed — no need to pass `-RepoUrl`
+   again unless you're pointing it at a different repo. If you don't
+   have Git installed: `winget install --id Git.Git -e`.
+
+   (Or by hand, if you'd rather not run a script:
+   ```
    git init
    git add .
    git commit -m "initial"
@@ -20,6 +33,7 @@ control the desktop app's own playback.
    git remote add origin https://github.com/<you>/music-remote.git
    git push -u origin main
    ```
+   )
 3. Go to the repo's **Actions** tab. The `Build Music Remote` workflow
    runs automatically on push, or click **Run workflow** to trigger it
    manually.

@@ -1,0 +1,22 @@
+# Flutter/Dart
+.dart_tool/
+.packages
+build/
+.flutter-plugins
+.flutter-plugins-dependencies
+*.iml
+
+# Platform folders — generated fresh by `flutter create` in CI each run,
+# so they don't need to live in the repo. If you ever want to customize
+# native code by hand instead of via the workflow's sed/PlistBuddy
+# patches, remove this and commit them for real.
+/android/
+/ios/
+
+# IDE
+.idea/
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
