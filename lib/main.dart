@@ -1,29 +1,17 @@
 import 'package:flutter/material.dart';
-import 'package:just_audio_background/just_audio_background.dart';
-import 'screens/library_screen.dart';
-import 'screens/settings_screen.dart';
-import 'services/settings_service.dart';
+import 'screens/home_shell.dart';
 
-Future<void> main() async {
-  WidgetsFlutterBinding.ensureInitialized();
-  // Registers the background audio service + lock-screen/notification
-  // controls. Must happen before any AudioPlayer is created.
-  await JustAudioBackground.init(
-    androidNotificationChannelId: 'com.zsmultitool.music_remote.audio',
-    androidNotificationChannelName: 'Music playback',
-    androidNotificationOngoing: true,
-    androidStopForegroundOnPause: true,
-  );
-  runApp(const MusicRemoteApp());
+void main() {
+  runApp(const MultiToolRemoteApp());
 }
 
-class MusicRemoteApp extends StatelessWidget {
-  const MusicRemoteApp({super.key});
+class MultiToolRemoteApp extends StatelessWidget {
+  const MultiToolRemoteApp({super.key});
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Zs Music Remote',
+      title: "Zs Multi Tool Remote",
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         useMaterial3: true,
@@ -37,68 +25,16 @@ class MusicRemoteApp extends StatelessWidget {
           backgroundColor: Color(0xFF151922),
           elevation: 0,
         ),
-      ),
-      home: const StartupScreen(),
-    );
-  }
-}
-
-class StartupScreen extends StatefulWidget {
-  const StartupScreen({super.key});
-
-  @override
-  State<StartupScreen> createState() => _StartupScreenState();
-}
-
-class _StartupScreenState extends State<StartupScreen> {
-  final _settings = SettingsService();
-  bool _checked = false;
-  String? _serverUrl;
-
-  @override
-  void initState() {
-    super.initState();
-    _init();
-  }
-
-  Future<void> _init() async {
-    final url = await _settings.getServerUrl();
-    setState(() {
-      _serverUrl = url;
-      _checked = true;
-    });
-  }
-
-  Future<void> _promptForServer() async {
-    final url = await Navigator.of(context).push<String>(
-      MaterialPageRoute(builder: (_) => const SettingsScreen(initialUrl: null)),
-    );
-    if (url != null && url.isNotEmpty) {
-      setState(() => _serverUrl = url);
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    if (!_checked) {
-      return const Scaffold(
-        body: Center(child: CircularProgressIndicator()),
-      );
-    }
-    if (_serverUrl == null || _serverUrl!.isEmpty) {
-      WidgetsBinding.instance.addPostFrameCallback((_) => _promptForServer());
-      return const Scaffold(
-        body: Center(
-          child: Padding(
-            padding: EdgeInsets.all(24),
-            child: Text(
-              'Set up your server to get started…',
-              style: TextStyle(color: Colors.white54),
-            ),
-          ),
+        cardTheme: const CardThemeData(
+          color: Color(0xFF1B2030),
+          elevation: 0,
         ),
-      );
-    }
-    return LibraryScreen(serverUrl: _serverUrl!);
+        navigationBarTheme: const NavigationBarThemeData(
+          backgroundColor: Color(0xFF151922),
+          indicatorColor: Color(0xFF23304a),
+        ),
+      ),
+      home: const HomeShell(),
+    );
   }
 }

@@ -1,4 +1,4 @@
-name: Build Music Remote
+name: Build Multi Tool Remote
 
 on:
   workflow_dispatch:
@@ -22,20 +22,12 @@ jobs:
       - name: Scaffold platform folders
         run: flutter create --platforms=android,ios --org com.zsmultitool .
 
-      # just_audio_background needs the app to request notification
-      # permission on Android 13+ (its lock-screen/notification controls
-      # are backed by a real notification channel).
-      - name: Patch AndroidManifest for background audio
-        run: |
-          sed -i 's#<manifest xmlns:android="http://schemas.android.com/apk/res/android">#<manifest xmlns:android="http://schemas.android.com/apk/res/android">\n    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>\n    <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>\n    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"/>#' android/app/src/main/AndroidManifest.xml
-          cat android/app/src/main/AndroidManifest.xml
-
       - run: flutter pub get
       - run: flutter build apk --release
 
       - uses: actions/upload-artifact@v4
         with:
-          name: music-remote-apk
+          name: multi-tool-remote-apk
           path: build/app/outputs/flutter-apk/app-release.apk
 
   build-ios:
@@ -51,15 +43,6 @@ jobs:
       - name: Scaffold platform folders
         run: flutter create --platforms=android,ios --org com.zsmultitool .
 
-      # Lets audio keep playing (and the lock-screen controls work) when
-      # the phone is locked or the app is backgrounded. Without this key,
-      # iOS suspends the app's audio session within seconds of leaving it.
-      - name: Patch Info.plist for background audio
-        run: |
-          /usr/libexec/PlistBuddy -c "Add :UIBackgroundModes array" ios/Runner/Info.plist || true
-          /usr/libexec/PlistBuddy -c "Add :UIBackgroundModes:0 string audio" ios/Runner/Info.plist
-          plutil -p ios/Runner/Info.plist | grep -A2 UIBackgroundModes
-
       - run: flutter pub get
 
       # --no-codesign: no Apple Developer account or Mac needed. Produces
@@ -74,9 +57,9 @@ jobs:
           cd build/ios/iphoneos
           mkdir Payload
           cp -r Runner.app Payload/Runner.app
-          zip -r MusicRemote-unsigned.ipa Payload
+          zip -r MultiToolRemote-unsigned.ipa Payload
 
       - uses: actions/upload-artifact@v4
         with:
-          name: music-remote-ipa-unsigned
-          path: build/ios/iphoneos/MusicRemote-unsigned.ipa
+          name: multi-tool-remote-ipa-unsigned
+          path: build/ios/iphoneos/MultiToolRemote-unsigned.ipa

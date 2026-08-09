@@ -9,7 +9,7 @@ REM and every push after that (just commits + pushes whatever changed).
 REM
 REM USAGE
 REM     First time:
-REM         push_to_github.bat https://github.com/<you>/music-remote.git
+REM         push_to_github.bat https://github.com/<you>/multi-tool-remote.git
 REM
 REM     Every time after that, from inside the folder:
 REM         push_to_github.bat
@@ -59,7 +59,7 @@ if not "%REPO_URL%"=="" (
     git remote get-url origin >nul 2>nul
     if errorlevel 1 (
         echo No remote configured yet. Run this once with a URL, e.g.:
-        echo   push_to_github.bat https://github.com/<you>/music-remote.git
+        echo   push_to_github.bat https://github.com/<you>/multi-tool-remote.git
         exit /b 1
     )
 )

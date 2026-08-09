@@ -7,7 +7,7 @@ every push after that (just commits + pushes whatever changed).
 
 USAGE
     First time:
-        .\push_to_github.ps1 -RepoUrl "https://github.com/<you>/music-remote.git"
+        .\push_to_github.ps1 -RepoUrl "https://github.com/<you>/multi-tool-remote.git"
 
     Every time after that, from inside the folder:
         .\push_to_github.ps1
@@ -60,7 +60,7 @@ if ($RepoUrl) {
         git remote add origin $RepoUrl
     }
 } elseif (-not (git remote get-url origin 2>$null)) {
-    Fail "No remote configured yet. Run this once with -RepoUrl, e.g.:`n  .\push_to_github.ps1 -RepoUrl `"https://github.com/<you>/music-remote.git`""
+    Fail "No remote configured yet. Run this once with -RepoUrl, e.g.:`n  .\push_to_github.ps1 -RepoUrl `"https://github.com/<you>/multi-tool-remote.git`""
 }
 
 git add -A
