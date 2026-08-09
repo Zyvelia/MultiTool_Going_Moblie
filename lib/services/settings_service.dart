@@ -1,4 +1,4 @@
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 /// One PC hostname, four fixed ports — matches APP_HTTPS_PORTS in
 /// core/services/tailscale_service.py on the desktop app. You only
@@ -19,30 +19,47 @@ class SettingsService {
   static const _soundboardCodeKey = 'soundboard_access_code';
   static const _ytCodeKey = 'yt_access_code';
 
+  // Backed by iOS Keychain / Android EncryptedSharedPreferences instead of
+  // shared_preferences. shared_preferences data lives in the app sandbox
+  // and gets wiped on uninstall — which meant re-typing the Tailscale
+  // hostname after every reinstall (e.g. after a TrollStore icon-cache
+  // fix). Keychain entries survive app deletion by default, so this
+  // persists across reinstalls.
+  static const _storage = FlutterSecureStorage(
+    iOptions: IOSOptions(
+      // Keep the item even if the app is deleted; only wiped by an
+      // explicit reset or a full device erase.
+      accessibility: KeychainAccessibility.first_unlock,
+    ),
+  );
+
   Future<String?> getHostname() async {
-    final prefs = await SharedPreferences.getInstance();
-    return prefs.getString(_hostKey);
+    return _storage.read(key: _hostKey);
   }
 
   Future<void> setHostname(String hostname) async {
-    final prefs = await SharedPreferences.getInstance();
     // Accept either a bare hostname or a full https://host:port URL
     // pasted in by mistake — strip scheme/port/path down to just the host.
     var h = hostname.trim();
     h = h.replaceFirst(RegExp(r'^https?://'), '');
     h = h.split('/').first;
     h = h.split(':').first;
-    await prefs.setString(_hostKey, h);
+    await _storage.write(key: _hostKey, value: h);
   }
 
   Future<String?> getAccessCode(String moduleKey) async {
-    final prefs = await SharedPreferences.getInstance();
-    return prefs.getString(_keyFor(moduleKey));
+    return _storage.read(key: _keyFor(moduleKey));
   }
 
   Future<void> setAccessCode(String moduleKey, String code) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_keyFor(moduleKey), code.trim());
+    await _storage.write(key: _keyFor(moduleKey), value: code.trim());
+  }
+
+  /// Clears all saved settings (hostname + access codes). Wire this up to
+  /// a "Reset" button in Settings if you want an explicit way to forget
+  /// everything without deleting the app.
+  Future<void> clearAll() async {
+    await _storage.deleteAll();
   }
 
   String _keyFor(String moduleKey) {

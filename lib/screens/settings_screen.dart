@@ -51,6 +51,42 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
+  Future<void> _reset() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Reset settings?'),
+        content: const Text(
+          'This clears your saved Tailscale hostname and all access codes '
+          'from this device. You\'ll need to re-enter them.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Reset'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    await _settings.clearAll();
+    _hostController.clear();
+    _gamesCodeController.clear();
+    _soundboardCodeController.clear();
+    _ytCodeController.clear();
+    setState(() => _saved = false);
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Settings cleared')),
+      );
+    }
+  }
+
   @override
   void dispose() {
     _hostController.dispose();
@@ -142,6 +178,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
               style: TextStyle(color: Colors.white38, fontSize: 12),
             ),
           ],
+          const SizedBox(height: 28),
+          const Divider(color: Colors.white24),
+          const SizedBox(height: 12),
+          OutlinedButton(
+            onPressed: _reset,
+            style: OutlinedButton.styleFrom(
+              foregroundColor: Colors.redAccent,
+              side: const BorderSide(color: Colors.redAccent),
+            ),
+            child: const Padding(
+              padding: EdgeInsets.symmetric(vertical: 14),
+              child: Text('Reset settings'),
+            ),
+          ),
         ],
       ),
     );
