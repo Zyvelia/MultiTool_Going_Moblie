@@ -4,21 +4,20 @@ import 'package:just_audio/just_audio.dart';
 import 'package:audio_service/audio_service.dart';
 import '../models/song.dart';
 import '../services/api_service.dart';
+import '../services/settings_service.dart';
 import '../widgets/mini_player.dart';
 import '../widgets/song_tile.dart';
-import 'settings_screen.dart';
 
 class LibraryScreen extends StatefulWidget {
-  final String serverUrl;
-  const LibraryScreen({super.key, required this.serverUrl});
+  const LibraryScreen({super.key});
 
   @override
   State<LibraryScreen> createState() => _LibraryScreenState();
 }
 
 class _LibraryScreenState extends State<LibraryScreen> {
-  late ApiService _api;
-  late String _serverUrl;
+  final _settings = SettingsService();
+  ApiService? _api;
   final _player = AudioPlayer();
   final _searchController = TextEditingController();
   Timer? _debounce;
@@ -36,14 +35,19 @@ class _LibraryScreenState extends State<LibraryScreen> {
   @override
   void initState() {
     super.initState();
-    _serverUrl = widget.serverUrl;
-    _api = ApiService(_serverUrl);
-    _loadSongs(reset: true);
+    _init();
     _player.processingStateStream.listen((state) {
       if (state == ProcessingState.completed) {
         _playNext();
       }
     });
+  }
+
+  Future<void> _init() async {
+    final base = await _settings.baseUrl('music');
+    if (base == null) return;
+    setState(() => _api = ApiService(base));
+    await _loadSongs(reset: true);
   }
 
   @override
@@ -55,7 +59,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
   }
 
   Future<void> _loadSongs({bool reset = false}) async {
-    if (_loading) return;
+    if (_api == null || _loading) return;
     setState(() {
       _loading = true;
       _error = null;
@@ -66,7 +70,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
     });
     try {
       final result =
-          await _api.fetchSongs(query: _query, offset: _offset, limit: 100);
+          await _api!.fetchSongs(query: _query, offset: _offset, limit: 100);
       setState(() {
         _songs.addAll(result.songs);
         _offset += result.songs.length;
@@ -91,7 +95,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
   }
 
   Future<void> _playIndex(int index) async {
-    if (index < 0 || index >= _songs.length) return;
+    if (_api == null || index < 0 || index >= _songs.length) return;
     setState(() => _currentIndex = index);
     final song = _songs[index];
     try {
@@ -102,7 +106,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
       // MediaItem tag is what shows up on the lock screen / notification
       // via just_audio_background.
       final source = LockCachingAudioSource(
-        Uri.parse(_api.streamUrl(song.id)),
+        Uri.parse(_api!.streamUrl(song.id)),
         tag: MediaItem(
           id: song.id.toString(),
           title: song.title,
@@ -131,32 +135,20 @@ class _LibraryScreenState extends State<LibraryScreen> {
     if (_currentIndex > 0) _playIndex(_currentIndex - 1);
   }
 
-  Future<void> _openSettings() async {
-    final newUrl = await Navigator.of(context).push<String>(
-      MaterialPageRoute(
-        builder: (_) => SettingsScreen(initialUrl: _serverUrl),
-      ),
-    );
-    if (newUrl != null && newUrl.isNotEmpty && newUrl != _serverUrl) {
-      setState(() {
-        _serverUrl = newUrl;
-        _api = ApiService(_serverUrl);
-      });
-      _loadSongs(reset: true);
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
+    if (_api == null) {
+      return const Scaffold(
+        body: Center(
+          child: Text('Set your PC hostname in Settings first.',
+              style: TextStyle(color: Colors.white54)),
+        ),
+      );
+    }
+
     return Scaffold(
       appBar: AppBar(
         title: Text(_total > 0 ? '$_total songs' : 'Library'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.settings),
-            onPressed: _openSettings,
-          ),
-        ],
       ),
       body: Column(
         children: [

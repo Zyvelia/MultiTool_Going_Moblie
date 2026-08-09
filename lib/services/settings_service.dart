@@ -6,9 +6,10 @@ import 'package:shared_preferences/shared_preferences.dart';
 /// derived from it.
 class ModulePorts {
   static const vault = 8443;
+  static const music = 8444;
+  static const yt = 8445;
   static const games = 8446;
   static const soundboard = 8447;
-  static const yt = 8445;
 }
 
 class SettingsService {
@@ -61,6 +62,7 @@ class SettingsService {
     if (host == null || host.isEmpty) return null;
     final port = switch (moduleKey) {
       'vault' => ModulePorts.vault,
+      'music' => ModulePorts.music,
       'games' => ModulePorts.games,
       'soundboard' => ModulePorts.soundboard,
       'yt' => ModulePorts.yt,

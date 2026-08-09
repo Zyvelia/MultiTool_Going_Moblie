@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'vault_screen.dart';
+import 'library_screen.dart';
 import 'games_screen.dart';
 import 'soundboard_screen.dart';
 import 'yt_screen.dart';
@@ -64,6 +65,7 @@ class _HomeShellState extends State<HomeShell> {
 
     final screens = [
       const VaultScreen(),
+      const LibraryScreen(),
       const GamesScreen(),
       const SoundboardScreen(),
       const YtScreen(),
@@ -77,6 +79,7 @@ class _HomeShellState extends State<HomeShell> {
         onDestinationSelected: (i) => setState(() => _index = i),
         destinations: const [
           NavigationDestination(icon: Icon(Icons.lock), label: 'Vault'),
+          NavigationDestination(icon: Icon(Icons.music_note), label: 'Music'),
           NavigationDestination(icon: Icon(Icons.sports_esports), label: 'Games'),
           NavigationDestination(icon: Icon(Icons.volume_up), label: 'Sounds'),
           NavigationDestination(icon: Icon(Icons.download), label: 'YT'),
