@@ -10,10 +10,7 @@ class ModulePorts {
   static const yt = 8445;
   static const games = 8446;
   static const soundboard = 8447;
-<<<<<<< HEAD
   static const notes = 8448;
-=======
->>>>>>> 45c6d9bb297507350a62a30d1707a40d51d0e3e7
 }
 
 class SettingsService {
