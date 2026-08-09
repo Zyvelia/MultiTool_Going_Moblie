@@ -22,6 +22,40 @@ jobs:
       - name: Scaffold platform folders
         run: flutter create --platforms=android,ios --org com.zsmultitool .
 
+      # audio_service (Music tab) needs two changes to the generated
+      # AndroidManifest.xml that flutter create can't know about — a
+      # foreground-service permission set, and pointing the launcher
+      # activity at the plugin's own AudioServiceActivity (so its
+      # FlutterEngine/MediaBrowserService wiring works with zero custom
+      # Kotlin — MainActivity.kt is unused). Since android/ is scaffolded
+      # fresh every run rather than committed, this has to be patched in
+      # CI each time rather than hand-edited once.
+      - name: Patch AndroidManifest.xml for audio_service
+        run: |
+          python3 - <<'PY'
+          import re
+
+          path = "android/app/src/main/AndroidManifest.xml"
+          with open(path) as f:
+              xml = f.read()
+
+          perms = (
+              '    <uses-permission android:name="android.permission.WAKE_LOCK"/>\n'
+              '    <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>\n'
+              '    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"/>\n'
+          )
+          xml = re.sub(r'(<manifest[^>]*>\n)', r'\1' + perms, xml, count=1)
+
+          xml = xml.replace(
+              'android:name=".MainActivity"',
+              'android:name="com.ryanheise.audioservice.AudioServiceActivity"',
+          )
+
+          with open(path, "w") as f:
+              f.write(xml)
+          print("Patched AndroidManifest.xml for audio_service")
+          PY
+
       - run: flutter pub get
       - run: flutter build apk --release
 
@@ -42,6 +76,30 @@ jobs:
 
       - name: Scaffold platform folders
         run: flutter create --platforms=android,ios --org com.zsmultitool .
+
+      # audio_service (Music tab) needs background audio mode declared in
+      # Info.plist — same reasoning as the Android manifest patch above:
+      # ios/ is scaffolded fresh every run, so this can't just be
+      # hand-edited once and committed.
+      - name: Patch Info.plist for background audio
+        run: |
+          python3 - <<'PY'
+          path = "ios/Runner/Info.plist"
+          with open(path) as f:
+              plist = f.read()
+
+          block = (
+              "\t<key>UIBackgroundModes</key>\n"
+              "\t<array>\n"
+              "\t\t<string>audio</string>\n"
+              "\t</array>\n"
+          )
+          plist = plist.replace("<dict>\n", "<dict>\n" + block, 1)
+
+          with open(path, "w") as f:
+              f.write(plist)
+          print("Patched Info.plist for background audio")
+          PY
 
       - run: flutter pub get
 

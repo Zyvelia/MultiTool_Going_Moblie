@@ -11,6 +11,8 @@ dependencies:
     sdk: flutter
   http: ^1.2.0
   shared_preferences: ^2.2.2
+  just_audio: ^0.9.40
+  audio_service: ^0.18.15
 
 dev_dependencies:
   flutter_test:
