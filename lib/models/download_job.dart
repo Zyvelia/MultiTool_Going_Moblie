@@ -1,3 +1,17 @@
+class DownloadJobFile {
+  final String name;
+  final int size;
+
+  DownloadJobFile({required this.name, required this.size});
+
+  factory DownloadJobFile.fromJson(Map<String, dynamic> json) {
+    return DownloadJobFile(
+      name: json['name'] as String? ?? '',
+      size: (json['size'] as num?)?.toInt() ?? 0,
+    );
+  }
+}
+
 class DownloadJob {
   final String id;
   final String url;
@@ -6,6 +20,7 @@ class DownloadJob {
   final String status; // queued -> downloading -> done | error
   final double percent;
   final String message;
+  final List<DownloadJobFile> files;
 
   DownloadJob({
     required this.id,
@@ -15,6 +30,7 @@ class DownloadJob {
     required this.status,
     required this.percent,
     required this.message,
+    this.files = const [],
   });
 
   factory DownloadJob.fromJson(Map<String, dynamic> json) {
@@ -26,6 +42,9 @@ class DownloadJob {
       status: json['status'] as String? ?? 'queued',
       percent: (json['percent'] as num?)?.toDouble() ?? 0.0,
       message: json['message'] as String? ?? '',
+      files: (json['files'] as List<dynamic>? ?? [])
+          .map((f) => DownloadJobFile.fromJson(f as Map<String, dynamic>))
+          .toList(),
     );
   }
 }

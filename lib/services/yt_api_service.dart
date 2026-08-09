@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 import 'package:http/http.dart' as http;
 import '../models/download_job.dart';
 
@@ -48,6 +49,39 @@ class YtApiService {
     final data = jsonDecode(res.body) as Map<String, dynamic>;
     if (res.statusCode != 200 || data['ok'] != true) {
       throw Exception(data['error'] ?? 'Queue failed (${res.statusCode})');
+    }
+  }
+
+  /// Streams a completed job's file (by index into DownloadJob.files) to
+  /// [savePath], reporting 0.0–1.0 progress via [onProgress]. Throws if
+  /// the file is missing/moved or the request fails.
+  Future<void> downloadJobFile({
+    required String jobId,
+    required int index,
+    required String savePath,
+    void Function(double progress)? onProgress,
+  }) async {
+    final req = http.Request(
+      'GET',
+      _uri('/api/jobs/$jobId/download/$index'),
+    );
+    req.headers.addAll(_headers);
+    final streamed = await http.Client().send(req);
+    if (streamed.statusCode != 200 && streamed.statusCode != 206) {
+      throw Exception('Download failed (${streamed.statusCode})');
+    }
+
+    final total = streamed.contentLength ?? 0;
+    var received = 0;
+    final file = await File(savePath).open(mode: FileMode.write);
+    try {
+      await for (final chunk in streamed.stream) {
+        await file.writeFrom(chunk);
+        received += chunk.length;
+        if (total > 0) onProgress?.call(received / total);
+      }
+    } finally {
+      await file.close();
     }
   }
 }

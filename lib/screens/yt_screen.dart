@@ -1,5 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:share_plus/share_plus.dart';
 import '../models/download_job.dart';
 import '../services/settings_service.dart';
 import '../services/yt_api_service.dart';
@@ -21,6 +23,10 @@ class _YtScreenState extends State<YtScreen> {
   String? _error;
   bool _queuing = false;
   Timer? _pollTimer;
+
+  // Keyed by "jobId:index" — null = not started, 0.0-1.0 = in progress,
+  // 1.0 briefly before the share sheet opens.
+  final Map<String, double> _saveProgress = {};
 
   @override
   void initState() {
@@ -71,6 +77,78 @@ class _YtScreenState extends State<YtScreen> {
     } finally {
       if (mounted) setState(() => _queuing = false);
     }
+  }
+
+  Future<void> _saveToPhone(DownloadJob job, int index) async {
+    if (_api == null) return;
+    final file = job.files[index];
+    final key = '${job.id}:$index';
+    setState(() => _saveProgress[key] = 0.0);
+    try {
+      final dir = await getTemporaryDirectory();
+      final savePath = '${dir.path}/${file.name}';
+      await _api!.downloadJobFile(
+        jobId: job.id,
+        index: index,
+        savePath: savePath,
+        onProgress: (p) {
+          if (mounted) setState(() => _saveProgress[key] = p);
+        },
+      );
+      if (!mounted) return;
+      setState(() => _saveProgress.remove(key));
+      // Hands off to the OS share sheet — "Save to Files"/"Save Video"
+      // from there lands it in Files/Photos, same as sharing from Safari.
+      await SharePlus.instance.share(
+        ShareParams(files: [XFile(savePath)]),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _saveProgress.remove(key));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Save failed: ${e.toString().replaceFirst('Exception: ', '')}')),
+      );
+    }
+  }
+
+  Widget _buildFileRow(DownloadJob job, int index) {
+    final file = job.files[index];
+    final key = '${job.id}:$index';
+    final progress = _saveProgress[key];
+    final saving = progress != null;
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 4),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              file.name,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 12, color: Colors.white70),
+            ),
+          ),
+          const SizedBox(width: 8),
+          if (saving)
+            SizedBox(
+              width: 44,
+              child: Text(
+                '${(progress * 100).toStringAsFixed(0)}%',
+                style: const TextStyle(fontSize: 11, color: Colors.white54),
+              ),
+            )
+          else
+            IconButton(
+              icon: const Icon(Icons.ios_share, size: 18),
+              tooltip: 'Save to phone',
+              onPressed: () => _saveToPhone(job, index),
+              constraints: const BoxConstraints(),
+              padding: const EdgeInsets.all(6),
+            ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -187,6 +265,17 @@ class _YtScreenState extends State<YtScreen> {
                                 child: LinearProgressIndicator(
                                   value: j.percent > 0 ? j.percent : null,
                                   minHeight: 3,
+                                ),
+                              ),
+                            if (done && j.files.isNotEmpty)
+                              Padding(
+                                padding: const EdgeInsets.only(top: 6),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    for (var idx = 0; idx < j.files.length; idx++)
+                                      _buildFileRow(j, idx),
+                                  ],
                                 ),
                               ),
                           ],
