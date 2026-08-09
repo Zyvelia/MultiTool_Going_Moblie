@@ -18,6 +18,18 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^4.0.0
+  flutter_launcher_icons: ^0.14.1
 
 flutter:
   uses-material-design: true
+  assets:
+    - assets/icon/icon.png
+
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: "assets/icon/icon.png"
+  # Source icon has transparency baked in (dark glow background), so this
+  # is fine for Android adaptive icons and iOS (iOS ignores alpha anyway —
+  # flutter_launcher_icons flattens it onto a solid background automatically).
+  remove_alpha_ios: true

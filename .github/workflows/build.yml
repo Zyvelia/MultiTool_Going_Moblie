@@ -57,6 +57,13 @@ jobs:
           PY
 
       - run: flutter pub get
+
+      # Regenerates android/app/src/main/res/mipmap-*/ic_launcher.png (and
+      # adaptive icon layers) from assets/icon/icon.png. Needed every run
+      # since android/ is scaffolded fresh above, not committed.
+      - name: Generate launcher icons
+        run: dart run flutter_launcher_icons
+
       - run: flutter build apk --release
 
       - uses: actions/upload-artifact@v4
@@ -107,6 +114,12 @@ jobs:
           PY
 
       - run: flutter pub get
+
+      # Regenerates ios/Runner/Assets.xcassets/AppIcon.appiconset/ from
+      # assets/icon/icon.png. Needed every run since ios/ is scaffolded
+      # fresh above, not committed.
+      - name: Generate launcher icons
+        run: dart run flutter_launcher_icons
 
       # --no-codesign: no Apple Developer account or Mac needed. Produces
       # an unsigned Runner.app, which is exactly what jailbroken sideload
