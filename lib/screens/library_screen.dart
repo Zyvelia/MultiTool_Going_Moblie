@@ -149,7 +149,18 @@ class _LibraryScreenState extends State<LibraryScreen> {
     try {
       await _api!.control(action, songId: songId, value: value);
       await _pollNowPlaying();
+    } on ControlException catch (e) {
+      // Refresh state regardless — a transient failure (dropped response
+      // on the Tailscale hop) usually still means the command landed on
+      // the PC, so the next poll shows the real, current state.
+      await _pollNowPlaying();
+      if (mounted && !e.transient) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('PC control failed: ${e.message}')),
+        );
+      }
     } catch (e) {
+      await _pollNowPlaying();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('PC control failed: $e')),

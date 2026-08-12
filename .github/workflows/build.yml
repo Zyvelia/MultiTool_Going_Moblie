@@ -58,6 +58,39 @@ jobs:
 
       - run: flutter pub get
 
+      # file_picker pulls in flutter_plugin_android_lifecycle, which now
+      # requires compileSdk 36+. `flutter create` on the Flutter version
+      # this CI installs still scaffolds `compileSdk = flutter.compileSdkVersion`,
+      # which currently resolves lower than that — so the build fails at
+      # :file_picker:checkReleaseAarMetadata. Same story as the manifest
+      # patch above: android/ isn't committed, so this has to be patched
+      # fresh each run rather than hand-edited once.
+      - name: Patch Android compileSdk (file_picker needs 36+)
+        run: |
+          python3 - <<'PY'
+          import re
+
+          path = "android/app/build.gradle.kts"
+          with open(path) as f:
+              gradle = f.read()
+
+          gradle, n = re.subn(
+              r'compileSdk\s*=\s*flutter\.compileSdkVersion',
+              'compileSdk = 36',
+              gradle,
+          )
+          if n == 0:
+              raise SystemExit(
+                  f"Couldn't find 'compileSdk = flutter.compileSdkVersion' in "
+                  f"{path} — the flutter create template may have changed; "
+                  "update this patch to match its current compileSdk line."
+              )
+
+          with open(path, "w") as f:
+              f.write(gradle)
+          print(f"Patched compileSdk -> 36 in {path}")
+          PY
+
       # Regenerates android/app/src/main/res/mipmap-*/ic_launcher.png (and
       # adaptive icon layers) from assets/icon/icon.png. Needed every run
       # since android/ is scaffolded fresh above, not committed.

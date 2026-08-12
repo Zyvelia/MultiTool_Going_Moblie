@@ -3,6 +3,20 @@ import 'package:http/http.dart' as http;
 import '../models/song.dart';
 import '../models/now_playing.dart';
 
+/// Thrown by [ApiService.control] on failure. [transient] marks failures
+/// that are most likely just a dropped response on the Tailscale hop
+/// (gateway errors, timeouts, connection resets) rather than the desktop
+/// actually rejecting the command — in those cases the action may well
+/// have already taken effect, so callers should re-poll state instead of
+/// treating this as a hard error.
+class ControlException implements Exception {
+  final String message;
+  final bool transient;
+  ControlException(this.message, {this.transient = false});
+  @override
+  String toString() => message;
+}
+
 /// Thin wrapper around the endpoints exposed by
 /// modules/media_player/web_server.py on the desktop app.
 ///
@@ -80,14 +94,30 @@ class ApiService {
     final body = <String, dynamic>{'action': action};
     if (songId != null) body['song_id'] = songId;
     if (value != null) body['value'] = value;
-    final res = await http
-        .post(
-          _uri('/api/control'),
-          headers: {'Content-Type': 'application/json'},
-          body: jsonEncode(body),
-        )
-        .timeout(const Duration(seconds: 6));
+
+    http.Response res;
+    try {
+      res = await http
+          .post(
+            _uri('/api/control'),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode(body),
+          )
+          .timeout(const Duration(seconds: 6));
+    } catch (e) {
+      // Connection reset, timeout, etc. — transport-level, not the
+      // desktop actively rejecting the command.
+      throw ControlException('network error: $e', transient: true);
+    }
+
     if (res.statusCode != 200) {
+      // 502/503/504 typically mean the Tailscale proxy hop dropped the
+      // response after the desktop already ran the command, not that
+      // the command failed — genuine rejections (bad action, no engine
+      // attached) come back as 4xx with a real error message.
+      if (res.statusCode == 502 || res.statusCode == 503 || res.statusCode == 504) {
+        throw ControlException('gateway status ${res.statusCode}', transient: true);
+      }
       String message = 'status ${res.statusCode}';
       try {
         final parsed = jsonDecode(res.body) as Map<String, dynamic>;
@@ -95,7 +125,7 @@ class ApiService {
       } catch (_) {
         // Body wasn't JSON — fall back to the status code above.
       }
-      throw Exception(message);
+      throw ControlException(message);
     }
   }
 }
