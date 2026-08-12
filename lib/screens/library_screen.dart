@@ -3,10 +3,14 @@ import 'package:flutter/material.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:audio_service/audio_service.dart';
 import '../models/song.dart';
+import '../models/now_playing.dart';
 import '../services/api_service.dart';
 import '../services/settings_service.dart';
 import '../widgets/mini_player.dart';
+import '../widgets/pc_mini_player.dart';
 import '../widgets/song_tile.dart';
+
+enum _PlaySource { phone, pc }
 
 class LibraryScreen extends StatefulWidget {
   const LibraryScreen({super.key});
@@ -32,6 +36,15 @@ class _LibraryScreenState extends State<LibraryScreen> {
 
   int _currentIndex = -1;
 
+  // "Phone" streams audio into this screen's own AudioPlayer and plays
+  // locally. "PC" instead remote-controls the desktop app's own player
+  // (audio comes out of the PC's speakers) via polling /api/now-playing
+  // and posting to /api/control.
+  _PlaySource _source = _PlaySource.phone;
+  Timer? _pollTimer;
+  NowPlaying? _nowPlaying;
+  bool _sendingControl = false;
+
   @override
   void initState() {
     super.initState();
@@ -53,6 +66,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
   @override
   void dispose() {
     _debounce?.cancel();
+    _pollTimer?.cancel();
     _player.dispose();
     _searchController.dispose();
     super.dispose();
@@ -92,6 +106,58 @@ class _LibraryScreenState extends State<LibraryScreen> {
       setState(() => _query = value);
       _loadSongs(reset: true);
     });
+  }
+
+  void _setSource(_PlaySource source) {
+    if (source == _source) return;
+    setState(() => _source = source);
+    if (source == _PlaySource.pc) {
+      // Only one place should be making sound at a time.
+      _player.pause();
+      _startPolling();
+    } else {
+      _stopPolling();
+    }
+  }
+
+  void _startPolling() {
+    _pollTimer?.cancel();
+    _pollNowPlaying();
+    _pollTimer =
+        Timer.periodic(const Duration(seconds: 1), (_) => _pollNowPlaying());
+  }
+
+  void _stopPolling() {
+    _pollTimer?.cancel();
+    _pollTimer = null;
+  }
+
+  Future<void> _pollNowPlaying() async {
+    if (_api == null) return;
+    try {
+      final np = await _api!.nowPlaying();
+      if (mounted) setState(() => _nowPlaying = np);
+    } catch (_) {
+      // Desktop unreachable for a beat — keep showing the last known
+      // state rather than flashing an error on every missed poll.
+    }
+  }
+
+  Future<void> _sendControl(String action, {int? songId, double? value}) async {
+    if (_api == null || _sendingControl) return;
+    _sendingControl = true;
+    try {
+      await _api!.control(action, songId: songId, value: value);
+      await _pollNowPlaying();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('PC control failed: $e')),
+        );
+      }
+    } finally {
+      _sendingControl = false;
+    }
   }
 
   Future<void> _playIndex(int index) async {
@@ -135,6 +201,14 @@ class _LibraryScreenState extends State<LibraryScreen> {
     if (_currentIndex > 0) _playIndex(_currentIndex - 1);
   }
 
+  void _onSongTap(int index) {
+    if (_source == _PlaySource.phone) {
+      _playIndex(index);
+    } else {
+      _sendControl('play_song', songId: _songs[index].id);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_api == null) {
@@ -146,12 +220,35 @@ class _LibraryScreenState extends State<LibraryScreen> {
       );
     }
 
+    final activeSongId =
+        _source == _PlaySource.pc ? _nowPlaying?.songId : null;
+
     return Scaffold(
       appBar: AppBar(
         title: Text(_total > 0 ? '$_total songs' : 'Library'),
       ),
       body: Column(
         children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+            child: SegmentedButton<_PlaySource>(
+              segments: const [
+                ButtonSegment(
+                  value: _PlaySource.phone,
+                  icon: Icon(Icons.phone_android),
+                  label: Text('This phone'),
+                ),
+                ButtonSegment(
+                  value: _PlaySource.pc,
+                  icon: Icon(Icons.desktop_windows),
+                  label: Text('PC speakers'),
+                ),
+              ],
+              selected: {_source},
+              showSelectedIcon: false,
+              onSelectionChanged: (s) => _setSource(s.first),
+            ),
+          ),
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
             child: TextField(
@@ -205,16 +302,31 @@ class _LibraryScreenState extends State<LibraryScreen> {
                       );
                     }
                     final song = _songs[index];
+                    final active = _source == _PlaySource.phone
+                        ? index == _currentIndex
+                        : song.id == activeSongId;
                     return SongTile(
                       song: song,
-                      active: index == _currentIndex,
-                      onTap: () => _playIndex(index),
+                      active: active,
+                      onTap: () => _onSongTap(index),
                     );
                   },
                 ),
               ),
             ),
-          if (_currentIndex >= 0 && _currentIndex < _songs.length)
+          if (_source == _PlaySource.pc && !(_nowPlaying?.attached ?? false))
+            Padding(
+              padding: const EdgeInsets.fromLTRB(24, 8, 24, 0),
+              child: Text(
+                'Open the Music Player page in the desktop app first — '
+                'that\'s what actually drives the PC\'s speakers.',
+                style: const TextStyle(color: Colors.white38, fontSize: 12.5),
+                textAlign: TextAlign.center,
+              ),
+            ),
+          if (_source == _PlaySource.phone &&
+              _currentIndex >= 0 &&
+              _currentIndex < _songs.length)
             MiniPlayer(
               player: _player,
               song: _songs[_currentIndex],
@@ -222,6 +334,21 @@ class _LibraryScreenState extends State<LibraryScreen> {
               onNext: _playNext,
               hasPrev: _currentIndex > 0,
               hasNext: _currentIndex + 1 < _songs.length,
+            ),
+          if (_source == _PlaySource.pc && (_nowPlaying?.attached ?? false))
+            PcMiniPlayer(
+              title: _nowPlaying!.title,
+              artist: _nowPlaying!.artist,
+              isPlaying: _nowPlaying!.isPlaying,
+              position: _nowPlaying!.position,
+              duration: _nowPlaying!.duration,
+              hasPrev: _nowPlaying!.hasPrev,
+              hasNext: _nowPlaying!.hasNext,
+              onPlayPause: () => _sendControl(
+                  _nowPlaying!.isPlaying ? 'pause' : 'play'),
+              onPrev: () => _sendControl('prev'),
+              onNext: () => _sendControl('next'),
+              onSeek: (v) => _sendControl('seek', value: v),
             ),
         ],
       ),
