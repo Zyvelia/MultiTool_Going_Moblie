@@ -11,6 +11,7 @@ class ModulePorts {
   static const games = 8446;
   static const soundboard = 8447;
   static const notes = 8448;
+  static const send = 8449;
 }
 
 class SettingsService {
@@ -85,6 +86,7 @@ class SettingsService {
       'soundboard' => ModulePorts.soundboard,
       'yt' => ModulePorts.yt,
       'notes' => ModulePorts.notes,
+      'send' => ModulePorts.send,
       _ => throw ArgumentError('unknown module $moduleKey'),
     };
     return 'https://$host:$port';

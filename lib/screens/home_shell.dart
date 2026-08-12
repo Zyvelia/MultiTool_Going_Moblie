@@ -5,6 +5,7 @@ import 'notes_screen.dart';
 import 'games_screen.dart';
 import 'soundboard_screen.dart';
 import 'yt_screen.dart';
+import 'quick_send_screen.dart';
 import 'settings_screen.dart';
 import '../services/settings_service.dart';
 
@@ -71,6 +72,7 @@ class _HomeShellState extends State<HomeShell> {
       const GamesScreen(),
       const SoundboardScreen(),
       const YtScreen(),
+      const QuickSendScreen(),
       const SettingsScreen(),
     ];
 
@@ -86,6 +88,7 @@ class _HomeShellState extends State<HomeShell> {
           NavigationDestination(icon: Icon(Icons.sports_esports), label: 'Games'),
           NavigationDestination(icon: Icon(Icons.volume_up), label: 'Sounds'),
           NavigationDestination(icon: Icon(Icons.download), label: 'YT'),
+          NavigationDestination(icon: Icon(Icons.send), label: 'Send'),
           NavigationDestination(icon: Icon(Icons.settings), label: 'Settings'),
         ],
       ),

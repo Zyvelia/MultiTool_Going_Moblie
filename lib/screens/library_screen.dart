@@ -3,14 +3,10 @@ import 'package:flutter/material.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:audio_service/audio_service.dart';
 import '../models/song.dart';
-import '../models/now_playing.dart';
 import '../services/api_service.dart';
 import '../services/settings_service.dart';
 import '../widgets/mini_player.dart';
-import '../widgets/pc_mini_player.dart';
 import '../widgets/song_tile.dart';
-
-enum PlaybackMode { phone, pc }
 
 class LibraryScreen extends StatefulWidget {
   const LibraryScreen({super.key});
@@ -36,13 +32,6 @@ class _LibraryScreenState extends State<LibraryScreen> {
 
   int _currentIndex = -1;
 
-  // --- PC control mode ---
-  PlaybackMode _mode = PlaybackMode.phone;
-  Timer? _pcPollTimer;
-  NowPlaying? _nowPlaying;
-  String? _pcError;
-  bool _pcSeeking = false; // suppress poll overwrites while dragging
-
   @override
   void initState() {
     super.initState();
@@ -64,62 +53,10 @@ class _LibraryScreenState extends State<LibraryScreen> {
   @override
   void dispose() {
     _debounce?.cancel();
-    _pcPollTimer?.cancel();
     _player.dispose();
     _searchController.dispose();
     super.dispose();
   }
-
-  // -----------------------------------------------------------
-  // Mode switching
-  // -----------------------------------------------------------
-
-  Future<void> _setMode(PlaybackMode mode) async {
-    if (mode == _mode) return;
-    if (mode == PlaybackMode.pc) {
-      // Stop local playback before handing off — don't play in two
-      // places at once.
-      await _player.pause();
-      setState(() {
-        _mode = mode;
-        _pcError = null;
-      });
-      _startPcPolling();
-    } else {
-      _pcPollTimer?.cancel();
-      setState(() => _mode = mode);
-    }
-  }
-
-  void _startPcPolling() {
-    _pcPollTimer?.cancel();
-    _pollNowPlaying(); // immediate first fetch, don't wait a full second
-    _pcPollTimer = Timer.periodic(const Duration(seconds: 1), (_) {
-      _pollNowPlaying();
-    });
-  }
-
-  Future<void> _pollNowPlaying() async {
-    if (_api == null || _pcSeeking) return;
-    try {
-      final np = await _api!.fetchNowPlaying();
-      if (!mounted) return;
-      setState(() {
-        _nowPlaying = np;
-        _pcError = np.attached
-            ? null
-            : 'Open the Music Player page in the desktop app first.';
-      });
-    } catch (e) {
-      if (!mounted) return;
-      setState(() => _pcError = 'Lost connection: $e');
-    }
-  }
-
-  // -----------------------------------------------------------
-  // Library loading (shared by both modes — PC mode still browses
-  // the same list, it just taps a different action to start playback)
-  // -----------------------------------------------------------
 
   Future<void> _loadSongs({bool reset = false}) async {
     if (_api == null || _loading) return;
@@ -156,10 +93,6 @@ class _LibraryScreenState extends State<LibraryScreen> {
       _loadSongs(reset: true);
     });
   }
-
-  // -----------------------------------------------------------
-  // Phone-mode playback
-  // -----------------------------------------------------------
 
   Future<void> _playIndex(int index) async {
     if (_api == null || index < 0 || index >= _songs.length) return;
@@ -202,77 +135,6 @@ class _LibraryScreenState extends State<LibraryScreen> {
     if (_currentIndex > 0) _playIndex(_currentIndex - 1);
   }
 
-  // -----------------------------------------------------------
-  // PC-mode playback (all just POSTs /api/control; the next poll
-  // tick picks up the resulting state, but each call also returns
-  // a fresh snapshot so the UI updates immediately instead of
-  // waiting up to a second for the next poll)
-  // -----------------------------------------------------------
-
-  Future<void> _pcTap(Song song) async {
-    if (_api == null) return;
-    try {
-      final np = await _api!.pcPlaySong(song.id);
-      if (mounted) setState(() => _nowPlaying = np);
-    } catch (e) {
-      _showPcError(e);
-    }
-  }
-
-  Future<void> _pcPlayPause() async {
-    if (_api == null || _nowPlaying == null) return;
-    try {
-      final np = _nowPlaying!.isPlaying
-          ? await _api!.pcPause()
-          : await _api!.pcPlay();
-      if (mounted) setState(() => _nowPlaying = np);
-    } catch (e) {
-      _showPcError(e);
-    }
-  }
-
-  Future<void> _pcNext() async {
-    if (_api == null) return;
-    try {
-      final np = await _api!.pcNext();
-      if (mounted) setState(() => _nowPlaying = np);
-    } catch (e) {
-      _showPcError(e);
-    }
-  }
-
-  Future<void> _pcPrev() async {
-    if (_api == null) return;
-    try {
-      final np = await _api!.pcPrev();
-      if (mounted) setState(() => _nowPlaying = np);
-    } catch (e) {
-      _showPcError(e);
-    }
-  }
-
-  Future<void> _pcSeek(double seconds) async {
-    if (_api == null) return;
-    try {
-      final np = await _api!.pcSeek(seconds);
-      if (mounted) setState(() => _nowPlaying = np);
-    } catch (e) {
-      _showPcError(e);
-    } finally {
-      _pcSeeking = false;
-    }
-  }
-
-  void _showPcError(Object e) {
-    if (!mounted) return;
-    ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text('$e')));
-  }
-
-  // -----------------------------------------------------------
-  // Build
-  // -----------------------------------------------------------
-
   @override
   Widget build(BuildContext context) {
     if (_api == null) {
@@ -287,12 +149,6 @@ class _LibraryScreenState extends State<LibraryScreen> {
     return Scaffold(
       appBar: AppBar(
         title: Text(_total > 0 ? '$_total songs' : 'Library'),
-        actions: [
-          Padding(
-            padding: const EdgeInsets.only(right: 12),
-            child: _ModeSwitch(mode: _mode, onChanged: _setMode),
-          ),
-        ],
       ),
       body: Column(
         children: [
@@ -314,14 +170,6 @@ class _LibraryScreenState extends State<LibraryScreen> {
               ),
             ),
           ),
-          if (_mode == PlaybackMode.pc && _pcError != null)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-              child: Text(
-                _pcError!,
-                style: const TextStyle(color: Colors.orangeAccent, fontSize: 12),
-              ),
-            ),
           if (_error != null)
             Expanded(
               child: Center(
@@ -357,23 +205,16 @@ class _LibraryScreenState extends State<LibraryScreen> {
                       );
                     }
                     final song = _songs[index];
-                    final active = _mode == PlaybackMode.phone
-                        ? index == _currentIndex
-                        : (_nowPlaying?.songId == song.id);
                     return SongTile(
                       song: song,
-                      active: active,
-                      onTap: () => _mode == PlaybackMode.phone
-                          ? _playIndex(index)
-                          : _pcTap(song),
+                      active: index == _currentIndex,
+                      onTap: () => _playIndex(index),
                     );
                   },
                 ),
               ),
             ),
-          if (_mode == PlaybackMode.phone &&
-              _currentIndex >= 0 &&
-              _currentIndex < _songs.length)
+          if (_currentIndex >= 0 && _currentIndex < _songs.length)
             MiniPlayer(
               player: _player,
               song: _songs[_currentIndex],
@@ -382,95 +223,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
               hasPrev: _currentIndex > 0,
               hasNext: _currentIndex + 1 < _songs.length,
             ),
-          if (_mode == PlaybackMode.pc &&
-              _nowPlaying != null &&
-              _nowPlaying!.attached)
-            PcMiniPlayer(
-              title: _nowPlaying!.title,
-              artist: _nowPlaying!.artist,
-              isPlaying: _nowPlaying!.isPlaying,
-              position: _nowPlaying!.position,
-              duration: _nowPlaying!.duration,
-              hasPrev: _nowPlaying!.hasPrev,
-              hasNext: _nowPlaying!.hasNext,
-              onPlayPause: _pcPlayPause,
-              onPrev: _pcPrev,
-              onNext: _pcNext,
-              onSeek: (v) {
-                _pcSeeking = true;
-                setState(() => _nowPlaying = NowPlaying(
-                      attached: true,
-                      songId: _nowPlaying!.songId,
-                      title: _nowPlaying!.title,
-                      artist: _nowPlaying!.artist,
-                      album: _nowPlaying!.album,
-                      isPlaying: _nowPlaying!.isPlaying,
-                      position: v,
-                      duration: _nowPlaying!.duration,
-                      hasPrev: _nowPlaying!.hasPrev,
-                      hasNext: _nowPlaying!.hasNext,
-                    ));
-                _pcSeek(v);
-              },
-            ),
         ],
-      ),
-    );
-  }
-}
-
-/// Small "Phone / PC" segmented toggle for the app bar.
-class _ModeSwitch extends StatelessWidget {
-  final PlaybackMode mode;
-  final ValueChanged<PlaybackMode> onChanged;
-
-  const _ModeSwitch({required this.mode, required this.onChanged});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        color: const Color(0xFF1B2030),
-        borderRadius: BorderRadius.circular(20),
-      ),
-      padding: const EdgeInsets.all(3),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          _segment(
-            icon: Icons.phone_iphone,
-            selected: mode == PlaybackMode.phone,
-            onTap: () => onChanged(PlaybackMode.phone),
-          ),
-          _segment(
-            icon: Icons.desktop_windows,
-            selected: mode == PlaybackMode.pc,
-            onTap: () => onChanged(PlaybackMode.pc),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _segment({
-    required IconData icon,
-    required bool selected,
-    required VoidCallback onTap,
-  }) {
-    return GestureDetector(
-      onTap: onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 150),
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-        decoration: BoxDecoration(
-          color: selected ? const Color(0xFF4EA1FF) : Colors.transparent,
-          borderRadius: BorderRadius.circular(16),
-        ),
-        child: Icon(
-          icon,
-          size: 18,
-          color: selected ? const Color(0xFF0B0D10) : Colors.white54,
-        ),
       ),
     );
   }
