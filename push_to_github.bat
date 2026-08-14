@@ -34,7 +34,7 @@ if "%MSG%"=="" set "MSG=Update"
 where git >nul 2>nul
 if errorlevel 1 (
     echo Git isn't installed or isn't on PATH. Install it first: winget install --id Git.Git -e
-    exit /b 1
+    goto :fail
 )
 
 REM Run from this script's own folder regardless of where it's invoked from.
@@ -60,7 +60,7 @@ if not "%REPO_URL%"=="" (
     if errorlevel 1 (
         echo No remote configured yet. Run this once with a URL, e.g.:
         echo   push_to_github.bat https://github.com/<you>/multi-tool-remote.git
-        exit /b 1
+        goto :fail
     )
 )
 
@@ -74,12 +74,50 @@ if errorlevel 1 (
     echo No changes to commit.
 )
 
+REM The most common reason a push silently "does nothing" is that
+REM origin/main has commits this copy doesn't (a commit from another
+REM machine, an edit made on GitHub's web UI, or a previous run of this
+REM script that got interrupted after pushing but before finishing). In
+REM that case a plain push is rejected outright. Fetch first and rebase
+REM onto origin/main so a normal push can go through instead of failing.
+git fetch origin main >nul 2>nul
+if not errorlevel 1 (
+    git rev-list HEAD..origin/main --count > "%TEMP%\_behind_count.txt" 2>nul
+    set /p BEHIND_COUNT=<"%TEMP%\_behind_count.txt"
+    del "%TEMP%\_behind_count.txt" >nul 2>nul
+    if not "!BEHIND_COUNT!"=="0" (
+        echo origin/main has changes this copy doesn't - rebasing onto it first...
+        git pull --rebase origin main
+        if errorlevel 1 (
+            echo.
+            echo Rebase hit a conflict. Nothing was pushed. Resolve it manually:
+            echo   1. Fix the conflicting file^(s^) shown above
+            echo   2. git add ^<file^>
+            echo   3. git rebase --continue
+            echo   4. Re-run this script
+            echo   ^(or: git rebase --abort to undo and go back to before this run^)
+            goto :fail
+        )
+    )
+)
+
 echo Pushing to origin/main...
 git push -u origin main
 if errorlevel 1 (
-    echo Push failed - see the error above.
-    exit /b 1
+    echo.
+    echo Push failed - see the error above. Common causes: not signed in to
+    echo GitHub yet ^(a browser window should pop up to authenticate - check
+    echo for it behind this one^), or no network connection.
+    goto :fail
 )
 
 echo.
 echo Done. GitHub Actions will start the build automatically - check the Actions tab.
+pause
+exit /b 0
+
+:fail
+echo.
+echo Something went wrong - see above for details.
+pause
+exit /b 1
