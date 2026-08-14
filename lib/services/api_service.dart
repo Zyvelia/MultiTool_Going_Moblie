@@ -54,7 +54,7 @@ class ApiService {
       'q': query,
       'offset': '$offset',
       'limit': '$limit',
-    }));
+    })).timeout(const Duration(seconds: 10));
     if (res.statusCode != 200) {
       throw Exception('Failed to load songs (${res.statusCode})');
     }

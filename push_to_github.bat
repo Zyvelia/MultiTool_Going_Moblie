@@ -78,24 +78,36 @@ REM The most common reason a push silently "does nothing" is that
 REM origin/main has commits this copy doesn't (a commit from another
 REM machine, an edit made on GitHub's web UI, or a previous run of this
 REM script that got interrupted after pushing but before finishing). In
-REM that case a plain push is rejected outright. Fetch first and rebase
-REM onto origin/main so a normal push can go through instead of failing.
+REM that case a plain push is rejected outright. Fetch first and merge
+REM origin/main in so a normal push can go through instead of failing.
+REM
+REM This uses a real merge (git pull --no-rebase), not a rebase. Rebase
+REM replays each local commit one at a time and can pause mid-sequence
+REM when a commit turns out to already be applied upstream, leaving the
+REM repo in a half-finished state that needs manual `rebase --continue`/
+REM `--abort` surgery to escape. A merge just combines both histories in
+REM one step - if anything conflicts, it stops cleanly with clear
+REM "Unmerged paths" state and nothing partially applied, which is a lot
+REM easier to recover from by hand.
 git fetch origin main >nul 2>nul
 if not errorlevel 1 (
     git rev-list HEAD..origin/main --count > "%TEMP%\_behind_count.txt" 2>nul
     set /p BEHIND_COUNT=<"%TEMP%\_behind_count.txt"
     del "%TEMP%\_behind_count.txt" >nul 2>nul
     if not "!BEHIND_COUNT!"=="0" (
-        echo origin/main has changes this copy doesn't - rebasing onto it first...
-        git pull --rebase origin main
+        echo origin/main has changes this copy doesn't - merging them in first...
+        git pull --no-rebase --no-edit origin main
         if errorlevel 1 (
             echo.
-            echo Rebase hit a conflict. Nothing was pushed. Resolve it manually:
-            echo   1. Fix the conflicting file^(s^) shown above
-            echo   2. git add ^<file^>
-            echo   3. git rebase --continue
+            echo Merge hit a conflict. Nothing was pushed. Resolve it:
+            echo   1. Open the conflicting file^(s^) listed above - look for
+            echo      ^<^<^<^<^<^<^< / ======= / ^>^>^>^>^>^>^> markers and edit each
+            echo      section down to what it should actually say
+            echo   2. git add ^<file^>   ^(for each file you fixed^)
+            echo   3. git commit        ^(a merge commit message is pre-filled -
+            echo      just save and close the editor that opens^)
             echo   4. Re-run this script
-            echo   ^(or: git rebase --abort to undo and go back to before this run^)
+            echo   ^(or: git merge --abort to undo and go back to before this run^)
             goto :fail
         )
     )
