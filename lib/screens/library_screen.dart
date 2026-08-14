@@ -45,15 +45,50 @@ class _LibraryScreenState extends State<LibraryScreen> {
   NowPlaying? _nowPlaying;
   bool _sendingControl = false;
 
+  int _midStreamRetries = 0;
+
   @override
   void initState() {
     super.initState();
     _init();
     _player.processingStateStream.listen((state) {
       if (state == ProcessingState.completed) {
-        _playNext();
+        // Calling setAudioSource() synchronously from inside this
+        // listener — while ExoPlayer is still finishing its own
+        // transition into the "completed" state — is what causes
+        // Android's media3 error 1004 (ERROR_CODE_FAILED_RUNTIME_CHECK).
+        // Deferring to the next microtask lets that transition settle
+        // first.
+        Future.microtask(_playNext);
       }
     });
+    // The retry loop in _playIndex only covers a blip right as a track
+    // starts. A Tailscale hiccup a few seconds into an already-playing
+    // track (the more common case while out and about on cellular) comes
+    // through here instead, as a stream error rather than a thrown
+    // exception. Re-request the same track a couple of times before
+    // treating it as a real failure.
+    _player.playbackEventStream.listen(
+      (_) {},
+      onError: (Object e, StackTrace st) {
+        if (_currentIndex < 0) return;
+        if (_midStreamRetries >= 2) {
+          _midStreamRetries = 0;
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('Playback dropped: $e')),
+            );
+          }
+          return;
+        }
+        _midStreamRetries++;
+        final resumeAt = _player.position;
+        Future.delayed(Duration(milliseconds: 500 * _midStreamRetries), () async {
+          if (!mounted || _currentIndex < 0) return;
+          await _playIndex(_currentIndex, resumeAt: resumeAt);
+        });
+      },
+    );
   }
 
   Future<void> _init() async {
@@ -171,35 +206,53 @@ class _LibraryScreenState extends State<LibraryScreen> {
     }
   }
 
-  Future<void> _playIndex(int index) async {
+  Future<void> _playIndex(int index, {Duration? resumeAt}) async {
     if (_api == null || index < 0 || index >= _songs.length) return;
     setState(() => _currentIndex = index);
     final song = _songs[index];
-    try {
-      // LockCachingAudioSource streams like a normal URL source on first
-      // play, but writes what it downloads to a local cache file as it
-      // goes — so replaying the same song (even with a flaky Tailscale
-      // connection) reads from disk instead of re-streaming. The
-      // MediaItem tag is what shows up on the lock screen / notification
-      // via just_audio_background.
-      final source = LockCachingAudioSource(
-        Uri.parse(_api!.streamUrl(song.id)),
-        tag: MediaItem(
-          id: song.id.toString(),
-          title: song.title,
-          artist: song.artist,
-          album: song.album,
-          duration:
-              song.duration > 0 ? Duration(seconds: song.duration) : null,
-        ),
-      );
-      await _player.setAudioSource(source);
-      await _player.play();
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Playback failed: $e')),
-        );
+
+    // LockCachingAudioSource streams like a normal URL source on first
+    // play, but writes what it downloads to a local cache file as it
+    // goes — so replaying the same song (even with a flaky Tailscale
+    // connection) reads from disk instead of re-streaming. The
+    // MediaItem tag is what shows up on the lock screen / notification
+    // via just_audio_background.
+    final source = LockCachingAudioSource(
+      Uri.parse(_api!.streamUrl(song.id)),
+      tag: MediaItem(
+        id: song.id.toString(),
+        title: song.title,
+        artist: song.artist,
+        album: song.album,
+        duration: song.duration > 0 ? Duration(seconds: song.duration) : null,
+      ),
+    );
+
+    // A brief Tailscale connection hiccup right as one track ends and the
+    // next one's stream request goes out shows up as iOS's
+    // NSURLErrorCannotConnectToHost (-1004) or an equivalent transient
+    // error on Android — not a real failure, just bad timing. Retry a
+    // couple of times before treating it as one.
+    const maxAttempts = 3;
+    for (var attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        await _player.setAudioSource(source);
+        if (resumeAt != null && resumeAt > Duration.zero) {
+          await _player.seek(resumeAt);
+        }
+        await _player.play();
+        _midStreamRetries = 0;
+        return;
+      } catch (e) {
+        if (attempt == maxAttempts) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('Playback failed: $e')),
+            );
+          }
+          return;
+        }
+        await Future.delayed(Duration(milliseconds: 400 * attempt));
       }
     }
   }
