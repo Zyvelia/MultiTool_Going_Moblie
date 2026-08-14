@@ -45,21 +45,89 @@ class _LibraryScreenState extends State<LibraryScreen> {
   NowPlaying? _nowPlaying;
   bool _sendingControl = false;
 
+  int _midStreamRetries = 0;
+
+  // Mirrors _songs 1:1. Giving the player an actual playlist (instead of
+  // swapping in one isolated AudioSource per tap) is what lets
+  // just_audio_background know there's a next/previous track to skip to —
+  // it only shows those buttons when the player's own sequence has one.
+  final _playlist = ConcatenatingAudioSource(children: []);
+  bool _playlistAttached = false;
+
   @override
   void initState() {
     super.initState();
     _init();
-    _player.processingStateStream.listen((state) {
-      if (state == ProcessingState.completed) {
-        _playNext();
+    // The playlist auto-advances on its own now (see _playlist above), so
+    // the old "reload the next track when the current one completes"
+    // handler that used to live here is gone — that manual setAudioSource
+    // call from inside a processingStateStream listener was the actual
+    // cause of the 1004 (ERROR_CODE_FAILED_RUNTIME_CHECK) bug.
+    // Keep app state (highlighted row, mini player) in sync when a skip
+    // comes from the lock screen / notification rather than in-app.
+    _player.currentIndexStream.listen((index) {
+      if (mounted && index != null && index != _currentIndex) {
+        setState(() => _currentIndex = index);
       }
     });
+    // The retry loop in _playIndex only covers a blip right as a track
+    // starts. A Tailscale hiccup a few seconds into an already-playing
+    // track (the more common case while out and about on cellular) comes
+    // through here instead, as a stream error rather than a thrown
+    // exception. Re-request the same track a couple of times before
+    // treating it as a real failure.
+    _player.playbackEventStream.listen(
+      (_) {},
+      onError: (Object e, StackTrace st) {
+        final index = _player.currentIndex;
+        if (index == null) return;
+        if (_midStreamRetries >= 2) {
+          _midStreamRetries = 0;
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('Playback dropped: $e')),
+            );
+          }
+          return;
+        }
+        _midStreamRetries++;
+        final resumeAt = _player.position;
+        Future.delayed(Duration(milliseconds: 500 * _midStreamRetries), () async {
+          if (!mounted) return;
+          await _recoverTrack(index, resumeAt);
+        });
+      },
+    );
+  }
+
+  // Swaps in a fresh LockCachingAudioSource at [index] (the cached item
+  // may be stuck in a broken state after a dropped connection) and
+  // resumes from where playback left off.
+  Future<void> _recoverTrack(int index, Duration resumeAt) async {
+    if (index < 0 || index >= _songs.length) return;
+    try {
+      await _playlist.removeAt(index);
+      await _playlist.insert(index, _sourceFor(_songs[index]));
+      await _player.seek(resumeAt, index: index);
+      await _player.play();
+      _midStreamRetries = 0;
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Playback failed: $e')),
+        );
+      }
+    }
   }
 
   Future<void> _init() async {
     final base = await _settings.baseUrl('music');
     if (base == null) return;
     setState(() => _api = ApiService(base));
+    if (!_playlistAttached) {
+      await _player.setAudioSource(_playlist);
+      _playlistAttached = true;
+    }
     await _loadSongs(reset: true);
   }
 
@@ -82,9 +150,11 @@ class _LibraryScreenState extends State<LibraryScreen> {
         _songs.clear();
       }
     });
+    if (reset) await _playlist.clear();
     try {
       final result =
           await _api!.fetchSongs(query: _query, offset: _offset, limit: 100);
+      await _playlist.addAll(result.songs.map(_sourceFor).toList());
       setState(() {
         _songs.addAll(result.songs);
         _offset += result.songs.length;
@@ -98,6 +168,26 @@ class _LibraryScreenState extends State<LibraryScreen> {
         _loading = false;
       });
     }
+  }
+
+  // LockCachingAudioSource streams like a normal URL source on first play,
+  // but writes what it downloads to a local cache file as it goes — so
+  // replaying the same song (even with a flaky Tailscale connection) reads
+  // from disk instead of re-streaming. The MediaItem tag is what shows up
+  // on the lock screen / notification via just_audio_background, and
+  // (now that tracks live in a real playlist) is also what tells it
+  // there's a next/previous item to show skip buttons for.
+  AudioSource _sourceFor(Song song) {
+    return LockCachingAudioSource(
+      Uri.parse(_api!.streamUrl(song.id)),
+      tag: MediaItem(
+        id: song.id.toString(),
+        title: song.title,
+        artist: song.artist,
+        album: song.album,
+        duration: song.duration > 0 ? Duration(seconds: song.duration) : null,
+      ),
+    );
   }
 
   void _onSearchChanged(String value) {
@@ -173,43 +263,34 @@ class _LibraryScreenState extends State<LibraryScreen> {
 
   Future<void> _playIndex(int index) async {
     if (_api == null || index < 0 || index >= _songs.length) return;
-    setState(() => _currentIndex = index);
-    final song = _songs[index];
-    try {
-      // LockCachingAudioSource streams like a normal URL source on first
-      // play, but writes what it downloads to a local cache file as it
-      // goes — so replaying the same song (even with a flaky Tailscale
-      // connection) reads from disk instead of re-streaming. The
-      // MediaItem tag is what shows up on the lock screen / notification
-      // via just_audio_background.
-      final source = LockCachingAudioSource(
-        Uri.parse(_api!.streamUrl(song.id)),
-        tag: MediaItem(
-          id: song.id.toString(),
-          title: song.title,
-          artist: song.artist,
-          album: song.album,
-          duration:
-              song.duration > 0 ? Duration(seconds: song.duration) : null,
-        ),
-      );
-      await _player.setAudioSource(source);
-      await _player.play();
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Playback failed: $e')),
-        );
+
+    const maxAttempts = 3;
+    for (var attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        await _player.seek(Duration.zero, index: index);
+        await _player.play();
+        _midStreamRetries = 0;
+        return;
+      } catch (e) {
+        if (attempt == maxAttempts) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('Playback failed: $e')),
+            );
+          }
+          return;
+        }
+        await Future.delayed(Duration(milliseconds: 400 * attempt));
       }
     }
   }
 
   void _playNext() {
-    if (_currentIndex + 1 < _songs.length) _playIndex(_currentIndex + 1);
+    if (_player.hasNext) _player.seekToNext();
   }
 
   void _playPrev() {
-    if (_currentIndex > 0) _playIndex(_currentIndex - 1);
+    if (_player.hasPrevious) _player.seekToPrevious();
   }
 
   void _onSongTap(int index) {
