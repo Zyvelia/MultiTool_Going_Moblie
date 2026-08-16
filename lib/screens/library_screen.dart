@@ -62,6 +62,12 @@ class _LibraryScreenState extends State<LibraryScreen> {
   final _cache = OfflineCacheService.instance;
   StreamSubscription<CacheEvent>? _cacheSub;
   final Map<int, double> _downloadProgress = {};
+  // "Download all" batch state, driven by OfflineCacheService's
+  // batchStarted/batchProgress/batchFinished events (see _onCacheEvent).
+  bool _batchActive = false;
+  int _batchDone = 0;
+  int _batchTotal = 0;
+  bool _fetchingBatchList = false;
   // True when the song list currently on screen came from the offline
   // cache manifest rather than a live /api/songs response, because the
   // desktop was unreachable. Search is disabled in this state — the
@@ -227,8 +233,124 @@ class _LibraryScreenState extends State<LibraryScreen> {
         case CacheEventType.cleared:
           _downloadProgress.clear();
           break;
+        case CacheEventType.batchStarted:
+          _batchActive = true;
+          _batchDone = 0;
+          _batchTotal = evt.batchTotal ?? 0;
+          break;
+        case CacheEventType.batchProgress:
+          _batchDone = evt.batchDone ?? _batchDone;
+          _batchTotal = evt.batchTotal ?? _batchTotal;
+          break;
+        case CacheEventType.batchFinished:
+        case CacheEventType.batchCancelled:
+          _batchActive = false;
+          if (evt.type == CacheEventType.batchFinished && mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('Downloaded ${evt.batchDone ?? 0} songs')),
+            );
+          }
+          break;
       }
     });
+  }
+
+  /// Kicks off downloading every song matching the current search across
+  /// the whole library, not just the page(s) scrolled into view — the
+  /// list on screen is paginated 100 at a time, so this pages through
+  /// /api/songs itself first to build the full set.
+  Future<void> _downloadAllTapped() async {
+    if (_batchActive) {
+      _cache.cancelBatch();
+      return;
+    }
+    if (_api == null || _fetchingBatchList) return;
+
+    final wifiOnly = await _settings.getMusicWifiOnlyDownloads();
+    final metered = ConnectivityService.instance.isLikelyMetered(_networkType);
+    if (wifiOnly && metered) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Downloads are Wi-Fi only — connect to Wi-Fi, or turn that '
+              'off in Settings, to download over this connection.',
+            ),
+          ),
+        );
+      }
+      return;
+    }
+
+    setState(() => _fetchingBatchList = true);
+    List<Song> all;
+    try {
+      all = await _fetchAllMatchingSongs();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not load full song list: $e')),
+        );
+      }
+      setState(() => _fetchingBatchList = false);
+      return;
+    }
+    setState(() => _fetchingBatchList = false);
+
+    final pending = all.where((s) => !_cache.isCached(s.id)).toList();
+    if (pending.isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Everything matching is already downloaded')),
+        );
+      }
+      return;
+    }
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF1B2030),
+        title: const Text('Download all songs?', style: TextStyle(color: Colors.white)),
+        content: Text(
+          _query.isEmpty
+              ? 'This downloads all ${pending.length} songs not already '
+                  'saved to this device.'
+              : 'This downloads ${pending.length} songs matching '
+                  '"$_query" that aren\'t already saved to this device.',
+          style: const TextStyle(color: Colors.white70),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Download'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || _api == null) return;
+    _cache.downloadAll(pending, _api!);
+  }
+
+  /// Pages through /api/songs with the current search query until
+  /// exhausted. Separate from the incremental _songs/_offset state used
+  /// for on-screen scrolling — this always starts from offset 0 and
+  /// doesn't touch that state.
+  Future<List<Song>> _fetchAllMatchingSongs() async {
+    final all = <Song>[];
+    var offset = 0;
+    while (true) {
+      final result =
+          await _api!.fetchSongs(query: _query, offset: offset, limit: 200);
+      all.addAll(result.songs);
+      offset += result.songs.length;
+      if (!result.hasMore || result.songs.isEmpty) break;
+    }
+    return all;
   }
 
   SongCacheState _cacheStateFor(int songId) {
@@ -480,6 +602,22 @@ class _LibraryScreenState extends State<LibraryScreen> {
       appBar: AppBar(
         title: Text(_total > 0 ? '$_total songs' : 'Library'),
         actions: [
+          if (!_offlineFallback)
+            IconButton(
+              icon: _fetchingBatchList
+                  ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : Icon(_batchActive
+                      ? Icons.cancel_outlined
+                      : Icons.download_for_offline_outlined),
+              tooltip: _batchActive
+                  ? 'Cancel downloading all'
+                  : 'Download all songs',
+              onPressed: _fetchingBatchList ? null : _downloadAllTapped,
+            ),
           IconButton(
             icon: const Icon(Icons.offline_pin),
             tooltip: 'Downloads',
@@ -528,6 +666,44 @@ class _LibraryScreenState extends State<LibraryScreen> {
               child: Text(
                 'Connected: ${_server!.label}',
                 style: const TextStyle(color: Colors.white24, fontSize: 11),
+              ),
+            ),
+          if (_batchActive)
+            Container(
+              width: double.infinity,
+              color: const Color(0xFFB03A2E).withValues(alpha: 0.12),
+              padding: const EdgeInsets.fromLTRB(16, 8, 8, 8),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Downloading $_batchDone/$_batchTotal…',
+                          style: const TextStyle(
+                              color: Colors.white70, fontSize: 12.5),
+                        ),
+                        const SizedBox(height: 4),
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(4),
+                          child: LinearProgressIndicator(
+                            value: _batchTotal > 0
+                                ? _batchDone / _batchTotal
+                                : null,
+                            minHeight: 4,
+                            backgroundColor: Colors.white12,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  TextButton(
+                    onPressed: () => _cache.cancelBatch(),
+                    child: const Text('Cancel',
+                        style: TextStyle(color: Colors.redAccent)),
+                  ),
+                ],
               ),
             ),
           Padding(

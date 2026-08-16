@@ -31,14 +31,37 @@ const Map<String, String> _extForMime = {
   'audio/amr': 'amr',
 };
 
-enum CacheEventType { started, progress, completed, removed, error, cleared }
+enum CacheEventType {
+  started,
+  progress,
+  completed,
+  removed,
+  error,
+  cleared,
+  // Batch ("download all") events, distinct from the per-song ones above
+  // so LibraryScreen can drive an overall progress banner without trying
+  // to infer batch membership from individual song events.
+  batchStarted,
+  batchProgress,
+  batchFinished,
+  batchCancelled,
+}
 
 class CacheEvent {
   final CacheEventType type;
   final int? songId;
   final double? progress; // 0..1, or negative when total size is unknown
   final String? error;
-  const CacheEvent(this.type, {this.songId, this.progress, this.error});
+  final int? batchDone;
+  final int? batchTotal;
+  const CacheEvent(
+    this.type, {
+    this.songId,
+    this.progress,
+    this.error,
+    this.batchDone,
+    this.batchTotal,
+  });
 }
 
 class _ManifestEntry {
@@ -272,6 +295,74 @@ class OfflineCacheService {
       _downloading.remove(song.id);
       _clients.remove(song.id);
       client.close();
+    }
+  }
+
+  bool _batchRunning = false;
+  bool _batchCancelled = false;
+  bool get isBatchRunning => _batchRunning;
+
+  /// Downloads every song in [songs] that isn't already cached (or
+  /// already mid-download), a handful at a time. Reuses [download] for
+  /// each individual song, so per-song progress/error events fire exactly
+  /// as they would for a manual tap — this just adds the overall
+  /// batchStarted/batchProgress/batchFinished events on top for a
+  /// "download all" progress banner. A no-op if a batch is already
+  /// running or nothing needs downloading.
+  Future<void> downloadAll(
+    List<Song> songs,
+    ApiService api, {
+    int concurrency = 3,
+  }) async {
+    await ensureReady();
+    if (_batchRunning) return;
+    final pending =
+        songs.where((s) => !isCached(s.id) && !isDownloading(s.id)).toList();
+    if (pending.isEmpty) return;
+
+    _batchRunning = true;
+    _batchCancelled = false;
+    final total = pending.length;
+    var done = 0;
+    _events.add(CacheEvent(CacheEventType.batchStarted, batchTotal: total));
+
+    var next = 0;
+    Future<void> worker() async {
+      while (!_batchCancelled) {
+        if (next >= pending.length) return;
+        final song = pending[next++];
+        if (!isCached(song.id) && !isDownloading(song.id)) {
+          await download(song, api);
+        }
+        done++;
+        _events.add(CacheEvent(
+          CacheEventType.batchProgress,
+          batchDone: done,
+          batchTotal: total,
+        ));
+      }
+    }
+
+    await Future.wait(
+      List.generate(concurrency.clamp(1, total), (_) => worker()),
+    );
+
+    _batchRunning = false;
+    _events.add(CacheEvent(
+      _batchCancelled ? CacheEventType.batchCancelled : CacheEventType.batchFinished,
+      batchDone: done,
+      batchTotal: total,
+    ));
+  }
+
+  /// Stops a running [downloadAll] batch: no further songs are started,
+  /// and whatever's currently mid-download (up to [concurrency] of them)
+  /// is cancelled too, same as a manual per-song cancel.
+  void cancelBatch() {
+    if (!_batchRunning) return;
+    _batchCancelled = true;
+    for (final id in _downloading.toList()) {
+      cancelDownload(id);
     }
   }
 
