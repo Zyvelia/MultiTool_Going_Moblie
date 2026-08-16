@@ -12,7 +12,6 @@ class ModulePorts {
   static const music = 8444;
   static const yt = 8445;
   static const games = 8446;
-  static const soundboard = 8447;
   static const notes = 8448;
   static const send = 8449;
 }
@@ -20,7 +19,6 @@ class ModulePorts {
 class SettingsService {
   static const _hostKey = 'tailscale_hostname';
   static const _gamesCodeKey = 'games_access_code';
-  static const _soundboardCodeKey = 'soundboard_access_code';
   static const _ytCodeKey = 'yt_access_code';
 
   // Music is the one module that can also be reached over a public
@@ -78,8 +76,6 @@ class SettingsService {
     switch (moduleKey) {
       case 'games':
         return _gamesCodeKey;
-      case 'soundboard':
-        return _soundboardCodeKey;
       case 'yt':
         return _ytCodeKey;
       default:
@@ -94,7 +90,6 @@ class SettingsService {
       'vault' => ModulePorts.vault,
       'music' => ModulePorts.music,
       'games' => ModulePorts.games,
-      'soundboard' => ModulePorts.soundboard,
       'yt' => ModulePorts.yt,
       'notes' => ModulePorts.notes,
       'send' => ModulePorts.send,

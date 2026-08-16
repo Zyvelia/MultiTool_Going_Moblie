@@ -24,7 +24,7 @@ class ConnectionTestStep {
 class ConnectionTestService {
   /// [accessCode], if provided, is sent as `X-Access-Code` on the auth
   /// check — matches the header the other module servers
-  /// (games/soundboard/yt) already expect. Music has no auth wired up
+  /// (games/yt) already expect. Music has no auth wired up
   /// yet (see settings_screen), so that step reports itself as
   /// unconfigured rather than faking a pass.
   Future<List<ConnectionTestStep>> run(String baseUrl, {String? accessCode}) async {

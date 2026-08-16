@@ -4,7 +4,7 @@ import '../models/note.dart';
 
 /// Talks to modules/notes/web_server.py. No access-code support — that
 /// server doesn't gate anything (see its own header comment), matching
-/// Music Player's trust model rather than Gaming Hub/Soundboard's.
+/// Music Player's trust model rather than Gaming Hub's.
 class NotesApiService {
   final String baseUrl;
   NotesApiService(this.baseUrl);

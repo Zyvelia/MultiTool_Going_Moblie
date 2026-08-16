@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import '../models/note.dart';
 import '../services/settings_service.dart';
 import '../services/notes_api_service.dart';
+import '../services/notes_sync_service.dart';
+import '../services/connectivity_service.dart';
 
 class NotesScreen extends StatefulWidget {
   const NotesScreen({super.key});
@@ -13,71 +15,139 @@ class NotesScreen extends StatefulWidget {
 
 class _NotesScreenState extends State<NotesScreen> {
   final _settings = SettingsService();
+  final _sync = NotesSyncService.instance;
   NotesApiService? _api;
   List<Note> _notes = [];
   bool _loading = true;
-  String? _error;
   String _query = '';
-  Timer? _debounce;
+
+  StreamSubscription<NetworkType>? _connectivitySub;
+  StreamSubscription<NotesSyncEvent>? _syncSub;
+  NetworkType _networkType = NetworkType.other;
+  // True once a live fetch has actually failed — distinct from
+  // _networkType == offline, which only means "no interface at all"
+  // and misses the more common case here (interface up, Tailscale
+  // hostname unreachable).
+  bool _unreachable = false;
+  bool _syncing = false;
 
   @override
   void initState() {
     super.initState();
+    _syncSub = _sync.events.listen((evt) {
+      if (!mounted) return;
+      if (evt.type == NotesSyncEventType.syncStarted) {
+        setState(() => _syncing = true);
+      } else if (evt.type == NotesSyncEventType.syncFinished) {
+        setState(() => _syncing = false);
+        _refreshLocal();
+        final synced = evt.synced ?? 0;
+        final failed = evt.failed ?? 0;
+        if (synced > 0) {
+          _showToast(
+            'Synced $synced note${synced == 1 ? '' : 's'} to desktop'
+            '${failed > 0 ? ' ($failed failed, will retry)' : ''}',
+          );
+        }
+      }
+    });
     _init();
+    _initConnectivity();
   }
 
   @override
   void dispose() {
-    _debounce?.cancel();
+    _connectivitySub?.cancel();
+    _syncSub?.cancel();
     super.dispose();
   }
 
   Future<void> _init() async {
+    await _sync.ensureReady();
+    _refreshLocal();
     final base = await _settings.baseUrl('notes');
     if (base == null) return;
     setState(() => _api = NotesApiService(base));
     await _load();
   }
 
-  Future<void> _load() async {
-    if (_api == null) return;
-    setState(() {
-      _loading = true;
-      _error = null;
+  void _initConnectivity() {
+    ConnectivityService.instance.current().then((t) {
+      if (mounted) setState(() => _networkType = t);
     });
+    _connectivitySub = ConnectivityService.instance.onChange.listen((type) async {
+      final wasOffline = _networkType == NetworkType.offline;
+      if (mounted) setState(() => _networkType = type);
+      if (type == NetworkType.offline) return;
+      if (!wasOffline) return; // only act on offline -> back-online edges
+      await _load();
+    });
+  }
+
+  void _refreshLocal() {
+    setState(() {
+      _notes = _sync.localNotes(query: _query);
+      _loading = false;
+    });
+  }
+
+  /// Shows the local cache immediately (works with no connection at
+  /// all), then — if a server is configured — tries to pull the latest
+  /// from the desktop and push any queued local changes.
+  Future<void> _load() async {
+    _refreshLocal();
+    if (_api == null) return;
     try {
-      final notes = await _api!.fetchNotes(query: _query);
-      setState(() {
-        _notes = notes;
-        _loading = false;
-      });
-    } catch (e) {
-      setState(() {
-        _error = 'Could not reach Notes: ${e.toString().replaceFirst('Exception: ', '')}';
-        _loading = false;
-      });
+      final serverNotes = await _api!.fetchNotes();
+      await _sync.replaceFromServer(serverNotes);
+      if (mounted) setState(() => _unreachable = false);
+      await _sync.sync(_api!);
+      _refreshLocal();
+    } catch (_) {
+      // Desktop unreachable — local cache (already shown) is the
+      // fallback, and whatever's queued just waits for the next
+      // successful _load().
+      if (mounted) setState(() => _unreachable = true);
     }
   }
 
   void _onSearchChanged(String value) {
-    _debounce?.cancel();
-    _debounce = Timer(const Duration(milliseconds: 350), () {
+    // Purely a local-cache filter now (see NotesSyncService.localNotes),
+    // so no debounce/network round trip needed — it also means search
+    // works the same online or off.
+    setState(() {
       _query = value;
-      _load();
+      _notes = _sync.localNotes(query: _query);
     });
   }
 
   Future<void> _openEditor({Note? note}) async {
     final saved = await Navigator.of(context).push<bool>(
-      MaterialPageRoute(builder: (_) => NoteEditorScreen(api: _api!, note: note)),
+      MaterialPageRoute(builder: (_) => NoteEditorScreen(note: note)),
     );
-    if (saved == true) _load();
+    if (saved == true) {
+      _refreshLocal();
+      _maybeSync();
+    }
+  }
+
+  /// Fire-and-forget sync attempt after a local edit — only actually
+  /// does anything if a server's configured and reachable; otherwise
+  /// the change just stays queued.
+  void _maybeSync() {
+    if (_api == null || _networkType == NetworkType.offline) return;
+    _sync.sync(_api!);
   }
 
   Future<void> _togglePin(Note note) async {
+    if (_api == null || _networkType == NetworkType.offline) {
+      _showToast('Connect to the desktop to toggle pin');
+      return;
+    }
     try {
-      await _api!.togglePin(note.id);
-      _load();
+      final updated = await _api!.togglePin(note.id);
+      await _sync.upsertFromServer(updated);
+      _refreshLocal();
     } catch (e) {
       _showToast(e.toString().replaceFirst('Exception: ', ''));
     }
@@ -101,9 +171,35 @@ class _NotesScreenState extends State<NotesScreen> {
       );
     }
 
+    final showOfflineBanner =
+        _networkType == NetworkType.offline || _unreachable;
+    final pending = _sync.pendingCount;
+
     return Scaffold(
       appBar: AppBar(
         title: Text(_notes.isNotEmpty ? '${_notes.length} notes' : 'Notes'),
+        actions: [
+          if (_syncing)
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 16),
+              child: Center(
+                child: SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+              ),
+            )
+          else if (pending > 0)
+            IconButton(
+              icon: Badge(
+                label: Text('$pending'),
+                child: const Icon(Icons.cloud_upload_outlined),
+              ),
+              tooltip: '$pending note${pending == 1 ? '' : 's'} waiting to sync — tap to retry',
+              onPressed: _maybeSync,
+            ),
+        ],
       ),
       floatingActionButton: FloatingActionButton(
         onPressed: () => _openEditor(),
@@ -113,6 +209,18 @@ class _NotesScreenState extends State<NotesScreen> {
         onRefresh: _load,
         child: Column(
           children: [
+            if (showOfflineBanner)
+              Container(
+                width: double.infinity,
+                color: Colors.amber.withValues(alpha: 0.15),
+                padding: const EdgeInsets.symmetric(vertical: 6),
+                child: const Text(
+                  'Offline — showing notes saved on this phone. '
+                  'Changes will sync once reconnected.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(fontSize: 12, color: Colors.amber),
+                ),
+              ),
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
               child: TextField(
@@ -133,55 +241,49 @@ class _NotesScreenState extends State<NotesScreen> {
             Expanded(
               child: _loading
                   ? const Center(child: CircularProgressIndicator())
-                  : _error != null
+                  : _notes.isEmpty
                       ? ListView(
-                          children: [
+                          children: const [
                             Padding(
-                              padding: const EdgeInsets.all(24),
-                              child: Text(_error!,
-                                  style: const TextStyle(color: Colors.redAccent),
-                                  textAlign: TextAlign.center),
+                              padding: EdgeInsets.all(24),
+                              child: Text(
+                                'No notes yet. Tap + to write one.',
+                                style: TextStyle(color: Colors.white54),
+                                textAlign: TextAlign.center,
+                              ),
                             ),
                           ],
                         )
-                      : _notes.isEmpty
-                          ? ListView(
-                              children: const [
-                                Padding(
-                                  padding: EdgeInsets.all(24),
-                                  child: Text(
-                                    'No notes yet. Tap + to write one.',
-                                    style: TextStyle(color: Colors.white54),
-                                    textAlign: TextAlign.center,
-                                  ),
-                                ),
-                              ],
-                            )
-                          : ListView.builder(
-                              padding: const EdgeInsets.only(bottom: 80),
-                              itemCount: _notes.length,
-                              itemBuilder: (context, i) {
-                                final note = _notes[i];
-                                return ListTile(
-                                  leading: Icon(
-                                    note.pinned ? Icons.push_pin : Icons.push_pin_outlined,
-                                    color: note.pinned
-                                        ? const Color(0xFF4EA1FF)
-                                        : Colors.white38,
-                                  ),
-                                  title: Text(note.title,
-                                      maxLines: 1, overflow: TextOverflow.ellipsis),
-                                  subtitle: Text(
-                                    note.body,
-                                    maxLines: 2,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: const TextStyle(color: Colors.white54),
-                                  ),
-                                  onTap: () => _openEditor(note: note),
-                                  onLongPress: () => _togglePin(note),
-                                );
-                              },
-                            ),
+                      : ListView.builder(
+                          padding: const EdgeInsets.only(bottom: 80),
+                          itemCount: _notes.length,
+                          itemBuilder: (context, i) {
+                            final note = _notes[i];
+                            final isPending = _sync.isPending(note.id);
+                            return ListTile(
+                              leading: Icon(
+                                note.pinned ? Icons.push_pin : Icons.push_pin_outlined,
+                                color: note.pinned
+                                    ? const Color(0xFF4EA1FF)
+                                    : Colors.white38,
+                              ),
+                              title: Text(note.title,
+                                  maxLines: 1, overflow: TextOverflow.ellipsis),
+                              subtitle: Text(
+                                note.body,
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(color: Colors.white54),
+                              ),
+                              trailing: isPending
+                                  ? const Icon(Icons.cloud_off,
+                                      size: 18, color: Colors.white38)
+                                  : null,
+                              onTap: () => _openEditor(note: note),
+                              onLongPress: () => _togglePin(note),
+                            );
+                          },
+                        ),
             ),
           ],
         ),
@@ -191,16 +293,16 @@ class _NotesScreenState extends State<NotesScreen> {
 }
 
 class NoteEditorScreen extends StatefulWidget {
-  final NotesApiService api;
   final Note? note;
 
-  const NoteEditorScreen({super.key, required this.api, this.note});
+  const NoteEditorScreen({super.key, this.note});
 
   @override
   State<NoteEditorScreen> createState() => _NoteEditorScreenState();
 }
 
 class _NoteEditorScreenState extends State<NoteEditorScreen> {
+  final _sync = NotesSyncService.instance;
   late final TextEditingController _titleController;
   late final TextEditingController _bodyController;
   bool _saving = false;
@@ -226,9 +328,9 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
       final title = _titleController.text.trim();
       final body = _bodyController.text;
       if (widget.note != null) {
-        await widget.api.updateNote(widget.note!.id, title: title, body: body);
+        await _sync.updateNote(widget.note!.id, title: title, body: body);
       } else {
-        await widget.api.createNote(title: title, body: body);
+        await _sync.createNote(title: title, body: body);
       }
       if (mounted) Navigator.of(context).pop(true);
     } catch (e) {
@@ -262,7 +364,7 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
 
     setState(() => _deleting = true);
     try {
-      await widget.api.deleteNote(widget.note!.id);
+      await _sync.deleteNote(widget.note!.id);
       if (mounted) Navigator.of(context).pop(true);
     } catch (e) {
       setState(() => _deleting = false);

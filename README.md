@@ -7,7 +7,6 @@ talk to the matching servers already built into Zs Multi Tool:
 |---|---|---|
 | Vault | `core/services/vault_web_server.py` | 8443 |
 | Games | `modules/gaming_hub/web_server.py` (new) | 8446 |
-| Sounds | `modules/soundboard/web_server.py` (new) | 8447 |
 | YT | `modules/yt_downloader/web_server.py` | 8445 |
 
 You only enter your PC's Tailscale hostname once in Settings — each
@@ -59,8 +58,8 @@ Developer account, no 7-day expiry, no Xcode dance.
 
 1. On each module's page in the desktop app, tap **Start Remote
    Access** (Vault/Music/YT already have this in their Settings tab;
-   Gaming Hub and Soundboard now have a compact version of the same
-   panel right under the header).
+   Gaming Hub now has a compact version of the same panel right under
+   the header).
 2. Open this app → **Settings** tab (bottom nav) → enter your
    Tailscale hostname, e.g. `my-pc.tailnet-name.ts.net` — no
    `https://`, no port. Save.
@@ -76,10 +75,6 @@ Developer account, no 7-day expiry, no Xcode dance.
 - **Games**: shows the same cached list your desktop Gaming Hub page
   shows on open — tap the refresh icon to trigger a fresh scan on the
   PC if you just installed something new.
-- **Sounds**: plays out of whatever output device(s) you picked in the
-  desktop Soundboard page's device pickers — that's how this reaches a
-  Bluetooth speaker/headset paired to the PC. Set a sound folder there
-  first (Load Folder) if you haven't.
 - **YT**: same job queue the desktop page and browser extension use —
   queue from your phone, it downloads on the PC.
 - Access codes (if you set any per-module in the desktop Settings

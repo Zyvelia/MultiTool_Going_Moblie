@@ -14,7 +14,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
   final _settings = SettingsService();
   final _hostController = TextEditingController();
   final _gamesCodeController = TextEditingController();
-  final _soundboardCodeController = TextEditingController();
   final _ytCodeController = TextEditingController();
   final _musicPublicUrlController = TextEditingController();
 
@@ -33,14 +32,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Future<void> _load() async {
     final host = await _settings.getHostname();
     final gamesCode = await _settings.getAccessCode('games');
-    final soundboardCode = await _settings.getAccessCode('soundboard');
     final ytCode = await _settings.getAccessCode('yt');
     final musicPublicUrl = await _settings.getMusicPublicUrl();
     final musicPreferred = await _settings.getMusicPreferredServer();
     final musicWifiOnly = await _settings.getMusicWifiOnlyDownloads();
     _hostController.text = host ?? '';
     _gamesCodeController.text = gamesCode ?? '';
-    _soundboardCodeController.text = soundboardCode ?? '';
     _ytCodeController.text = ytCode ?? '';
     _musicPublicUrlController.text = musicPublicUrl ?? '';
     setState(() {
@@ -55,7 +52,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (host.isEmpty) return;
     await _settings.setHostname(host);
     await _settings.setAccessCode('games', _gamesCodeController.text);
-    await _settings.setAccessCode('soundboard', _soundboardCodeController.text);
     await _settings.setAccessCode('yt', _ytCodeController.text);
     await _settings.setMusicPublicUrl(_musicPublicUrlController.text);
     await _settings.setMusicPreferredServer(_musicPreferred);
@@ -94,7 +90,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     await _settings.clearAll();
     _hostController.clear();
     _gamesCodeController.clear();
-    _soundboardCodeController.clear();
     _ytCodeController.clear();
     _musicPublicUrlController.clear();
     setState(() {
@@ -113,7 +108,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
   void dispose() {
     _hostController.dispose();
     _gamesCodeController.dispose();
-    _soundboardCodeController.dispose();
     _ytCodeController.dispose();
     _musicPublicUrlController.dispose();
     super.dispose();
@@ -219,15 +213,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
             obscureText: true,
             decoration: const InputDecoration(
               labelText: 'Gaming Hub code',
-              border: OutlineInputBorder(),
-            ),
-          ),
-          const SizedBox(height: 10),
-          TextField(
-            controller: _soundboardCodeController,
-            obscureText: true,
-            decoration: const InputDecoration(
-              labelText: 'Soundboard code',
               border: OutlineInputBorder(),
             ),
           ),

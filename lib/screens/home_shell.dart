@@ -3,7 +3,6 @@ import 'vault_screen.dart';
 import 'library_screen.dart';
 import 'notes_screen.dart';
 import 'games_screen.dart';
-import 'soundboard_screen.dart';
 import 'yt_screen.dart';
 import 'quick_send_screen.dart';
 import 'settings_screen.dart';
@@ -100,7 +99,6 @@ class _HomeShellState extends State<HomeShell> {
       _KeepAlive(child: LibraryScreen()),
       _KeepAlive(child: NotesScreen()),
       _KeepAlive(child: GamesScreen()),
-      _KeepAlive(child: SoundboardScreen()),
       _KeepAlive(child: YtScreen()),
       _KeepAlive(child: QuickSendScreen()),
       _KeepAlive(child: SettingsScreen()),
@@ -120,7 +118,6 @@ class _HomeShellState extends State<HomeShell> {
           NavigationDestination(icon: Icon(Icons.music_note), label: 'Music'),
           NavigationDestination(icon: Icon(Icons.notes), label: 'Notes'),
           NavigationDestination(icon: Icon(Icons.sports_esports), label: 'Games'),
-          NavigationDestination(icon: Icon(Icons.volume_up), label: 'Sounds'),
           NavigationDestination(icon: Icon(Icons.download), label: 'YT'),
           NavigationDestination(icon: Icon(Icons.send), label: 'Send'),
           NavigationDestination(icon: Icon(Icons.settings), label: 'Settings'),
