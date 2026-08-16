@@ -4,11 +4,15 @@ import 'package:just_audio/just_audio.dart';
 import 'package:audio_service/audio_service.dart';
 import '../models/song.dart';
 import '../models/now_playing.dart';
+import '../models/server_profile.dart';
 import '../services/api_service.dart';
+import '../services/connectivity_service.dart';
+import '../services/offline_cache_service.dart';
 import '../services/settings_service.dart';
 import '../widgets/mini_player.dart';
 import '../widgets/pc_mini_player.dart';
 import '../widgets/song_tile.dart';
+import 'downloads_screen.dart';
 
 enum _PlaySource { phone, pc }
 
@@ -22,7 +26,11 @@ class LibraryScreen extends StatefulWidget {
 class _LibraryScreenState extends State<LibraryScreen> {
   final _settings = SettingsService();
   ApiService? _api;
+  ResolvedServer? _server;
   final _player = AudioPlayer();
+  StreamSubscription<NetworkType>? _connectivitySub;
+  NetworkType _networkType = NetworkType.other;
+  bool _reconnecting = false;
   final _searchController = TextEditingController();
   Timer? _debounce;
 
@@ -47,6 +55,19 @@ class _LibraryScreenState extends State<LibraryScreen> {
 
   int _midStreamRetries = 0;
 
+  // Explicit offline cache — separate from (and takes priority over) the
+  // implicit per-play caching LockCachingAudioSource does below. Progress
+  // is keyed by song id; a song not present here and not [_cache.isCached]
+  // is simply not downloaded.
+  final _cache = OfflineCacheService.instance;
+  StreamSubscription<CacheEvent>? _cacheSub;
+  final Map<int, double> _downloadProgress = {};
+  // True when the song list currently on screen came from the offline
+  // cache manifest rather than a live /api/songs response, because the
+  // desktop was unreachable. Search is disabled in this state — the
+  // cache has no search index, just whatever's downloaded.
+  bool _offlineFallback = false;
+
   // Mirrors _songs 1:1. Giving the player an actual playlist (instead of
   // swapping in one isolated AudioSource per tap) is what lets
   // just_audio_background know there's a next/previous track to skip to —
@@ -58,6 +79,8 @@ class _LibraryScreenState extends State<LibraryScreen> {
   void initState() {
     super.initState();
     _init();
+    _initConnectivity();
+    _cacheSub = _cache.events.listen(_onCacheEvent);
     // The playlist auto-advances on its own now (see _playlist above), so
     // the old "reload the next track when the current one completes"
     // handler that used to live here is gone — that manual setAudioSource
@@ -121,9 +144,16 @@ class _LibraryScreenState extends State<LibraryScreen> {
   }
 
   Future<void> _init() async {
-    final base = await _settings.baseUrl('music');
-    if (base == null) return;
-    setState(() => _api = ApiService(base));
+    // Needed before the first _sourceFor call so cached-vs-stream source
+    // selection (and offline fallback below) sees real data, not an
+    // empty pre-load manifest.
+    await _cache.ensureReady();
+    final server = await _settings.resolveMusicServer();
+    if (server == null) return;
+    setState(() {
+      _server = server;
+      _api = ApiService(server.baseUrl);
+    });
     if (!_playlistAttached) {
       await _player.setAudioSource(_playlist);
       _playlistAttached = true;
@@ -131,13 +161,110 @@ class _LibraryScreenState extends State<LibraryScreen> {
     await _loadSongs(reset: true);
   }
 
+  // Watches for Wi-Fi/cellular/offline transitions. This doesn't touch
+  // playback directly — LockCachingAudioSource + the retry logic below
+  // already ride out a drop mid-track — it's specifically for the
+  // "connection came back after being offline" case: re-resolve which
+  // server answers fastest (private vs public may have flipped after a
+  // network change) and refresh the library/now-playing state instead
+  // of silently sitting on stale data.
+  void _initConnectivity() {
+    ConnectivityService.instance.current().then((t) {
+      if (mounted) setState(() => _networkType = t);
+    });
+    _connectivitySub = ConnectivityService.instance.onChange.listen((type) async {
+      final wasOffline = _networkType == NetworkType.offline;
+      if (mounted) setState(() => _networkType = type);
+      if (type == NetworkType.offline) return;
+      if (!wasOffline) return; // only act on offline -> back-online edges
+
+      setState(() => _reconnecting = true);
+      final server = await _settings.resolveMusicServer();
+      if (!mounted) return;
+      if (server != null && server.baseUrl != _server?.baseUrl) {
+        setState(() {
+          _server = server;
+          _api = ApiService(server.baseUrl);
+        });
+      }
+      await _loadSongs(reset: true);
+      if (_source == _PlaySource.pc) await _pollNowPlaying();
+      if (mounted) setState(() => _reconnecting = false);
+    });
+  }
+
   @override
   void dispose() {
     _debounce?.cancel();
     _pollTimer?.cancel();
+    _connectivitySub?.cancel();
+    _cacheSub?.cancel();
     _player.dispose();
     _searchController.dispose();
     super.dispose();
+  }
+
+  void _onCacheEvent(CacheEvent evt) {
+    if (!mounted) return;
+    setState(() {
+      switch (evt.type) {
+        case CacheEventType.progress:
+          if (evt.songId != null) _downloadProgress[evt.songId!] = evt.progress ?? -1;
+          break;
+        case CacheEventType.started:
+          if (evt.songId != null) _downloadProgress[evt.songId!] = -1;
+          break;
+        case CacheEventType.completed:
+        case CacheEventType.removed:
+          if (evt.songId != null) _downloadProgress.remove(evt.songId);
+          break;
+        case CacheEventType.error:
+          if (evt.songId != null) _downloadProgress.remove(evt.songId);
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Download failed: ${evt.error}')),
+          );
+          break;
+        case CacheEventType.cleared:
+          _downloadProgress.clear();
+          break;
+      }
+    });
+  }
+
+  SongCacheState _cacheStateFor(int songId) {
+    if (_downloadProgress.containsKey(songId)) return SongCacheState.downloading;
+    if (_cache.isCached(songId)) return SongCacheState.cached;
+    return SongCacheState.none;
+  }
+
+  Future<void> _onCacheIconTap(Song song) async {
+    final state = _cacheStateFor(song.id);
+    if (state == SongCacheState.cached) {
+      await _cache.remove(song.id);
+      return;
+    }
+    if (state == SongCacheState.downloading) {
+      _cache.cancelDownload(song.id);
+      return;
+    }
+    if (_api == null) return;
+
+    final wifiOnly = await _settings.getMusicWifiOnlyDownloads();
+    final metered = ConnectivityService.instance.isLikelyMetered(_networkType);
+    if (wifiOnly && metered) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Downloads are Wi-Fi only — connect to Wi-Fi, or turn that '
+              'off in Settings, to download over this connection.',
+            ),
+          ),
+        );
+      }
+      return;
+    }
+    _cache.download(song, _api!);
   }
 
   Future<void> _loadSongs({bool reset = false}) async {
@@ -148,6 +275,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
       if (reset) {
         _offset = 0;
         _songs.clear();
+        _offlineFallback = false;
       }
     });
     if (reset) await _playlist.clear();
@@ -161,12 +289,30 @@ class _LibraryScreenState extends State<LibraryScreen> {
         _total = result.total;
         _hasMore = result.hasMore;
         _loading = false;
+        _offlineFallback = false;
       });
     } catch (e) {
-      setState(() {
-        _error = 'Could not load library: $e';
-        _loading = false;
-      });
+      // Desktop unreachable with nothing loaded yet (e.g. cold app start
+      // while offline) — fall back to whatever's been explicitly
+      // downloaded so the library tab isn't just a dead error screen.
+      // Only on a fresh load: mid-pagination failures should surface as
+      // a real error instead of silently truncating the visible list.
+      final downloaded = reset ? _cache.downloadedSongs : const <Song>[];
+      if (reset && downloaded.isNotEmpty) {
+        await _playlist.addAll(downloaded.map(_sourceFor).toList());
+        setState(() {
+          _songs.addAll(downloaded);
+          _total = downloaded.length;
+          _hasMore = false;
+          _loading = false;
+          _offlineFallback = true;
+        });
+      } else {
+        setState(() {
+          _error = 'Could not load library: $e';
+          _loading = false;
+        });
+      }
     }
   }
 
@@ -178,15 +324,26 @@ class _LibraryScreenState extends State<LibraryScreen> {
   // (now that tracks live in a real playlist) is also what tells it
   // there's a next/previous item to show skip buttons for.
   AudioSource _sourceFor(Song song) {
+    final tag = MediaItem(
+      id: song.id.toString(),
+      title: song.title,
+      artist: song.artist,
+      album: song.album,
+      duration: song.duration > 0 ? Duration(seconds: song.duration) : null,
+    );
+
+    // Explicitly downloaded songs play straight from disk — no network,
+    // no dependence on the desktop being reachable, and it's what makes
+    // the offline-fallback song list above actually playable rather than
+    // just browsable. Only reachable songs (from a live /api/songs
+    // response, i.e. _api != null) fall through to network streaming.
+    final local = _cache.isCached(song.id) ? _cache.localFile(song.id) : null;
+    if (local != null) {
+      return AudioSource.uri(Uri.file(local.path), tag: tag);
+    }
     return LockCachingAudioSource(
       Uri.parse(_api!.streamUrl(song.id)),
-      tag: MediaItem(
-        id: song.id.toString(),
-        title: song.title,
-        artist: song.artist,
-        album: song.album,
-        duration: song.duration > 0 ? Duration(seconds: song.duration) : null,
-      ),
+      tag: tag,
     );
   }
 
@@ -306,8 +463,12 @@ class _LibraryScreenState extends State<LibraryScreen> {
     if (_api == null) {
       return const Scaffold(
         body: Center(
-          child: Text('Set your PC hostname in Settings first.',
-              style: TextStyle(color: Colors.white54)),
+          child: Text(
+            'Set your Tailscale hostname or public music server URL in '
+            'Settings first.',
+            style: TextStyle(color: Colors.white54),
+            textAlign: TextAlign.center,
+          ),
         ),
       );
     }
@@ -318,9 +479,57 @@ class _LibraryScreenState extends State<LibraryScreen> {
     return Scaffold(
       appBar: AppBar(
         title: Text(_total > 0 ? '$_total songs' : 'Library'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.offline_pin),
+            tooltip: 'Downloads',
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const DownloadsScreen()),
+            ),
+          ),
+        ],
       ),
       body: Column(
         children: [
+          if (_offlineFallback)
+            Container(
+              width: double.infinity,
+              color: Colors.amber.withValues(alpha: 0.15),
+              padding: const EdgeInsets.symmetric(vertical: 6),
+              child: const Text(
+                'Desktop unreachable — showing downloaded songs only',
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 12, color: Colors.amber),
+              ),
+            )
+          else if (_networkType == NetworkType.offline || _reconnecting)
+            Container(
+              width: double.infinity,
+              color: _networkType == NetworkType.offline
+                  ? Colors.redAccent.withValues(alpha: 0.15)
+                  : Colors.amber.withValues(alpha: 0.15),
+              padding: const EdgeInsets.symmetric(vertical: 6),
+              child: Text(
+                _networkType == NetworkType.offline
+                    ? 'Offline — showing cached data'
+                    : 'Reconnecting…',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 12,
+                  color: _networkType == NetworkType.offline
+                      ? Colors.redAccent
+                      : Colors.amber,
+                ),
+              ),
+            )
+          else if (_server != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Text(
+                'Connected: ${_server!.label}',
+                style: const TextStyle(color: Colors.white24, fontSize: 11),
+              ),
+            ),
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
             child: SegmentedButton<_PlaySource>(
@@ -346,8 +555,11 @@ class _LibraryScreenState extends State<LibraryScreen> {
             child: TextField(
               controller: _searchController,
               onChanged: _onSearchChanged,
+              enabled: !_offlineFallback,
               decoration: InputDecoration(
-                hintText: 'Search songs, artists…',
+                hintText: _offlineFallback
+                    ? 'Search unavailable offline'
+                    : 'Search songs, artists…',
                 prefixIcon: const Icon(Icons.search),
                 filled: true,
                 fillColor: const Color(0xFF1B2030),
@@ -401,6 +613,9 @@ class _LibraryScreenState extends State<LibraryScreen> {
                       song: song,
                       active: active,
                       onTap: () => _onSongTap(index),
+                      cacheState: _cacheStateFor(song.id),
+                      downloadProgress: _downloadProgress[song.id],
+                      onCacheTap: () => _onCacheIconTap(song),
                     );
                   },
                 ),

@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import '../models/server_profile.dart';
 import '../services/settings_service.dart';
+import 'connection_test_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -14,6 +16,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
   final _gamesCodeController = TextEditingController();
   final _soundboardCodeController = TextEditingController();
   final _ytCodeController = TextEditingController();
+  final _musicPublicUrlController = TextEditingController();
+
+  PreferredServer _musicPreferred = PreferredServer.auto;
+  bool _musicWifiOnly = true;
 
   bool _loaded = false;
   bool _saved = false;
@@ -29,11 +35,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final gamesCode = await _settings.getAccessCode('games');
     final soundboardCode = await _settings.getAccessCode('soundboard');
     final ytCode = await _settings.getAccessCode('yt');
+    final musicPublicUrl = await _settings.getMusicPublicUrl();
+    final musicPreferred = await _settings.getMusicPreferredServer();
+    final musicWifiOnly = await _settings.getMusicWifiOnlyDownloads();
     _hostController.text = host ?? '';
     _gamesCodeController.text = gamesCode ?? '';
     _soundboardCodeController.text = soundboardCode ?? '';
     _ytCodeController.text = ytCode ?? '';
-    setState(() => _loaded = true);
+    _musicPublicUrlController.text = musicPublicUrl ?? '';
+    setState(() {
+      _musicPreferred = musicPreferred;
+      _musicWifiOnly = musicWifiOnly;
+      _loaded = true;
+    });
   }
 
   Future<void> _save() async {
@@ -43,6 +57,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
     await _settings.setAccessCode('games', _gamesCodeController.text);
     await _settings.setAccessCode('soundboard', _soundboardCodeController.text);
     await _settings.setAccessCode('yt', _ytCodeController.text);
+    await _settings.setMusicPublicUrl(_musicPublicUrlController.text);
+    await _settings.setMusicPreferredServer(_musicPreferred);
+    await _settings.setMusicWifiOnlyDownloads(_musicWifiOnly);
     setState(() => _saved = true);
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -79,7 +96,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _gamesCodeController.clear();
     _soundboardCodeController.clear();
     _ytCodeController.clear();
-    setState(() => _saved = false);
+    _musicPublicUrlController.clear();
+    setState(() {
+      _musicPreferred = PreferredServer.auto;
+      _musicWifiOnly = true;
+      _saved = false;
+    });
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Settings cleared')),
@@ -93,6 +115,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _gamesCodeController.dispose();
     _soundboardCodeController.dispose();
     _ytCodeController.dispose();
+    _musicPublicUrlController.dispose();
     super.dispose();
   }
 
@@ -123,6 +146,61 @@ class _SettingsScreenState extends State<SettingsScreen> {
               hintText: 'my-pc.tailnet-name.ts.net',
               border: OutlineInputBorder(),
             ),
+          ),
+          const SizedBox(height: 28),
+          const Text(
+            'Music server',
+            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+          ),
+          const SizedBox(height: 4),
+          const Text(
+            'Optional: a public HTTPS API for the music library, for when '
+            'you\'re away from the tailnet (e.g. Tailscale not installed '
+            'on this device). Leave blank to use Tailscale only.',
+            style: TextStyle(color: Colors.white54, fontSize: 12),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _musicPublicUrlController,
+            autocorrect: false,
+            keyboardType: TextInputType.url,
+            decoration: const InputDecoration(
+              labelText: 'Public music API URL',
+              hintText: 'https://music.example.com/api',
+              border: OutlineInputBorder(),
+            ),
+          ),
+          const SizedBox(height: 14),
+          const Text('Preferred server', style: TextStyle(color: Colors.white70)),
+          const SizedBox(height: 6),
+          SegmentedButton<PreferredServer>(
+            segments: const [
+              ButtonSegment(value: PreferredServer.auto, label: Text('Auto')),
+              ButtonSegment(value: PreferredServer.private, label: Text('Private')),
+              ButtonSegment(value: PreferredServer.public, label: Text('Public')),
+            ],
+            selected: {_musicPreferred},
+            showSelectedIcon: false,
+            onSelectionChanged: (s) => setState(() => _musicPreferred = s.first),
+          ),
+          const SizedBox(height: 14),
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('Wi-Fi-only downloads'),
+            subtitle: const Text(
+              'Avoid downloading music for offline use on cellular',
+              style: TextStyle(fontSize: 12),
+            ),
+            value: _musicWifiOnly,
+            onChanged: (v) => setState(() => _musicWifiOnly = v),
+          ),
+          const SizedBox(height: 8),
+          OutlinedButton.icon(
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const ConnectionTestScreen()),
+            ),
+            icon: const Icon(Icons.wifi_tethering),
+            label: const Text('Test connection'),
           ),
           const SizedBox(height: 28),
           const Text(
