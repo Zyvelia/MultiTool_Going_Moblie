@@ -146,6 +146,38 @@ jobs:
           print("Patched Info.plist for background audio")
           PY
 
+      # AirPrint discovery (Notes tab print button, via the `printing`
+      # package) goes over Bonjour/mDNS on the local network. Since iOS
+      # 14, that requires the app to declare which Bonjour service types
+      # it uses and why — without these two keys, iOS blocks the local
+      # network access silently (no permission prompt, no error, printer
+      # list just stays empty), which is exactly what an HP printer not
+      # showing up looks like. `_ipp._tcp`/`_ipps._tcp` are the standard
+      # IPP printing service types that AirPrint-capable printers
+      # (including HP's) advertise themselves under.
+      - name: Patch Info.plist for AirPrint discovery
+        run: |
+          python3 - <<'PY'
+          path = "ios/Runner/Info.plist"
+          with open(path) as f:
+              plist = f.read()
+
+          block = (
+              "\t<key>NSLocalNetworkUsageDescription</key>\n"
+              "\t<string>Used to find printers on your Wi-Fi network so notes can be printed.</string>\n"
+              "\t<key>NSBonjourServices</key>\n"
+              "\t<array>\n"
+              "\t\t<string>_ipp._tcp</string>\n"
+              "\t\t<string>_ipps._tcp</string>\n"
+              "\t</array>\n"
+          )
+          plist = plist.replace("<dict>\n", "<dict>\n" + block, 1)
+
+          with open(path, "w") as f:
+              f.write(plist)
+          print("Patched Info.plist for AirPrint discovery")
+          PY
+
       - run: flutter pub get
 
       # Regenerates ios/Runner/Assets.xcassets/AppIcon.appiconset/ from
