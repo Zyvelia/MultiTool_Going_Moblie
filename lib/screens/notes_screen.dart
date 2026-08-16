@@ -1,5 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:pdf/widgets.dart' as pw;
+import 'package:printing/printing.dart';
 import '../models/note.dart';
 import '../services/settings_service.dart';
 import '../services/notes_api_service.dart';
@@ -343,6 +345,37 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
     }
   }
 
+  /// Renders the note (whatever's currently in the text fields, saved or
+  /// not) to a simple PDF and hands it to the OS print flow — AirPrint on
+  /// iOS, the Android print framework (which covers most wireless/network
+  /// printers) on Android. Fully offline: the PDF is built on-device, no
+  /// server round trip involved.
+  Future<void> _print() async {
+    final title = _titleController.text.trim().isEmpty
+        ? 'Untitled'
+        : _titleController.text.trim();
+    final body = _bodyController.text;
+
+    final doc = pw.Document();
+    doc.addPage(
+      pw.MultiPage(
+        build: (context) => [
+          pw.Header(
+            level: 0,
+            child: pw.Text(title,
+                style: pw.TextStyle(fontSize: 20, fontWeight: pw.FontWeight.bold)),
+          ),
+          pw.Paragraph(text: body, style: const pw.TextStyle(fontSize: 12)),
+        ],
+      ),
+    );
+
+    await Printing.layoutPdf(
+      name: title,
+      onLayout: (format) async => doc.save(),
+    );
+  }
+
   Future<void> _delete() async {
     if (widget.note == null) return;
     final confirmed = await showDialog<bool>(
@@ -383,6 +416,11 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
       appBar: AppBar(
         title: Text(widget.note != null ? 'Edit note' : 'New note'),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.print_outlined),
+            tooltip: 'Print',
+            onPressed: busy ? null : _print,
+          ),
           if (widget.note != null)
             IconButton(
               icon: const Icon(Icons.delete_outline),

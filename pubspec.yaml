@@ -18,6 +18,8 @@ dependencies:
   path_provider: ^2.1.4
   file_picker: ^10.3.10
   connectivity_plus: ^6.1.3
+  printing: ^5.13.4
+  pdf: ^3.11.1
 
 dev_dependencies:
   flutter_test:
