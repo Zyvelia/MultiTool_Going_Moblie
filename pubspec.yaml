@@ -36,7 +36,5 @@ flutter_launcher_icons:
   android: true
   ios: true
   image_path: "assets/icon/icon.png"
-  # Source icon has transparency baked in (dark glow background), so this
-  # is fine for Android adaptive icons and iOS (iOS ignores alpha anyway —
-  # flutter_launcher_icons flattens it onto a solid background automatically).
-  remove_alpha_ios: true
+  # Fully opaque square (badge on solid black), so no alpha-flattening
+  # needed for iOS and no clipping risk on Android's round icon mask.
