@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../models/server_profile.dart';
 import '../services/settings_service.dart';
 import 'connection_test_screen.dart';
+import 'speed_test_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -195,6 +196,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
             icon: const Icon(Icons.wifi_tethering),
             label: const Text('Test connection'),
+          ),
+          const SizedBox(height: 10),
+          OutlinedButton.icon(
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const SpeedTestScreen()),
+            ),
+            icon: const Icon(Icons.speed),
+            label: const Text('Speed test'),
           ),
           const SizedBox(height: 28),
           const Text(

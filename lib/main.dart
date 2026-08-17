@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:just_audio_background/just_audio_background.dart';
 import 'screens/home_shell.dart';
-import 'services/local_notification_service.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -15,10 +14,6 @@ Future<void> main() async {
     androidNotificationChannelName: 'Music playback',
     androidNotificationOngoing: true,
   );
-  // Z Connect Notifications: this app had no native-notification plumbing
-  // before this feature, so it needs its own init call here rather than
-  // reusing something that already existed.
-  await LocalNotificationService.instance.init();
   runApp(const MultiToolRemoteApp());
 }
 
