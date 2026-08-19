@@ -1,7 +1,10 @@
 import 'dart:async';
+import 'dart:io';
+import 'dart:math' as math;
 import 'package:audio_service/audio_service.dart';
 import 'package:flutter/material.dart';
 import 'package:just_audio/just_audio.dart';
+import 'package:path_provider/path_provider.dart';
 import '../models/now_playing.dart';
 import '../models/server_profile.dart';
 import '../models/song.dart';
@@ -28,7 +31,8 @@ class _LibraryScreenState extends State<LibraryScreen> {
   final _settings = SettingsService();
   ApiService? _api;
   ResolvedServer? _server;
-  final _player = AudioPlayer();
+  AudioPlayer? _audio;
+  StreamSubscription<int?>? _indexSub;
   StreamSubscription<NetworkType>? _connectivitySub;
   NetworkType _networkType = NetworkType.other;
   bool _reconnecting = false;
@@ -80,8 +84,13 @@ class _LibraryScreenState extends State<LibraryScreen> {
   // swapping in one isolated AudioSource per tap) is what lets
   // just_audio_background know there's a next/previous track to skip to —
   // it only shows those buttons when the player's own sequence has one.
+  // Built in small chunks after the first frame so opening the Music tab
+  // doesn't freeze the UI while hundreds of AudioSources are created.
   final _playlist = ConcatenatingAudioSource(children: []);
   bool _playlistAttached = false;
+  int _playlistEpoch = 0;
+  Future<void> _playlistMut = Future.value();
+  Directory? _remoteCacheDir;
 
   @override
   void initState() {
@@ -89,31 +98,28 @@ class _LibraryScreenState extends State<LibraryScreen> {
     _init();
     _initConnectivity();
     _cacheSub = _cache.events.listen(_onCacheEvent);
-    // The playlist auto-advances on its own now (see _playlist above), so
-    // the old "reload the next track when the current one completes"
-    // handler that used to live here is gone — that manual setAudioSource
-    // call from inside a processingStateStream listener was the actual
-    // cause of the 1004 (ERROR_CODE_FAILED_RUNTIME_CHECK) bug.
-    // Keep app state (highlighted row, mini player) in sync when a skip
-    // comes from the lock screen / notification rather than in-app.
-    _player.currentIndexStream.listen((index) {
+  }
+
+  AudioPlayer get _player => _audio!;
+  bool get _hasPlayer => _audio != null;
+
+  /// Native player init is expensive (ExoPlayer / AVPlayer). Don't do it
+  /// during the first Music-tab frame — that's what made the tab freeze
+  /// for a couple of seconds on open.
+  Future<void> _ensurePlayer() async {
+    if (_audio != null) return;
+    final player = AudioPlayer();
+    _audio = player;
+    _indexSub = player.currentIndexStream.listen((index) {
       if (mounted && index != null && index != _currentIndex) {
         setState(() => _currentIndex = index);
       }
     });
-    // The retry loop in _playIndex only covers a blip right as a track
-    // starts. A Tailscale hiccup a few seconds into an already-playing
-    // track (the more common case while out and about on cellular) comes
-    // through here instead, as a stream error rather than a thrown
-    // exception. Re-request the same track a couple of times before
-    // treating it as a real failure.
-    _player.playbackEventStream.listen(
+    player.playbackEventStream.listen(
       (_) {},
       onError: (Object e, StackTrace st) {
-        final index = _player.currentIndex;
+        final index = player.currentIndex;
         if (index == null || index < 0 || index >= _songs.length) return;
-        // Local files don't recover by re-requesting a stream — retrying
-        // would just wait on a dead Tailscale hop for nothing.
         if (_cache.isCached(_songs[index].id)) {
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
@@ -132,7 +138,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
           return;
         }
         _midStreamRetries++;
-        final resumeAt = _player.position;
+        final resumeAt = player.position;
         Future.delayed(Duration(milliseconds: 500 * _midStreamRetries), () async {
           if (!mounted) return;
           await _recoverTrack(index, resumeAt);
@@ -178,28 +184,37 @@ class _LibraryScreenState extends State<LibraryScreen> {
 
   Future<void> _init() async {
     await _cache.ensureReady();
-    if (!_playlistAttached) {
-      await _player.setAudioSource(_playlist);
-      _playlistAttached = true;
-    }
+    unawaited(_ensureRemoteCacheDir());
 
-    // Show downloaded tracks immediately so the tab isn't empty while we
-    // wait to find out whether the desktop is reachable.
+    // Paint the downloaded list immediately — do NOT attach audio sources
+    // yet. Building a ConcatenatingAudioSource for every file (and then
+    // throwing it away when the live library arrives) is what froze the
+    // Music tab for a few seconds on first open.
     if (_cache.count > 0) {
-      await _showCachedLibrary(preservePlayback: false);
+      _paintCachedLibrary();
+      if (mounted) setState(() => _reconnecting = true);
+      // Let the list actually draw before we start network / player work.
+      await Future<void>.delayed(Duration.zero);
     }
 
     final net = await ConnectivityService.instance.current();
     if (mounted) setState(() => _networkType = net);
 
     if (net == NetworkType.offline) {
-      // Don't probe Tailscale / wait on /api/songs — we're offline.
       unawaited(_resolveServer(skipProbe: true));
-      if (_cache.count == 0) await _showCachedLibrary();
+      await _showCachedLibrary(attachPlaylist: true);
       return;
     }
 
     await _connectAndLoadLive();
+  }
+
+  Future<void> _ensureRemoteCacheDir() async {
+    if (_remoteCacheDir != null) return;
+    final tmp = await getTemporaryDirectory();
+    final dir = Directory('${tmp.path}/just_audio_cache/remote');
+    await dir.create(recursive: true);
+    _remoteCacheDir = dir;
   }
 
   Future<void> _resolveServer({bool skipProbe = false}) async {
@@ -217,35 +232,21 @@ class _LibraryScreenState extends State<LibraryScreen> {
     await _loadSongs(reset: true);
   }
 
-  /// Replace (or append to) the on-screen list + player playlist together,
-  /// keeping the current track playing across a live <-> offline swap.
-  Future<void> _applySongList(
+  Future<void> _lockPlaylist(Future<void> Function() fn) {
+    final op = _playlistMut.then((_) => fn());
+    _playlistMut = op.catchError((_) {});
+    return op;
+  }
+
+  /// Updates the on-screen list without touching the audio player.
+  void _paintSongs(
     List<Song> songs, {
     required bool reset,
     int? total,
     bool hasMore = false,
     bool offlineFallback = false,
-    bool preservePlayback = true,
-  }) async {
-    final playingId = preservePlayback &&
-            _currentIndex >= 0 &&
-            _currentIndex < _songs.length
-        ? _songs[_currentIndex].id
-        : null;
-    final wasPlaying = preservePlayback && _player.playing;
-    final position = _player.position;
-
-    if (!_playlistAttached) {
-      await _player.setAudioSource(_playlist);
-      _playlistAttached = true;
-    }
-
-    if (reset) await _playlist.clear();
-    if (songs.isNotEmpty) {
-      await _playlist.addAll(songs.map(_sourceFor).toList());
-    }
+  }) {
     if (!mounted) return;
-
     setState(() {
       if (reset) {
         _songs
@@ -263,20 +264,9 @@ class _LibraryScreenState extends State<LibraryScreen> {
       _error = null;
       _reconnecting = false;
     });
-
-    if (reset && playingId != null) {
-      final newIndex = _songs.indexWhere((s) => s.id == playingId);
-      if (newIndex >= 0) {
-        try {
-          await _player.seek(position, index: newIndex);
-          if (wasPlaying) await _player.play();
-        } catch (_) {}
-      }
-    }
   }
 
-  Future<void> _showCachedLibrary({bool preservePlayback = true}) async {
-    await _cache.ensureReady();
+  void _paintCachedLibrary() {
     var list = _cache.downloadedSongs;
     final q = _query.trim().toLowerCase();
     if (q.isNotEmpty) {
@@ -301,11 +291,137 @@ class _LibraryScreenState extends State<LibraryScreen> {
       }
       return;
     }
-    await _applySongList(
-      list,
+    _paintSongs(list, reset: true, offlineFallback: true);
+  }
+
+  /// Rebuilds the player playlist in small batches, yielding to the UI
+  /// between chunks so tab switches stay responsive.
+  Future<void> _rebuildPlaylist({
+    required bool reset,
+    int? playIndex,
+    Duration playFrom = Duration.zero,
+    bool autoplay = false,
+  }) {
+    final epoch = ++_playlistEpoch;
+    final songs = List<Song>.from(_songs);
+    return _lockPlaylist(() async {
+      if (epoch != _playlistEpoch || !mounted) return;
+      await _ensurePlayer();
+      await _ensureRemoteCacheDir();
+      if (epoch != _playlistEpoch || !mounted) return;
+
+      if (!_playlistAttached) {
+        await _player.setAudioSource(_playlist, preload: false);
+        if (epoch != _playlistEpoch) return;
+        _playlistAttached = true;
+      }
+
+      if (reset) {
+        await _playlist.clear();
+        if (epoch != _playlistEpoch) return;
+      }
+
+      var start = _playlist.length;
+      if (start > songs.length) start = songs.length;
+
+      Future<void> addRange(int from, int to) async {
+        if (from >= to || epoch != _playlistEpoch) return;
+        final batch = <AudioSource>[
+          for (var i = from; i < to; i++) _sourceFor(songs[i]),
+        ];
+        await _playlist.addAll(batch);
+      }
+
+      // If the user already tapped a track, load through that index first
+      // so playback can start without waiting on the rest of the library.
+      if (playIndex != null && playIndex >= start && playIndex < songs.length) {
+        await addRange(start, playIndex + 1);
+        if (epoch != _playlistEpoch) return;
+        try {
+          await _player.seek(playFrom, index: playIndex);
+          if (autoplay) await _player.play();
+          _midStreamRetries = 0;
+        } catch (_) {}
+        start = playIndex + 1;
+      }
+
+      const chunk = 10;
+      for (var i = start; i < songs.length; i += chunk) {
+        if (!mounted || epoch != _playlistEpoch) return;
+        await addRange(i, math.min(i + chunk, songs.length));
+        await Future<void>.delayed(Duration.zero);
+      }
+    });
+  }
+
+  Future<void> _applySongList(
+    List<Song> songs, {
+    required bool reset,
+    int? total,
+    bool hasMore = false,
+    bool offlineFallback = false,
+    bool preservePlayback = true,
+    bool attachPlaylist = true,
+  }) async {
+    final playingId = preservePlayback &&
+            _currentIndex >= 0 &&
+            _currentIndex < _songs.length
+        ? _songs[_currentIndex].id
+        : null;
+    final wasPlaying = preservePlayback && _hasPlayer && _player.playing;
+    final position = _hasPlayer ? _player.position : Duration.zero;
+
+    _paintSongs(
+      songs,
+      reset: reset,
+      total: total,
+      hasMore: hasMore,
+      offlineFallback: offlineFallback,
+    );
+
+    if (!attachPlaylist) return;
+    await Future<void>.delayed(Duration.zero);
+
+    int? playIndex;
+    if (playingId != null) {
+      final i = _songs.indexWhere((s) => s.id == playingId);
+      if (i >= 0) playIndex = i;
+    }
+
+    await _rebuildPlaylist(
+      reset: reset,
+      playIndex: playIndex,
+      playFrom: position,
+      autoplay: wasPlaying,
+    );
+  }
+
+  Future<void> _showCachedLibrary({
+    bool preservePlayback = true,
+    bool attachPlaylist = true,
+  }) async {
+    await _cache.ensureReady();
+    final playingId = preservePlayback &&
+            _currentIndex >= 0 &&
+            _currentIndex < _songs.length
+        ? _songs[_currentIndex].id
+        : null;
+    final wasPlaying = preservePlayback && _hasPlayer && _player.playing;
+    final position = _hasPlayer ? _player.position : Duration.zero;
+
+    _paintCachedLibrary();
+    if (!attachPlaylist || _songs.isEmpty) return;
+
+    int? playIndex;
+    if (playingId != null) {
+      final i = _songs.indexWhere((s) => s.id == playingId);
+      if (i >= 0) playIndex = i;
+    }
+    await _rebuildPlaylist(
       reset: true,
-      offlineFallback: true,
-      preservePlayback: preservePlayback,
+      playIndex: playIndex,
+      playFrom: position,
+      autoplay: wasPlaying,
     );
   }
 
@@ -357,7 +473,8 @@ class _LibraryScreenState extends State<LibraryScreen> {
     _pollTimer?.cancel();
     _connectivitySub?.cancel();
     _cacheSub?.cancel();
-    _player.dispose();
+    _indexSub?.cancel();
+    _audio?.dispose();
     _searchController.dispose();
     super.dispose();
   }
@@ -623,10 +740,19 @@ class _LibraryScreenState extends State<LibraryScreen> {
     if (local != null) {
       return AudioSource.file(local.path, tag: tag);
     }
-    return LockCachingAudioSource(
-      Uri.parse(_api!.streamUrl(song.id)),
-      tag: tag,
-    );
+    final uri = Uri.parse(_api!.streamUrl(song.id));
+    final dir = _remoteCacheDir;
+    // Pass an explicit cache file so we don't fire getTemporaryDirectory()
+    // once per song — that platform-channel storm was freezing the Music
+    // tab for a few seconds on first open.
+    if (dir != null) {
+      return LockCachingAudioSource(
+        uri,
+        cacheFile: File('${dir.path}/${song.id}'),
+        tag: tag,
+      );
+    }
+    return LockCachingAudioSource(uri, tag: tag);
   }
 
   void _onSearchChanged(String value) {
@@ -646,7 +772,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
     setState(() => _source = source);
     if (source == _PlaySource.pc) {
       // Only one place should be making sound at a time.
-      _player.pause();
+      if (_hasPlayer) _player.pause();
       _startPolling();
     } else {
       _stopPolling();
@@ -714,6 +840,15 @@ class _LibraryScreenState extends State<LibraryScreen> {
       _midStreamRetries = 0;
     }
 
+    if (_playlist.length <= index) {
+      await _rebuildPlaylist(
+        reset: false,
+        playIndex: index,
+        autoplay: true,
+      );
+      return;
+    }
+
     // Downloaded tracks are on disk — don't burn time retrying a stream.
     if (local) {
       try {
@@ -750,11 +885,21 @@ class _LibraryScreenState extends State<LibraryScreen> {
   }
 
   void _playNext() {
-    if (_player.hasNext) _player.seekToNext();
+    if (!_hasPlayer) return;
+    if (_player.hasNext) {
+      _player.seekToNext();
+    } else if (_currentIndex + 1 < _songs.length) {
+      _playIndex(_currentIndex + 1);
+    }
   }
 
   void _playPrev() {
-    if (_player.hasPrevious) _player.seekToPrevious();
+    if (!_hasPlayer) return;
+    if (_player.hasPrevious) {
+      _player.seekToPrevious();
+    } else if (_currentIndex > 0) {
+      _playIndex(_currentIndex - 1);
+    }
   }
 
   void _onSongTap(int index) {
@@ -1009,6 +1154,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
               ),
             ),
           if (_source == _PlaySource.phone &&
+              _hasPlayer &&
               _currentIndex >= 0 &&
               _currentIndex < _songs.length)
             MiniPlayer(
