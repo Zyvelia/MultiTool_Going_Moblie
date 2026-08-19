@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:io';
-import 'dart:math' as math;
 import 'package:audio_service/audio_service.dart';
 import 'package:flutter/material.dart';
 import 'package:just_audio/just_audio.dart';
@@ -80,16 +79,11 @@ class _LibraryScreenState extends State<LibraryScreen> {
   // cache has no search index, just whatever's downloaded.
   bool _offlineFallback = false;
 
-  // Mirrors _songs 1:1. Giving the player an actual playlist (instead of
-  // swapping in one isolated AudioSource per tap) is what lets
-  // just_audio_background know there's a next/previous track to skip to —
-  // it only shows those buttons when the player's own sequence has one.
-  // Built in small chunks after the first frame so opening the Music tab
-  // doesn't freeze the UI while hundreds of AudioSources are created.
-  final _playlist = ConcatenatingAudioSource(children: []);
-  bool _playlistAttached = false;
-  int _playlistEpoch = 0;
-  Future<void> _playlistMut = Future.value();
+  // Built lazily on tap (not while the tab is opening) so ExoPlayer isn't
+  // mutating an empty concatenating source — that was skipping/failing the
+  // first few downloaded tracks.
+  ConcatenatingAudioSource? _playlist;
+  int _playGen = 0;
   Directory? _remoteCacheDir;
 
   @override
@@ -155,9 +149,13 @@ class _LibraryScreenState extends State<LibraryScreen> {
     final song = _songs[index];
     if (_cache.isCached(song.id)) {
       try {
-        await _player.seek(resumeAt, index: index);
+        await _player.setAudioSource(
+          _sourceFor(song),
+          initialPosition: resumeAt,
+        );
         await _player.play();
         _midStreamRetries = 0;
+        _playlist = null;
       } catch (e) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -168,11 +166,13 @@ class _LibraryScreenState extends State<LibraryScreen> {
       return;
     }
     try {
-      await _playlist.removeAt(index);
-      await _playlist.insert(index, _sourceFor(song));
-      await _player.seek(resumeAt, index: index);
+      await _player.setAudioSource(
+        _sourceFor(song),
+        initialPosition: resumeAt,
+      );
       await _player.play();
       _midStreamRetries = 0;
+      _playlist = null;
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -202,7 +202,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
 
     if (net == NetworkType.offline) {
       unawaited(_resolveServer(skipProbe: true));
-      await _showCachedLibrary(attachPlaylist: true);
+      _paintCachedLibrary();
       return;
     }
 
@@ -230,12 +230,6 @@ class _LibraryScreenState extends State<LibraryScreen> {
     await _resolveServer();
     if (!mounted || _api == null) return;
     await _loadSongs(reset: true);
-  }
-
-  Future<void> _lockPlaylist(Future<void> Function() fn) {
-    final op = _playlistMut.then((_) => fn());
-    _playlistMut = op.catchError((_) {});
-    return op;
   }
 
   /// Updates the on-screen list without touching the audio player.
@@ -294,83 +288,13 @@ class _LibraryScreenState extends State<LibraryScreen> {
     _paintSongs(list, reset: true, offlineFallback: true);
   }
 
-  /// Rebuilds the player playlist in small batches, yielding to the UI
-  /// between chunks so tab switches stay responsive.
-  Future<void> _rebuildPlaylist({
-    required bool reset,
-    int? playIndex,
-    Duration playFrom = Duration.zero,
-    bool autoplay = false,
-  }) {
-    final epoch = ++_playlistEpoch;
-    final songs = List<Song>.from(_songs);
-    return _lockPlaylist(() async {
-      if (epoch != _playlistEpoch || !mounted) return;
-      await _ensurePlayer();
-      await _ensureRemoteCacheDir();
-      if (epoch != _playlistEpoch || !mounted) return;
-
-      if (!_playlistAttached) {
-        await _player.setAudioSource(_playlist, preload: false);
-        if (epoch != _playlistEpoch) return;
-        _playlistAttached = true;
-      }
-
-      if (reset) {
-        await _playlist.clear();
-        if (epoch != _playlistEpoch) return;
-      }
-
-      var start = _playlist.length;
-      if (start > songs.length) start = songs.length;
-
-      Future<void> addRange(int from, int to) async {
-        if (from >= to || epoch != _playlistEpoch) return;
-        final batch = <AudioSource>[
-          for (var i = from; i < to; i++) _sourceFor(songs[i]),
-        ];
-        await _playlist.addAll(batch);
-      }
-
-      // If the user already tapped a track, load through that index first
-      // so playback can start without waiting on the rest of the library.
-      if (playIndex != null && playIndex >= start && playIndex < songs.length) {
-        await addRange(start, playIndex + 1);
-        if (epoch != _playlistEpoch) return;
-        try {
-          await _player.seek(playFrom, index: playIndex);
-          if (autoplay) await _player.play();
-          _midStreamRetries = 0;
-        } catch (_) {}
-        start = playIndex + 1;
-      }
-
-      const chunk = 10;
-      for (var i = start; i < songs.length; i += chunk) {
-        if (!mounted || epoch != _playlistEpoch) return;
-        await addRange(i, math.min(i + chunk, songs.length));
-        await Future<void>.delayed(Duration.zero);
-      }
-    });
-  }
-
   Future<void> _applySongList(
     List<Song> songs, {
     required bool reset,
     int? total,
     bool hasMore = false,
     bool offlineFallback = false,
-    bool preservePlayback = true,
-    bool attachPlaylist = true,
   }) async {
-    final playingId = preservePlayback &&
-            _currentIndex >= 0 &&
-            _currentIndex < _songs.length
-        ? _songs[_currentIndex].id
-        : null;
-    final wasPlaying = preservePlayback && _hasPlayer && _player.playing;
-    final position = _hasPlayer ? _player.position : Duration.zero;
-
     _paintSongs(
       songs,
       reset: reset,
@@ -378,50 +302,21 @@ class _LibraryScreenState extends State<LibraryScreen> {
       hasMore: hasMore,
       offlineFallback: offlineFallback,
     );
-
-    if (!attachPlaylist) return;
-    await Future<void>.delayed(Duration.zero);
-
-    int? playIndex;
-    if (playingId != null) {
-      final i = _songs.indexWhere((s) => s.id == playingId);
-      if (i >= 0) playIndex = i;
-    }
-
-    await _rebuildPlaylist(
-      reset: reset,
-      playIndex: playIndex,
-      playFrom: position,
-      autoplay: wasPlaying,
-    );
+    // Playlist is built on tap so we never mutate an already-playing
+    // ConcatenatingAudioSource. Stale mapping is dropped on a full reset.
+    if (reset) _playlist = null;
   }
 
-  Future<void> _showCachedLibrary({
-    bool preservePlayback = true,
-    bool attachPlaylist = true,
-  }) async {
+  Future<void> _showCachedLibrary() async {
     await _cache.ensureReady();
-    final playingId = preservePlayback &&
-            _currentIndex >= 0 &&
-            _currentIndex < _songs.length
-        ? _songs[_currentIndex].id
-        : null;
-    final wasPlaying = preservePlayback && _hasPlayer && _player.playing;
-    final position = _hasPlayer ? _player.position : Duration.zero;
-
     _paintCachedLibrary();
-    if (!attachPlaylist || _songs.isEmpty) return;
+    _playlist = null;
+  }
 
-    int? playIndex;
-    if (playingId != null) {
-      final i = _songs.indexWhere((s) => s.id == playingId);
-      if (i >= 0) playIndex = i;
-    }
-    await _rebuildPlaylist(
-      reset: true,
-      playIndex: playIndex,
-      playFrom: position,
-      autoplay: wasPlaying,
+  ConcatenatingAudioSource _playlistFrom(List<Song> songs) {
+    return ConcatenatingAudioSource(
+      useLazyPreparation: true,
+      children: [for (final s in songs) _sourceFor(s)],
     );
   }
 
@@ -737,8 +632,11 @@ class _LibraryScreenState extends State<LibraryScreen> {
     // just browsable. Only reachable songs (from a live /api/songs
     // response, i.e. _api != null) fall through to network streaming.
     final local = _cache.isCached(song.id) ? _cache.localFile(song.id) : null;
-    if (local != null) {
+    if (local != null && local.existsSync()) {
       return AudioSource.file(local.path, tag: tag);
+    }
+    if (_api == null) {
+      return AudioSource.file(local?.path ?? '', tag: tag);
     }
     final uri = Uri.parse(_api!.streamUrl(song.id));
     final dir = _remoteCacheDir;
@@ -832,74 +730,89 @@ class _LibraryScreenState extends State<LibraryScreen> {
 
   Future<void> _playIndex(int index) async {
     if (index < 0 || index >= _songs.length) return;
-    final local = _cache.isCached(_songs[index].id);
+    final gen = ++_playGen;
+    final song = _songs[index];
+    final local = _cache.isCached(song.id);
 
-    Future<void> start() async {
-      await _player.seek(Duration.zero, index: index);
+    await _ensurePlayer();
+    await _ensureRemoteCacheDir();
+    if (gen != _playGen || !mounted) return;
+
+    setState(() => _currentIndex = index);
+
+    Future<void> playAt(int i) async {
+      final source = _playlistFrom(List<Song>.from(_songs));
+      await _player.setAudioSource(
+        source,
+        initialIndex: i,
+        initialPosition: Duration.zero,
+      );
+      if (gen != _playGen) return;
+      _playlist = source;
       await _player.play();
       _midStreamRetries = 0;
     }
 
-    if (_playlist.length <= index) {
-      await _rebuildPlaylist(
-        reset: false,
-        playIndex: index,
-        autoplay: true,
-      );
-      return;
+    Future<void> playFile() async {
+      await _player.setAudioSource(_sourceFor(song));
+      if (gen != _playGen) return;
+      _playlist = null;
+      await _player.play();
+      _midStreamRetries = 0;
     }
 
-    // Downloaded tracks are on disk — don't burn time retrying a stream.
-    if (local) {
-      try {
-        await start();
-      } catch (e) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Playback failed: $e')),
-          );
-        }
-      }
-      return;
-    }
-
-    if (_api == null) return;
-
-    const maxAttempts = 3;
-    for (var attempt = 1; attempt <= maxAttempts; attempt++) {
-      try {
-        await start();
-        return;
-      } catch (e) {
-        if (attempt == maxAttempts) {
+    try {
+      await playAt(index);
+    } catch (e) {
+      if (local) {
+        try {
+          await playFile();
+        } catch (e2) {
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text('Playback failed: $e')),
+              SnackBar(content: Text('Playback failed: $e2')),
             );
           }
-          return;
         }
-        await Future.delayed(Duration(milliseconds: 400 * attempt));
+        return;
+      }
+      if (_api == null) return;
+      for (var attempt = 1; attempt <= 3; attempt++) {
+        if (gen != _playGen) return;
+        try {
+          await playAt(index);
+          return;
+        } catch (err) {
+          if (attempt == 3) {
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(content: Text('Playback failed: $err')),
+              );
+            }
+            return;
+          }
+          await Future.delayed(Duration(milliseconds: 400 * attempt));
+        }
       }
     }
   }
 
   void _playNext() {
-    if (!_hasPlayer) return;
-    if (_player.hasNext) {
+    if (_currentIndex + 1 >= _songs.length) return;
+    if (_hasPlayer && _playlist != null && _player.hasNext) {
       _player.seekToNext();
-    } else if (_currentIndex + 1 < _songs.length) {
-      _playIndex(_currentIndex + 1);
+      return;
     }
+    _playIndex(_currentIndex + 1);
   }
 
   void _playPrev() {
-    if (!_hasPlayer) return;
-    if (_player.hasPrevious) {
+    if (_currentIndex <= 0) return;
+    if (_hasPlayer && _playlist != null && _player.hasPrevious) {
       _player.seekToPrevious();
-    } else if (_currentIndex > 0) {
-      _playIndex(_currentIndex - 1);
+      return;
     }
+    _playIndex(_currentIndex - 1);
   }
 
   void _onSongTap(int index) {
