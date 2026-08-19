@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../games/brick_breaker/brick_breaker_screen.dart';
+import '../games/neon_drift/neon_drift_screen.dart';
 import '../models/game.dart';
 import '../theme/app_colors.dart';
 import '../services/settings_service.dart';
@@ -83,6 +84,12 @@ class _GamesScreenState extends State<GamesScreen> {
     }
   }
 
+  void _openNeonDrift() {
+    Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => const NeonDriftScreen()),
+    );
+  }
+
   void _openBrickBreaker() {
     Navigator.of(context).push(
       MaterialPageRoute(builder: (_) => const BrickBreakerScreen()),
@@ -132,6 +139,28 @@ class _GamesScreenState extends State<GamesScreen> {
             ),
             trailing: const Icon(Icons.play_arrow, color: AppColors.accent),
             onTap: _openBrickBreaker,
+          ),
+        ),
+        Card(
+          margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+          child: ListTile(
+            leading: Container(
+              width: 40,
+              height: 40,
+              decoration: BoxDecoration(
+                color: AppColors.accentMuted,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: AppColors.accent.withValues(alpha: 0.5)),
+              ),
+              child: const Icon(Icons.blur_linear, color: AppColors.accent),
+            ),
+            title: const Text('Neon Drift'),
+            subtitle: const Text(
+              'Endless gap dodge · works offline',
+              style: TextStyle(fontSize: 12),
+            ),
+            trailing: const Icon(Icons.play_arrow, color: AppColors.accent),
+            onTap: _openNeonDrift,
           ),
         ),
       ],
