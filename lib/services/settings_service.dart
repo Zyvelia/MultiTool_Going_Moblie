@@ -161,10 +161,15 @@ class SettingsService {
   ///   a real error — this isn't the place to silently switch servers
   ///   out from under an explicit user choice).
   /// - [PreferredServer.auto] → probe the private address with a short
-  ///   timeout; fall back to public if it doesn't answer. The probe is
-  ///   deliberately cheap (a single GET with a 2.5s timeout) since this
-  ///   runs on every cold connect, not just in the diagnostics screen.
-  Future<ResolvedServer?> resolveMusicServer() async {
+  ///   timeout; fall back to public if it doesn't answer.
+  /// - [skipProbe] skips the private-server ping and returns the private
+  ///   URL immediately — used when the OS already reports offline so we
+  ///   don't burn seconds waiting for a Tailscale hostname that can't
+  ///   resolve.
+  Future<ResolvedServer?> resolveMusicServer({
+    Duration probeTimeout = const Duration(milliseconds: 800),
+    bool skipProbe = false,
+  }) async {
     final private = await getMusicPrivateUrl();
     final public = await getMusicPublicUrl();
     final preferred = await getMusicPreferredServer();
@@ -179,18 +184,21 @@ class SettingsService {
       case PreferredServer.public:
         return ResolvedServer(public, 'Public');
       case PreferredServer.auto:
-        if (await _quickReachable(private)) {
+        if (skipProbe) {
+          return ResolvedServer(private, 'Private (Tailscale)');
+        }
+        if (await _quickReachable(private, probeTimeout)) {
           return ResolvedServer(private, 'Private (Tailscale)');
         }
         return ResolvedServer(public, 'Public');
     }
   }
 
-  Future<bool> _quickReachable(String baseUrl) async {
+  Future<bool> _quickReachable(String baseUrl, Duration timeout) async {
     try {
       final res = await http
           .get(Uri.parse('$baseUrl/api/status'))
-          .timeout(const Duration(milliseconds: 2500));
+          .timeout(timeout);
       return res.statusCode == 200;
     } catch (_) {
       return false;

@@ -49,12 +49,13 @@ class ApiService {
     String query = '',
     int offset = 0,
     int limit = 100,
+    Duration timeout = const Duration(seconds: 10),
   }) async {
     final res = await http.get(_uri('/api/songs', {
       'q': query,
       'offset': '$offset',
       'limit': '$limit',
-    })).timeout(const Duration(seconds: 10));
+    })).timeout(timeout);
     if (res.statusCode != 200) {
       throw Exception('Failed to load songs (${res.statusCode})');
     }
