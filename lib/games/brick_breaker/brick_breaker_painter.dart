@@ -12,14 +12,20 @@ class BrickBreakerPainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     game.resize(size.width, size.height);
 
-    // Grid glow
-    final gridPaint = Paint()
-      ..color = AppColors.border.withValues(alpha: 0.35)
-      ..strokeWidth = 0.5;
-    for (var i = 0; i <= 10; i++) {
-      final y = size.height * i / 10;
-      canvas.drawLine(Offset(0, y), Offset(size.width, y), gridPaint);
-    }
+    // STEP label
+    final stepTp = TextPainter(
+      text: TextSpan(
+        text: 'STEP ${game.step}',
+        style: TextStyle(
+          color: AppColors.accentGlow.withValues(alpha: 0.85),
+          fontSize: 13,
+          fontWeight: FontWeight.w600,
+          letterSpacing: 0.5,
+        ),
+      ),
+      textDirection: TextDirection.ltr,
+    )..layout();
+    stepTp.paint(canvas, const Offset(10, 10));
 
     // Danger line
     final dangerY = BrickBreakerGame.dangerY * size.height;
@@ -27,8 +33,8 @@ class BrickBreakerPainter extends CustomPainter {
       Offset(0, dangerY),
       Offset(size.width, dangerY),
       Paint()
-        ..color = Colors.redAccent.withValues(alpha: 0.55)
-        ..strokeWidth = 1.5,
+        ..color = Colors.redAccent.withValues(alpha: 0.45)
+        ..strokeWidth = 1.2,
     );
 
     // Bricks
@@ -58,14 +64,12 @@ class BrickBreakerPainter extends CustomPainter {
         final fill = Color.lerp(AppColors.wine, AppColors.accent, 1 - t)!;
         canvas.drawRRect(
           RRect.fromRectAndRadius(rect, const Radius.circular(6)),
-          Paint()
-            ..color = fill.withValues(alpha: 0.85)
-            ..style = PaintingStyle.fill,
+          Paint()..color = fill.withValues(alpha: 0.85),
         );
         canvas.drawRRect(
           RRect.fromRectAndRadius(rect, const Radius.circular(6)),
           Paint()
-            ..color = AppColors.accentGlow.withValues(alpha: 0.7)
+            ..color = AppColors.accentGlow.withValues(alpha: 0.65)
             ..style = PaintingStyle.stroke
             ..strokeWidth = 1.2,
         );
@@ -83,66 +87,102 @@ class BrickBreakerPainter extends CustomPainter {
         )..layout();
         tp.paint(
           canvas,
-          Offset(
-            rect.center.dx - tp.width / 2,
-            rect.center.dy - tp.height / 2,
-          ),
+          Offset(rect.center.dx - tp.width / 2, rect.center.dy - tp.height / 2),
         );
       }
     }
 
-    // Aim guide
-    if (game.phase == BreakerPhase.aiming) {
-      final px = game.paddleX * size.width;
-      final py = BrickBreakerGame.paddleY * size.height - BrickBreakerGame.paddleH;
-      final len = 80.0;
-      final ex = px + math.cos(game.aimAngle) * len;
-      final ey = py + math.sin(game.aimAngle) * len;
-      canvas.drawLine(
-        Offset(px, py),
-        Offset(ex, ey),
-        Paint()
-          ..color = AppColors.accent.withValues(alpha: 0.45)
-          ..strokeWidth = 2,
-      );
+    // Ball booster pickups
+    for (final pick in game.boosters) {
+      final rect = game.cellRect(pick.row, pick.col);
+      final cx = (rect.left + rect.right) / 2;
+      final cy = (rect.top + rect.bottom) / 2;
+      _drawBooster(canvas, Offset(cx, cy));
     }
 
-    // Balls
+    // Dotted aim guide while aiming (shows wall bounces)
+    if (game.phase == BreakerPhase.aiming) {
+      final preview = game.aimPreview();
+      final dotPaint = Paint()
+        ..color = Colors.white.withValues(alpha: 0.5)
+        ..strokeWidth = 2.5
+        ..strokeCap = StrokeCap.round;
+      for (final p in preview.dots) {
+        canvas.drawCircle(p, 1.5, dotPaint);
+      }
+      final bouncePaint = Paint()
+        ..color = AppColors.accentGlow.withValues(alpha: 0.75)
+        ..strokeWidth = 3
+        ..strokeCap = StrokeCap.round;
+      for (final p in preview.bounces) {
+        canvas.drawCircle(p, 2.8, bouncePaint);
+      }
+    }
+
+    // In-flight balls
     for (final b in game.balls) {
       if (!b.active) continue;
-      canvas.drawCircle(
-        Offset(b.x, b.y),
-        BrickBreakerGame.ballRadius,
-        Paint()
-          ..color = AppColors.accentGlow
-          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 3),
-      );
-      canvas.drawCircle(
-        Offset(b.x, b.y),
-        BrickBreakerGame.ballRadius - 1,
-        Paint()..color = Colors.white,
-      );
+      _drawBall(canvas, Offset(b.x, b.y), glow: true);
     }
 
-    // Paddle
-    final paddleRect = Rect.fromCenter(
-      center: Offset(
-        game.paddleX * size.width,
-        BrickBreakerGame.paddleY * size.height,
-      ),
-      width: BrickBreakerGame.paddleW,
-      height: BrickBreakerGame.paddleH,
-    );
-    canvas.drawRRect(
-      RRect.fromRectAndRadius(paddleRect, const Radius.circular(5)),
+    // Launcher ball + x count (only when aiming or between volleys)
+    if (game.phase == BreakerPhase.aiming) {
+      final lx = game.launcherPx;
+      final ly = game.launcherPy;
+      _drawBall(canvas, Offset(lx, ly), glow: true);
+
+      final countTp = TextPainter(
+        text: TextSpan(
+          text: 'x${game.ballsPerShot}',
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        textDirection: TextDirection.ltr,
+      )..layout();
+      countTp.paint(canvas, Offset(lx + 10, ly - 8));
+    }
+  }
+
+  void _drawBall(Canvas canvas, Offset c, {required bool glow}) {
+    if (glow) {
+      canvas.drawCircle(
+        c,
+        BrickBreakerGame.ballRadius + 2,
+        Paint()
+          ..color = AppColors.accent.withValues(alpha: 0.35)
+          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 4),
+      );
+    }
+    canvas.drawCircle(c, BrickBreakerGame.ballRadius, Paint()..color = Colors.white);
+  }
+
+  void _drawBooster(Canvas canvas, Offset c) {
+    canvas.drawCircle(
+      c,
+      11,
       Paint()
-        ..color = AppColors.accent
-        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 4),
+        ..color = AppColors.accent.withValues(alpha: 0.25)
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 5),
     );
-    canvas.drawRRect(
-      RRect.fromRectAndRadius(paddleRect, const Radius.circular(5)),
-      Paint()..color = AppColors.accentGlow,
-    );
+    canvas.drawCircle(c, 4, Paint()..color = Colors.white);
+
+    final ring = Paint()
+      ..color = AppColors.accentGlow.withValues(alpha: 0.9)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2.2;
+    for (var i = 0; i < 4; i++) {
+      final start = i * math.pi / 2 + 0.35;
+      canvas.drawArc(
+        Rect.fromCircle(center: c, radius: 9),
+        start,
+        math.pi / 2 - 0.5,
+        false,
+        ring,
+      );
+    }
   }
 
   @override

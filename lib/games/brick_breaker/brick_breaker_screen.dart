@@ -40,14 +40,10 @@ class _BrickBreakerScreenState extends State<BrickBreakerScreen>
   }
 
   void _onPanUpdate(DragUpdateDetails d, BoxConstraints box) {
+    if (_game.phase != BreakerPhase.aiming) return;
     final nx = (d.localPosition.dx / box.maxWidth).clamp(0.0, 1.0);
     final ny = (d.localPosition.dy / box.maxHeight).clamp(0.0, 1.0);
-    if (_game.phase == BreakerPhase.aiming) {
-      _game.movePaddle(nx);
-      _game.setAimFromTouch(nx, ny);
-    } else {
-      _game.movePaddle(nx);
-    }
+    _game.setAimFromTouch(nx, ny);
     setState(() {});
   }
 
@@ -146,7 +142,7 @@ class _BrickBreakerScreenState extends State<BrickBreakerScreen>
           const Padding(
             padding: EdgeInsets.fromLTRB(16, 0, 16, 16),
             child: Text(
-              'Drag to aim · Release to shoot · Clear the wall before it reaches the red line',
+              'Drag from the ball to aim (bounces off walls) · Release to shoot',
               textAlign: TextAlign.center,
               style: TextStyle(color: AppColors.muted, fontSize: 12),
             ),
