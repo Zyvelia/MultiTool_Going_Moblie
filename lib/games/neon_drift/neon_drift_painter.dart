@@ -142,7 +142,6 @@ class NeonDriftPainter extends CustomPainter {
     final tp = TextPainter(
       text: TextSpan(
         text: text,
-        textAlign: TextAlign.center,
         style: TextStyle(
           color: AppColors.accentGlow.withValues(alpha: 0.9),
           fontSize: 16,

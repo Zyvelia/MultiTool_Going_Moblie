@@ -25,7 +25,7 @@ class DriftGem {
   double y;
   bool taken;
 
-  DriftGem({required this.x, required this.y});
+  DriftGem({required this.x, required this.y, this.taken = false});
 }
 
 class NeonDriftGame {
