@@ -10,7 +10,7 @@ dependencies:
   flutter:
     sdk: flutter
   http: ^1.2.0
-  flutter_secure_storage: ^9.2.2
+  flutter_secure_storage: ^11.0.0
   just_audio: ^0.9.40
   audio_service: ^0.18.15
   just_audio_background: ^0.0.1-beta.17

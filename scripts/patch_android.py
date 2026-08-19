@@ -24,6 +24,15 @@ def patch_manifest() -> None:
     xml, n = re.subn(r"(<manifest[^>]*>\n)", r"\1" + perms, xml, count=1)
     if n == 0:
         raise SystemExit(f"Could not patch permissions in {path}")
+    # flutter_secure_storage v10+ — Google Drive backup can break key unwrap.
+    xml, n2 = re.subn(
+        r'(<application)(\s[^>]*)?>',
+        r'\1\2 android:allowBackup="false">',
+        xml,
+        count=1,
+    )
+    if n2 == 0:
+        raise SystemExit(f"Could not patch allowBackup in {path}")
     path.write_text(xml, encoding="utf-8")
     print(f"Patched {path}")
 
@@ -49,7 +58,7 @@ def patch_compile_sdk() -> None:
     gradle = path.read_text(encoding="utf-8")
     gradle, n = re.subn(
         r"compileSdk\s*=\s*flutter\.compileSdkVersion",
-        "compileSdk = 36",
+        "compileSdk = 37",
         gradle,
     )
     if n == 0:

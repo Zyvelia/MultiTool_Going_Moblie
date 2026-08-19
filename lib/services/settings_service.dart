@@ -37,6 +37,10 @@ class SettingsService {
   // fix). Keychain entries survive app deletion by default, so this
   // persists across reinstalls.
   static const _storage = FlutterSecureStorage(
+    aOptions: AndroidOptions(
+      // v9 → v11 cipher migration; safe if the app was never installed before.
+      migrateWithBackup: true,
+    ),
     iOptions: IOSOptions(
       // Keep the item even if the app is deleted; only wiped by an
       // explicit reset or a full device erase.

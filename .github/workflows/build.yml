@@ -20,7 +20,7 @@ jobs:
       # `flutter create .` scaffolds the missing platform folders in place
       # without touching lib/ or pubspec.yaml.
       - name: Scaffold platform folders
-        run: flutter create --platforms=android,ios --org com.zsmultitool .
+        run: flutter create --platforms=android,ios --org com.zsmultitool --no-pub .
 
       - name: Patch Android project (manifest, audio, compileSdk, Kotlin)
         run: python3 scripts/patch_android.py
@@ -56,7 +56,7 @@ jobs:
           channel: 'stable'
 
       - name: Scaffold platform folders
-        run: flutter create --platforms=android,ios --org com.zsmultitool .
+        run: flutter create --platforms=android,ios --org com.zsmultitool --no-pub .
 
       # audio_service (Music tab) needs background audio mode declared in
       # Info.plist — same reasoning as the Android manifest patch above:
