@@ -1,19 +1,67 @@
 #!/usr/bin/env python3
 """Patches the scaffolded ios/ folder after `flutter create`.
 
-Run once after generating platform folders (CI does this automatically):
+Run after `flutter pub get` (Podfile may not exist until then on newer Flutter):
     python scripts/patch_ios.py
 """
 from __future__ import annotations
 
+import argparse
 import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 
+# Standard Flutter Podfile — written when `flutter create` skips it (newer templates).
+_PODFILE_TEMPLATE = """# Generated for CI when the scaffold omits ios/Podfile.
+platform :ios, '13.0'
+
+ENV['COCOAPODS_DISABLE_STATS'] = 'true'
+
+project 'Runner', {
+  'Debug' => :debug,
+  'Profile' => :release,
+  'Release' => :release,
+}
+
+def flutter_root
+  generated_xcode_build_settings_path = File.expand_path(File.join('..', 'Flutter', 'Generated.xcconfig'), __FILE__)
+  unless File.exist?(generated_xcode_build_settings_path)
+    raise "#{generated_xcode_build_settings_path} must exist. Run flutter pub get first"
+  end
+
+  File.foreach(generated_xcode_build_settings_path) do |line|
+    matches = line.match(/FLUTTER_ROOT=(.*)/)
+    return matches[1].strip if matches
+  end
+  raise "FLUTTER_ROOT not found in #{generated_xcode_build_settings_path}"
+end
+
+require File.expand_path(File.join('packages', 'flutter_tools', 'bin', 'podhelper'), flutter_root)
+
+flutter_ios_podfile_setup
+
+target 'Runner' do
+  use_frameworks!
+  use_modular_headers!
+
+  flutter_install_all_ios_pods File.dirname(File.realpath(__FILE__))
+end
+
+post_install do |installer|
+  installer.pods_project.targets.each do |target|
+    flutter_additional_ios_build_settings(target)
+  end
+end
+"""
+
 
 def patch_info_plist() -> None:
     path = ROOT / "ios/Runner/Info.plist"
+    if not path.is_file():
+        print(f"Skip Info.plist — not found: {path}")
+        return
+
     plist = path.read_text(encoding="utf-8")
 
     blocks = [
@@ -45,8 +93,34 @@ def patch_info_plist() -> None:
     print(f"Patched {path}")
 
 
-def patch_podfile() -> None:
+def ensure_podfile() -> Path | None:
     path = ROOT / "ios/Podfile"
+    if path.is_file():
+        return path
+
+    ios_dir = ROOT / "ios"
+    if not ios_dir.is_dir():
+        print("Skip Podfile — ios/ folder missing")
+        return None
+
+    generated = ROOT / "ios/Flutter/Generated.xcconfig"
+    if not generated.is_file():
+        print(
+            "Skip Podfile — ios/Podfile missing and Flutter/Generated.xcconfig "
+            "not found (run flutter pub get first)"
+        )
+        return None
+
+    path.write_text(_PODFILE_TEMPLATE, encoding="utf-8")
+    print(f"Created {path}")
+    return path
+
+
+def patch_podfile() -> None:
+    path = ensure_podfile()
+    if path is None:
+        return
+
     text = path.read_text(encoding="utf-8")
 
     hook = """
@@ -74,8 +148,11 @@ def patch_podfile() -> None:
 
 
 def patch_pbxproj() -> None:
-    """Keep Runner on Automatic signing — xcodebuild overrides handle CI."""
     path = ROOT / "ios/Runner.xcodeproj/project.pbxproj"
+    if not path.is_file():
+        print(f"Skip pbxproj — not found: {path}")
+        return
+
     text = path.read_text(encoding="utf-8")
     original = text
 
@@ -99,9 +176,21 @@ def patch_pbxproj() -> None:
 
 
 def main() -> None:
-    patch_info_plist()
-    patch_podfile()
-    patch_pbxproj()
+    parser = argparse.ArgumentParser(description="Patch scaffolded ios/ for CI builds")
+    parser.add_argument(
+        "--podfile-only",
+        action="store_true",
+        help="Only ensure/patch ios/Podfile (run after flutter pub get)",
+    )
+    args = parser.parse_args()
+
+    if args.podfile_only:
+        patch_podfile()
+    else:
+        patch_info_plist()
+        patch_pbxproj()
+        patch_podfile()
+
     print("iOS patches applied.")
 
 
