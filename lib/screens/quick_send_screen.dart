@@ -62,10 +62,10 @@ class _QuickSendScreenState extends State<QuickSendScreen> {
 
   Future<void> _pickAndSend() async {
     if (_api == null) return;
-    final result = await FilePicker.platform.pickFiles();
-    if (result == null || result.files.single.path == null) return;
+    final file = await FilePicker.pickFile();
+    if (file == null || file.path == null) return;
 
-    final path = result.files.single.path!;
+    final path = file.path!;
     setState(() {
       _sending = true;
       _sendStatus = 'Sending...';
