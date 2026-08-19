@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:just_audio/just_audio.dart';
+import '../theme/app_colors.dart';
 import '../models/song.dart';
 import 'song_tile.dart';
 
@@ -26,8 +27,8 @@ class MiniPlayer extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
       decoration: BoxDecoration(
-        color: const Color(0xFF151922),
-        border: const Border(top: BorderSide(color: Color(0xFF232838))),
+        color: AppColors.surface,
+        border: const Border(top: BorderSide(color: AppColors.border)),
       ),
       child: SafeArea(
         top: false,
@@ -62,7 +63,7 @@ class MiniPlayer extends StatelessWidget {
                         child: Slider(
                           value: value,
                           max: max,
-                          activeColor: const Color(0xFF4EA1FF),
+                          activeColor: AppColors.accent,
                           inactiveColor: Colors.white24,
                           onChanged: (v) {
                             player.seek(Duration(milliseconds: v.toInt()));
@@ -115,7 +116,7 @@ class MiniPlayer extends StatelessWidget {
                       iconSize: 40,
                       icon: Icon(
                           playing ? Icons.pause_circle_filled : Icons.play_circle_filled),
-                      color: const Color(0xFF4EA1FF),
+                      color: AppColors.accent,
                       onPressed: () {
                         playing ? player.pause() : player.play();
                       },

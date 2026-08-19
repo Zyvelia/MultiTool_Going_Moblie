@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import '../theme/app_colors.dart';
 import '../services/connectivity_service.dart';
 import '../services/settings_service.dart';
 import '../services/speed_test_service.dart';
@@ -293,7 +294,7 @@ class _SpeedDial extends StatelessWidget {
     return DecoratedBox(
       decoration: BoxDecoration(
         shape: BoxShape.circle,
-        border: Border.all(color: Colors.white12, width: 6),
+        border: Border.all(color: AppColors.accent.withValues(alpha: 0.22), width: 6),
       ),
       child: Center(
         child: Column(

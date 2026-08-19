@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../models/sound_clip.dart';
+import '../theme/app_colors.dart';
 import '../services/settings_service.dart';
 import '../services/soundboard_api_service.dart';
 
@@ -145,8 +146,8 @@ class _SoundboardScreenState extends State<SoundboardScreen> {
                       final playing = _playingId == s.id;
                       return Material(
                         color: playing
-                            ? const Color(0xFF23304a)
-                            : const Color(0xFF1B2030),
+                            ? AppColors.wine
+                            : AppColors.card,
                         borderRadius: BorderRadius.circular(12),
                         child: InkWell(
                           borderRadius: BorderRadius.circular(12),
@@ -159,7 +160,7 @@ class _SoundboardScreenState extends State<SoundboardScreen> {
                                 Icon(
                                   playing ? Icons.graphic_eq : Icons.volume_up,
                                   color: playing
-                                      ? const Color(0xFF4EA1FF)
+                                      ? AppColors.accent
                                       : Colors.white54,
                                 ),
                                 const SizedBox(height: 6),

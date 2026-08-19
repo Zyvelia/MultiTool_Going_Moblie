@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../theme/app_colors.dart';
 import 'song_tile.dart';
 
 /// Same visual shape as MiniPlayer, but for "Control PC" mode: there's
@@ -42,8 +43,8 @@ class PcMiniPlayer extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
       decoration: BoxDecoration(
-        color: const Color(0xFF151922),
-        border: const Border(top: BorderSide(color: Color(0xFF232838))),
+        color: AppColors.surface,
+        border: const Border(top: BorderSide(color: AppColors.border)),
       ),
       child: SafeArea(
         top: false,
@@ -53,10 +54,10 @@ class PcMiniPlayer extends StatelessWidget {
             Row(
               children: [
                 const Icon(Icons.desktop_windows,
-                    size: 12, color: Color(0xFF4EA1FF)),
+                    size: 12, color: AppColors.accent),
                 const SizedBox(width: 4),
                 const Text('Controlling PC',
-                    style: TextStyle(color: Color(0xFF4EA1FF), fontSize: 10)),
+                    style: TextStyle(color: AppColors.accent, fontSize: 10)),
               ],
             ),
             Row(
@@ -75,7 +76,7 @@ class PcMiniPlayer extends StatelessWidget {
                     child: Slider(
                       value: value,
                       max: max,
-                      activeColor: const Color(0xFF4EA1FF),
+                      activeColor: AppColors.accent,
                       inactiveColor: Colors.white24,
                       onChanged: onSeek,
                     ),
@@ -120,7 +121,7 @@ class PcMiniPlayer extends StatelessWidget {
                   icon: Icon(isPlaying
                       ? Icons.pause_circle_filled
                       : Icons.play_circle_filled),
-                  color: const Color(0xFF4EA1FF),
+                  color: AppColors.accent,
                   onPressed: onPlayPause,
                 ),
                 IconButton(

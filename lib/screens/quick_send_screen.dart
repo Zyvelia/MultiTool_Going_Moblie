@@ -1,6 +1,7 @@
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
+import '../theme/app_colors.dart';
 import 'package:share_plus/share_plus.dart';
 import '../models/shared_file.dart';
 import '../services/quick_send_api_service.dart';
@@ -156,15 +157,15 @@ class _QuickSendScreenState extends State<QuickSendScreen> {
                 width: double.infinity,
                 padding: const EdgeInsets.symmetric(vertical: 28),
                 decoration: BoxDecoration(
-                  color: const Color(0xFF1B2030),
+                  color: AppColors.card,
                   borderRadius: BorderRadius.circular(14),
-                  border: Border.all(color: const Color(0xFF2A3145)),
+                  border: Border.all(color: AppColors.border),
                 ),
                 child: Column(
                   children: [
                     Icon(
                       _sending ? Icons.hourglass_top : Icons.upload_file,
-                      color: const Color(0xFF4EA1FF),
+                      color: AppColors.accent,
                       size: 28,
                     ),
                     const SizedBox(height: 8),
@@ -210,9 +211,9 @@ class _QuickSendScreenState extends State<QuickSendScreen> {
                   margin: const EdgeInsets.only(bottom: 8),
                   padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                   decoration: BoxDecoration(
-                    color: const Color(0xFF1B2030),
+                    color: AppColors.card,
                     borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: const Color(0xFF232838)),
+                    border: Border.all(color: AppColors.border),
                   ),
                   child: Row(
                     children: [
@@ -241,13 +242,13 @@ class _QuickSendScreenState extends State<QuickSendScreen> {
                           child: CircularProgressIndicator(
                             value: progress > 0 ? progress : null,
                             strokeWidth: 2,
-                            color: const Color(0xFF4EA1FF),
+                            color: AppColors.accent,
                           ),
                         )
                       else
                         IconButton(
                           icon: const Icon(Icons.download,
-                              color: Color(0xFF4EA1FF)),
+                              color: AppColors.accent),
                           onPressed: () => _downloadAndShare(f),
                         ),
                     ],

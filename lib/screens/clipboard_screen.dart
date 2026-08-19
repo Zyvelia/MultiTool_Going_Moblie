@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import '../theme/app_colors.dart';
 import '../models/clipboard_entry.dart';
 import '../services/settings_service.dart';
 import '../services/clipboard_api_service.dart';
@@ -191,7 +192,7 @@ class _ClipboardScreenState extends State<ClipboardScreen> {
                   hintText: 'Search history…',
                   prefixIcon: const Icon(Icons.search),
                   filled: true,
-                  fillColor: const Color(0xFF1B2030),
+                  fillColor: AppColors.card,
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(10),
                     borderSide: BorderSide.none,
@@ -227,7 +228,7 @@ class _ClipboardScreenState extends State<ClipboardScreen> {
                                     ? Icons.push_pin
                                     : Icons.push_pin_outlined,
                                 color: entry.pinned
-                                    ? const Color(0xFF4EA1FF)
+                                    ? AppColors.accent
                                     : Colors.white38,
                               ),
                               title: Text(

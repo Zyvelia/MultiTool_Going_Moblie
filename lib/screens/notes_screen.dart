@@ -7,6 +7,7 @@ import '../services/settings_service.dart';
 import '../services/notes_api_service.dart';
 import '../services/notes_sync_service.dart';
 import '../services/connectivity_service.dart';
+import '../theme/app_colors.dart';
 
 class NotesScreen extends StatefulWidget {
   const NotesScreen({super.key});
@@ -231,7 +232,7 @@ class _NotesScreenState extends State<NotesScreen> {
                   hintText: 'Search notes…',
                   prefixIcon: const Icon(Icons.search),
                   filled: true,
-                  fillColor: const Color(0xFF1B2030),
+                  fillColor: AppColors.card,
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(10),
                     borderSide: BorderSide.none,
@@ -266,7 +267,7 @@ class _NotesScreenState extends State<NotesScreen> {
                               leading: Icon(
                                 note.pinned ? Icons.push_pin : Icons.push_pin_outlined,
                                 color: note.pinned
-                                    ? const Color(0xFF4EA1FF)
+                                    ? AppColors.accent
                                     : Colors.white38,
                               ),
                               title: Text(note.title,

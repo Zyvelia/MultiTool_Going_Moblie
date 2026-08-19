@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../models/song.dart';
+import '../theme/app_colors.dart';
 
 String formatDuration(int seconds) {
   if (seconds <= 0) return '';
@@ -37,17 +38,17 @@ class SongTile extends StatelessWidget {
   Widget build(BuildContext context) {
     return ListTile(
       onTap: onTap,
-      tileColor: active ? Colors.white.withOpacity(0.06) : null,
+      tileColor: active ? AppColors.accent.withValues(alpha: 0.08) : null,
       leading: Icon(
         active ? Icons.graphic_eq : Icons.music_note,
-        color: active ? const Color(0xFF4EA1FF) : Colors.white38,
+        color: active ? AppColors.accent : Colors.white38,
       ),
       title: Text(
         song.title,
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
         style: TextStyle(
-          color: active ? const Color(0xFF4EA1FF) : Colors.white,
+          color: active ? AppColors.accent : Colors.white,
           fontWeight: active ? FontWeight.w600 : FontWeight.normal,
         ),
       ),
@@ -94,7 +95,7 @@ class _CacheIcon extends StatelessWidget {
     switch (state) {
       case SongCacheState.cached:
         return IconButton(
-          icon: const Icon(Icons.offline_pin, color: Color(0xFF4EA1FF)),
+          icon: const Icon(Icons.offline_pin, color: AppColors.accent),
           iconSize: 20,
           visualDensity: VisualDensity.compact,
           tooltip: 'Downloaded — tap to remove',
@@ -114,7 +115,7 @@ class _CacheIcon extends StatelessWidget {
                 child: CircularProgressIndicator(
                   strokeWidth: 2,
                   value: (p != null && p >= 0) ? p : null,
-                  color: const Color(0xFF4EA1FF),
+                  color: AppColors.accent,
                   backgroundColor: Colors.white12,
                 ),
               ),

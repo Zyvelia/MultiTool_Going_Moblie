@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../models/game.dart';
+import '../theme/app_colors.dart';
 import '../services/settings_service.dart';
 import '../services/games_api_service.dart';
 
@@ -139,7 +140,7 @@ class _GamesScreenState extends State<GamesScreen> {
                           final launching = _launchingId == g.id;
                           return ListTile(
                             leading: const Icon(Icons.sports_esports,
-                                color: Color(0xFF4EA1FF)),
+                                color: AppColors.accent),
                             title: Text(g.name),
                             subtitle: Text(g.launcher),
                             trailing: launching

@@ -1,14 +1,15 @@
 import 'dart:async';
+import 'package:audio_service/audio_service.dart';
 import 'package:flutter/material.dart';
 import 'package:just_audio/just_audio.dart';
-import 'package:audio_service/audio_service.dart';
-import '../models/song.dart';
 import '../models/now_playing.dart';
 import '../models/server_profile.dart';
+import '../models/song.dart';
 import '../services/api_service.dart';
 import '../services/connectivity_service.dart';
 import '../services/offline_cache_service.dart';
 import '../services/settings_service.dart';
+import '../theme/app_colors.dart';
 import '../widgets/mini_player.dart';
 import '../widgets/pc_mini_player.dart';
 import '../widgets/song_tile.dart';
@@ -310,7 +311,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        backgroundColor: const Color(0xFF1B2030),
+        backgroundColor: AppColors.card,
         title: const Text('Download all songs?', style: TextStyle(color: Colors.white)),
         content: Text(
           _query.isEmpty
@@ -738,7 +739,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
                     : 'Search songs, artists…',
                 prefixIcon: const Icon(Icons.search),
                 filled: true,
-                fillColor: const Color(0xFF1B2030),
+                fillColor: AppColors.card,
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(10),
                   borderSide: BorderSide.none,

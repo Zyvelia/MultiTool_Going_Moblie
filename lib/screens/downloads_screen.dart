@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import '../models/song.dart';
+import '../theme/app_colors.dart';
 import '../services/offline_cache_service.dart';
 import '../widgets/song_tile.dart';
 
@@ -47,7 +48,7 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        backgroundColor: const Color(0xFF1B2030),
+        backgroundColor: AppColors.card,
         title: const Text('Clear all downloads?',
             style: TextStyle(color: Colors.white)),
         content: Text(
@@ -94,8 +95,8 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
             width: double.infinity,
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
             decoration: const BoxDecoration(
-              color: Color(0xFF151922),
-              border: Border(bottom: BorderSide(color: Color(0xFF232838))),
+              color: AppColors.surface,
+              border: Border(bottom: BorderSide(color: AppColors.border)),
             ),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,

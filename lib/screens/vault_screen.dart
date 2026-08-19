@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import '../theme/app_colors.dart';
 import '../models/vault_entry.dart';
 import '../services/settings_service.dart';
 import '../services/vault_api_service.dart';
@@ -238,7 +239,7 @@ class _VaultScreenState extends State<VaultScreen>
               fontFamily: 'monospace',
               fontSize: 18,
               fontWeight: FontWeight.bold,
-              color: Color(0xFF4EA1FF),
+              color: AppColors.accent,
             ),
           ),
           onTap: () => _copyToClipboard(c.code),
