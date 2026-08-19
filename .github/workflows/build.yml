@@ -56,44 +56,75 @@ jobs:
           channel: 'stable'
 
       - name: Scaffold platform folders
-        run: flutter create --platforms=android,ios --org com.zsmultitool --no-pub .
+        run: flutter create --platforms=android,ios --org com.zsmultitool .
+
+      # audio_service (Music tab) needs background audio mode declared in
+      # Info.plist — ios/ is scaffolded fresh every run.
+      - name: Patch Info.plist for background audio
+        run: |
+          python3 - <<'PY'
+          path = "ios/Runner/Info.plist"
+          with open(path) as f:
+              plist = f.read()
+
+          block = (
+              "\t<key>UIBackgroundModes</key>\n"
+              "\t<array>\n"
+              "\t\t<string>audio</string>\n"
+              "\t</array>\n"
+          )
+          plist = plist.replace("<dict>\n", "<dict>\n" + block, 1)
+
+          with open(path, "w") as f:
+              f.write(plist)
+          print("Patched Info.plist for background audio")
+          PY
+
+      # AirPrint / Bonjour for the Notes print button (printing package).
+      - name: Patch Info.plist for AirPrint discovery
+        run: |
+          python3 - <<'PY'
+          path = "ios/Runner/Info.plist"
+          with open(path) as f:
+              plist = f.read()
+
+          block = (
+              "\t<key>NSLocalNetworkUsageDescription</key>\n"
+              "\t<string>Used to find printers on your Wi-Fi network so notes can be printed.</string>\n"
+              "\t<key>NSBonjourServices</key>\n"
+              "\t<array>\n"
+              "\t\t<string>_ipp._tcp</string>\n"
+              "\t\t<string>_ipps._tcp</string>\n"
+              "\t</array>\n"
+          )
+          plist = plist.replace("<dict>\n", "<dict>\n" + block, 1)
+
+          with open(path, "w") as f:
+              f.write(plist)
+          print("Patched Info.plist for AirPrint discovery")
+          PY
 
       - run: flutter pub get
-
-      # Podfile may not exist until after pub get on newer Flutter templates.
-      - name: Patch iOS project (Info.plist, pods, signing)
-        run: python3 scripts/patch_ios.py
 
       - name: Generate launcher icons
         run: dart run flutter_launcher_icons
 
-      # flutter build ios --no-codesign still runs a pre-flight signing check
-      # on some Flutter stable versions. Generate config + pods, then build
-      # with xcodebuild and signing fully disabled (unsigned sideload IPA).
+      # --no-codesign: unsigned Runner.app for sideload (TrollStore / Filza).
+      # Newer Flutter stable sometimes exits non-zero after a successful
+      # xcodebuild because of Apple cert pre-checks — keep going if the app exists.
       - name: Build iOS (unsigned)
         run: |
-          flutter build ios --release --config-only
-          # Re-apply Podfile patch if config-only created it, then reinstall pods.
-          python3 scripts/patch_ios.py --podfile-only
-          cd ios && pod install && cd ..
-          xcodebuild \
-            -workspace ios/Runner.xcworkspace \
-            -scheme Runner \
-            -configuration Release \
-            -sdk iphoneos \
-            -destination 'generic/platform=iOS' \
-            -derivedDataPath build/ios-derived \
-            CODE_SIGNING_ALLOWED=NO \
-            CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGN_IDENTITY="" \
-            CODE_SIGN_ENTITLEMENTS="" \
-            DEVELOPMENT_TEAM="" \
-            PROVISIONING_PROFILE_SPECIFIER="" \
-            build
-          mkdir -p build/ios/iphoneos
-          rsync -a \
-            build/ios-derived/Build/Products/Release-iphoneos/Runner.app \
-            build/ios/iphoneos/
+          set +e
+          flutter build ios --release --no-codesign
+          code=$?
+          set -e
+          if [ ! -d build/ios/iphoneos/Runner.app ]; then
+            echo "Runner.app missing (flutter exit $code)"
+            exit 1
+          fi
+          if [ "$code" -ne 0 ]; then
+            echo "Flutter exit $code but Runner.app built — packaging anyway"
+          fi
 
       - name: Package IPA
         run: |
