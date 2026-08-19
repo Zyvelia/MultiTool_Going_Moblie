@@ -12,7 +12,6 @@ class BrickBreakerPainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     game.resize(size.width, size.height);
 
-    // STEP label
     final stepTp = TextPainter(
       text: TextSpan(
         text: 'STEP ${game.step}',
@@ -27,7 +26,6 @@ class BrickBreakerPainter extends CustomPainter {
     )..layout();
     stepTp.paint(canvas, const Offset(10, 10));
 
-    // Danger line
     final dangerY = BrickBreakerGame.dangerY * size.height;
     canvas.drawLine(
       Offset(0, dangerY),
@@ -37,7 +35,26 @@ class BrickBreakerPainter extends CustomPainter {
         ..strokeWidth = 1.2,
     );
 
-    // Bricks
+    for (final beam in game.laserBeams) {
+      final y = game.rowCenterY(beam.row);
+      final alpha = (beam.life / 0.35).clamp(0.0, 1.0);
+      canvas.drawLine(
+        Offset(0, y),
+        Offset(size.width, y),
+        Paint()
+          ..color = Colors.redAccent.withValues(alpha: 0.25 + alpha * 0.55)
+          ..strokeWidth = 3 + alpha * 2
+          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 3),
+      );
+      canvas.drawLine(
+        Offset(0, y),
+        Offset(size.width, y),
+        Paint()
+          ..color = Colors.white.withValues(alpha: alpha * 0.8)
+          ..strokeWidth = 1.2,
+      );
+    }
+
     for (var r = 0; r < game.grid.length; r++) {
       for (var c = 0; c < game.grid[r].length; c++) {
         final brick = game.grid[r][c];
@@ -51,81 +68,44 @@ class BrickBreakerPainter extends CustomPainter {
           BrickBreakerGame.brickW * size.width - 4,
           BrickBreakerGame.brickH * size.height - 4,
         );
-
-        if (brick.barrier) {
-          canvas.drawRRect(
-            RRect.fromRectAndRadius(rect, const Radius.circular(4)),
-            Paint()..color = AppColors.border,
-          );
-          continue;
-        }
-
-        final t = (brick.hp / 12).clamp(0.0, 1.0);
-        final fill = Color.lerp(AppColors.wine, AppColors.accent, 1 - t)!;
-        canvas.drawRRect(
-          RRect.fromRectAndRadius(rect, const Radius.circular(6)),
-          Paint()..color = fill.withValues(alpha: 0.85),
-        );
-        canvas.drawRRect(
-          RRect.fromRectAndRadius(rect, const Radius.circular(6)),
-          Paint()
-            ..color = AppColors.accentGlow.withValues(alpha: 0.65)
-            ..style = PaintingStyle.stroke
-            ..strokeWidth = 1.2,
-        );
-
-        final tp = TextPainter(
-          text: TextSpan(
-            text: '${brick.hp}',
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 13,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-          textDirection: TextDirection.ltr,
-        )..layout();
-        tp.paint(
-          canvas,
-          Offset(rect.center.dx - tp.width / 2, rect.center.dy - tp.height / 2),
-        );
+        _drawBrick(canvas, rect, brick);
       }
     }
 
-    // Ball booster pickups
-    for (final pick in game.boosters) {
-      final rect = game.cellRect(pick.row, pick.col);
+    for (final p in game.powerups) {
+      final rect = game.cellRect(p.row, p.col);
       final cx = (rect.left + rect.right) / 2;
       final cy = (rect.top + rect.bottom) / 2;
-      _drawBooster(canvas, Offset(cx, cy));
+      if (p.buried) {
+        _drawBuriedPowerup(canvas, Offset(cx, cy), p);
+      } else if (p.readyForWave) {
+        _drawArmedPowerup(canvas, Offset(cx, cy), p);
+      } else {
+        _drawArmedPowerup(canvas, Offset(cx, cy), p, dimmed: true);
+      }
     }
 
-    // Dotted aim guide while aiming (shows wall bounces)
     if (game.phase == BreakerPhase.aiming) {
       final preview = game.aimPreview();
       final dotPaint = Paint()
         ..color = Colors.white.withValues(alpha: 0.5)
-        ..strokeWidth = 2.5
         ..strokeCap = StrokeCap.round;
-      for (final p in preview.dots) {
-        canvas.drawCircle(p, 1.5, dotPaint);
+      for (final pt in preview.dots) {
+        canvas.drawCircle(pt, 1.5, dotPaint);
       }
       final bouncePaint = Paint()
         ..color = AppColors.accentGlow.withValues(alpha: 0.75)
-        ..strokeWidth = 3
         ..strokeCap = StrokeCap.round;
-      for (final p in preview.bounces) {
-        canvas.drawCircle(p, 2.8, bouncePaint);
+      for (final pt in preview.bounces) {
+        canvas.drawCircle(pt, 2.8, bouncePaint);
       }
     }
 
-    // In-flight balls
     for (final b in game.balls) {
       if (!b.active) continue;
       _drawBall(canvas, Offset(b.x, b.y), glow: true);
     }
 
-    // Launcher ball + x count (only when aiming or between volleys)
     if (game.phase == BreakerPhase.aiming) {
       final lx = game.launcherPx;
       final ly = game.launcherPy;
@@ -146,6 +126,165 @@ class BrickBreakerPainter extends CustomPainter {
     }
   }
 
+  void _drawBrick(Canvas canvas, Rect rect, BreakerBrick brick) {
+    if (brick.kind == BrickKind.barrier) {
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(rect, const Radius.circular(4)),
+        Paint()..color = AppColors.border,
+      );
+      return;
+    }
+
+    if (brick.kind == BrickKind.heavy) {
+      final t = (brick.hp / 18).clamp(0.0, 1.0);
+      _fillBrick(
+        canvas,
+        rect,
+        Color.lerp(const Color(0xFF2A1030), AppColors.wine, t)!,
+        Color.lerp(AppColors.wine, AppColors.accent, 1 - t)!,
+      );
+    } else {
+      final t = (brick.hp / 15).clamp(0.0, 1.0);
+      _fillBrick(
+        canvas,
+        rect,
+        Color.lerp(AppColors.wine, AppColors.accent, 1 - t)!,
+        AppColors.accentGlow,
+      );
+    }
+    _drawLabel(canvas, rect.center, '${brick.hp}');
+  }
+
+  void _fillBrick(Canvas canvas, Rect rect, Color fill, Color stroke) {
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(rect, const Radius.circular(6)),
+      Paint()..color = fill.withValues(alpha: 0.88),
+    );
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(rect, const Radius.circular(6)),
+      Paint()
+        ..color = stroke.withValues(alpha: 0.7)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.2,
+    );
+  }
+
+  void _drawLabel(Canvas canvas, Offset center, String text) {
+    final tp = TextPainter(
+      text: TextSpan(
+        text: text,
+        style: const TextStyle(
+          color: Colors.white,
+          fontSize: 13,
+          fontWeight: FontWeight.bold,
+        ),
+      ),
+      textDirection: TextDirection.ltr,
+    )..layout();
+    tp.paint(canvas, Offset(center.dx - tp.width / 2, center.dy - tp.height / 2));
+  }
+
+  void _drawBuriedPowerup(Canvas canvas, Offset c, MapPowerup p) {
+    final progress = 1 - (p.mineHp / p.mineMax);
+    canvas.drawCircle(
+      c,
+      13,
+      Paint()
+        ..color = _kindColor(p.kind).withValues(alpha: 0.12 + progress * 0.15)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2,
+    );
+    canvas.drawCircle(
+      c,
+      8,
+      Paint()..color = Colors.black.withValues(alpha: 0.45),
+    );
+    _drawKindIcon(canvas, c, p.kind, alpha: 0.35 + progress * 0.45);
+    _drawLabel(canvas, c, '${p.mineHp}');
+  }
+
+  void _drawArmedPowerup(Canvas canvas, Offset c, MapPowerup p, {bool dimmed = false}) {
+    final glow = dimmed ? 0.15 : 0.35;
+    final stroke = dimmed ? 0.45 : 0.85;
+
+    canvas.drawCircle(
+      c,
+      14,
+      Paint()
+        ..color = _kindColor(p.kind).withValues(alpha: glow)
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 6),
+    );
+    canvas.drawCircle(
+      c,
+      10,
+      Paint()
+        ..color = _kindColor(p.kind).withValues(alpha: stroke)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2.5,
+    );
+    _drawKindIcon(canvas, c, p.kind, alpha: dimmed ? 0.55 : 1);
+
+    if (p.waveHits > 0) {
+      final chargeTp = TextPainter(
+        text: TextSpan(
+          text: '${p.waveHits}',
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 11,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        textDirection: TextDirection.ltr,
+      )..layout();
+      chargeTp.paint(canvas, Offset(c.dx + 10, c.dy - 12));
+    }
+  }
+
+  Color _kindColor(PowerupKind kind) {
+    return switch (kind) {
+      PowerupKind.laser => Colors.redAccent,
+      PowerupKind.bomb => Colors.orangeAccent,
+      PowerupKind.ballPlus => AppColors.accentGlow,
+    };
+  }
+
+  void _drawKindIcon(Canvas canvas, Offset c, PowerupKind kind, {required double alpha}) {
+    switch (kind) {
+      case PowerupKind.laser:
+        _drawLaserIcon(canvas, c, alpha);
+      case PowerupKind.bomb:
+        _drawBombIcon(canvas, c, alpha);
+      case PowerupKind.ballPlus:
+        _drawPlusBallIcon(canvas, c, alpha);
+    }
+  }
+
+  void _drawLaserIcon(Canvas canvas, Offset c, double alpha) {
+    final paint = Paint()
+      ..color = Colors.white.withValues(alpha: alpha)
+      ..strokeWidth = 2
+      ..strokeCap = StrokeCap.round;
+    canvas.drawLine(Offset(c.dx - 7, c.dy), Offset(c.dx + 7, c.dy), paint);
+  }
+
+  void _drawBombIcon(Canvas canvas, Offset c, double alpha) {
+    canvas.drawCircle(
+      c.translate(0, 1),
+      4.5,
+      Paint()..color = Colors.white.withValues(alpha: alpha),
+    );
+  }
+
+  void _drawPlusBallIcon(Canvas canvas, Offset c, double alpha) {
+    canvas.drawCircle(c, 4, Paint()..color = Colors.white.withValues(alpha: alpha));
+    final plus = Paint()
+      ..color = AppColors.accent.withValues(alpha: alpha)
+      ..strokeWidth = 1.8
+      ..strokeCap = StrokeCap.round;
+    canvas.drawLine(Offset(c.dx - 2.5, c.dy), Offset(c.dx + 2.5, c.dy), plus);
+    canvas.drawLine(Offset(c.dx, c.dy - 2.5), Offset(c.dx, c.dy + 2.5), plus);
+  }
+
   void _drawBall(Canvas canvas, Offset c, {required bool glow}) {
     if (glow) {
       canvas.drawCircle(
@@ -157,32 +296,6 @@ class BrickBreakerPainter extends CustomPainter {
       );
     }
     canvas.drawCircle(c, BrickBreakerGame.ballRadius, Paint()..color = Colors.white);
-  }
-
-  void _drawBooster(Canvas canvas, Offset c) {
-    canvas.drawCircle(
-      c,
-      11,
-      Paint()
-        ..color = AppColors.accent.withValues(alpha: 0.25)
-        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 5),
-    );
-    canvas.drawCircle(c, 4, Paint()..color = Colors.white);
-
-    final ring = Paint()
-      ..color = AppColors.accentGlow.withValues(alpha: 0.9)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 2.2;
-    for (var i = 0; i < 4; i++) {
-      final start = i * math.pi / 2 + 0.35;
-      canvas.drawArc(
-        Rect.fromCircle(center: c, radius: 9),
-        start,
-        math.pi / 2 - 0.5,
-        false,
-        ring,
-      );
-    }
   }
 
   @override

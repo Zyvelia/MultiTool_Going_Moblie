@@ -142,7 +142,7 @@ class _BrickBreakerScreenState extends State<BrickBreakerScreen>
           const Padding(
             padding: EdgeInsets.fromLTRB(16, 0, 16, 16),
             child: Text(
-              'Drag from the ball to aim (bounces off walls) · Release to shoot',
+              'Mine buried powerups · Armed ones charge per ball hit · Gone after one wave',
               textAlign: TextAlign.center,
               style: TextStyle(color: AppColors.muted, fontSize: 12),
             ),
