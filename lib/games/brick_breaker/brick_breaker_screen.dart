@@ -71,6 +71,16 @@ class _BrickBreakerScreenState extends State<BrickBreakerScreen>
       appBar: AppBar(
         title: const Text('Brick Breaker'),
         actions: [
+          if (_game.phase == BreakerPhase.flying)
+            TextButton.icon(
+              onPressed: () {
+                _game.dropAllBalls();
+                setState(() {});
+              },
+              icon: const Icon(Icons.keyboard_double_arrow_down, size: 18),
+              label: const Text('Drop'),
+              style: TextButton.styleFrom(foregroundColor: AppColors.accentGlow),
+            ),
           IconButton(
             icon: const Icon(Icons.refresh),
             tooltip: 'Restart',
@@ -142,7 +152,7 @@ class _BrickBreakerScreenState extends State<BrickBreakerScreen>
           const Padding(
             padding: EdgeInsets.fromLTRB(16, 0, 16, 16),
             child: Text(
-              'Mine buried powerups · Armed ones charge per ball hit · Gone after one wave',
+              'Fly through +1 orbs to grow your ball count · Drop if stuck',
               textAlign: TextAlign.center,
               style: TextStyle(color: AppColors.muted, fontSize: 12),
             ),

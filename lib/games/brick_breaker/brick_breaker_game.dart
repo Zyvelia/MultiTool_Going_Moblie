@@ -30,6 +30,30 @@ class MapPowerup {
 
   bool get buried => phase == PowerupPhase.buried;
   bool get armed => phase == PowerupPhase.armed;
+
+  final Map<int, double> _nextHitFromBall = {};
+  static const hitGap = 0.07;
+
+  /// One charge per ball pass — no bounce, but not every overlap frame.
+  bool tryChargeFrom(BreakerBall ball, double volleyTime) {
+    final next = _nextHitFromBall[ball.id] ?? 0;
+    if (volleyTime < next) return false;
+    _nextHitFromBall[ball.id] = volleyTime + hitGap;
+    return true;
+  }
+
+  void resetVolleyHits() {
+    _nextHitFromBall.clear();
+    waveHits = 0;
+  }
+}
+
+/// Glowing +ball orb on empty cells — fly through to add a permanent ball.
+class BallBooster {
+  int row;
+  int col;
+
+  BallBooster({required this.row, required this.col});
 }
 
 class BreakerBrick {
@@ -55,6 +79,9 @@ class BreakerBall {
   double vy;
   bool active;
   final bool isFirst;
+  final int id;
+
+  static int _nextId = 0;
 
   BreakerBall({
     required this.x,
@@ -63,7 +90,7 @@ class BreakerBall {
     required this.vy,
     this.active = true,
     this.isFirst = false,
-  });
+  }) : id = _nextId++;
 }
 
 enum BreakerPhase { aiming, flying, gameOver, levelClear }
@@ -72,10 +99,12 @@ class BrickBreakerGame {
   static const ballRadius = 5.0;
   static const launcherY = 0.92;
   static const dangerY = 0.82;
+  static const gridTopY = 0.03;
   static const cols = 7;
-  static const rows = 10;
+  static const rows = 12;
   static const brickW = 1 / cols;
-  static const brickH = 0.042;
+  /// Rows span from [gridTopY] down to [dangerY] — no invisible floor where bricks vanish.
+  static const brickH = (dangerY - gridTopY) / rows;
   static const speed = 420.0;
   static const fireGap = 0.07;
 
@@ -94,10 +123,12 @@ class BrickBreakerGame {
   final List<BreakerBall> balls = [];
   final List<List<BreakerBrick?>> grid = [];
   final List<MapPowerup> powerups = [];
+  final List<BallBooster> ballBoosters = [];
   final List<LaserBeam> laserBeams = [];
 
   int _ballsLeftToFire = 0;
   double _fireCooldown = 0;
+  double _volleyTime = 0;
   double? _firstBallLandX;
 
   final math.Random _rng = math.Random();
@@ -121,6 +152,7 @@ class BrickBreakerGame {
     aimAngle = -math.pi / 2;
     balls.clear();
     powerups.clear();
+    ballBoosters.clear();
     laserBeams.clear();
     _ballsLeftToFire = 0;
     _fireCooldown = 0;
@@ -141,11 +173,13 @@ class BrickBreakerGame {
   void _spawnStarterBrick() {
     final col = _rng.nextInt(cols);
     grid[0][col] = _makeBrick(step: 0);
+    _seedBallBoosters(rowOnly: 0, extraChance: 0.35);
   }
 
   void _spawnLevel() {
     _initEmptyGrid();
     powerups.clear();
+    ballBoosters.clear();
     laserBeams.clear();
     final count = (2 + level).clamp(1, cols);
     final used = <int>{};
@@ -156,6 +190,7 @@ class BrickBreakerGame {
       grid[0][c] = _makeBrick(step: step + level * 3);
     }
     _seedBuriedPowerups(rowOnly: 0);
+    _seedBallBoosters(rowOnly: 0);
     phase = BreakerPhase.aiming;
   }
 
@@ -188,18 +223,37 @@ class BrickBreakerGame {
       grid[0][slots[i]] = _makeBrick(step: step);
     }
     _seedBuriedPowerups(rowOnly: 0);
+    _seedBallBoosters(rowOnly: 0);
+  }
+
+  void _seedBallBoosters({required int rowOnly, double extraChance = 0}) {
+    for (var c = 0; c < cols; c++) {
+      if (grid[rowOnly][c] != null) continue;
+      if (_powerupAt(rowOnly, c) != null) continue;
+      if (_boosterAt(rowOnly, c) != null) continue;
+      final chance = extraChance > 0 ? extraChance : (0.16 + step * 0.005);
+      if (_rng.nextDouble() > chance) continue;
+      ballBoosters.add(BallBooster(row: rowOnly, col: c));
+    }
+  }
+
+  BallBooster? _boosterAt(int row, int col) {
+    for (final b in ballBoosters) {
+      if (b.row == row && b.col == col) return b;
+    }
+    return null;
   }
 
   PowerupKind _randomPowerupKind() {
     final roll = _rng.nextDouble();
-    if (roll < 0.34) return PowerupKind.laser;
-    if (roll < 0.67) return PowerupKind.bomb;
+    if (roll < 0.40) return PowerupKind.laser;
+    if (roll < 0.75) return PowerupKind.bomb;
     return PowerupKind.ballPlus;
   }
 
   void _seedBuriedPowerups({required int rowOnly}) {
     if (step < 2) return;
-    final chance = 0.10 + step * 0.003;
+    final chance = 0.08 + step * 0.002;
     for (var c = 0; c < cols; c++) {
       if (grid[rowOnly][c] != null) continue;
       if (_powerupAt(rowOnly, c) != null) continue;
@@ -220,18 +274,21 @@ class BrickBreakerGame {
     return null;
   }
 
+  double rowTopPx(int r) => (gridTopY + r * brickH) * height;
+  double rowBottomPx(int r) => (gridTopY + (r + 1) * brickH) * height;
+
   ({double left, double top, double right, double bottom}) cellRect(int r, int c) {
     final left = c * brickW * width + 2;
-    final top = r * brickH * height + 8;
+    final top = rowTopPx(r) + 2;
     return (
       left: left,
       top: top,
       right: left + brickW * width - 4,
-      bottom: top + brickH * height - 4,
+      bottom: rowBottomPx(r) - 2,
     );
   }
 
-  double rowCenterY(int r) => r * brickH * height + 8 + (brickH * height - 4) / 2;
+  double rowCenterY(int r) => (rowTopPx(r) + rowBottomPx(r)) / 2;
 
   void setAimFromTouch(double nx, double ny) {
     if (phase != BreakerPhase.aiming) return;
@@ -250,10 +307,32 @@ class BrickBreakerGame {
     for (final p in powerups) {
       if (p.armed) {
         p.readyForWave = true;
-        p.waveHits = 0;
+        p.resetVolleyHits();
       }
     }
+    _volleyTime = 0;
     phase = BreakerPhase.flying;
+  }
+
+  /// Stop the volley early — drops every ball to the floor and ends the turn.
+  void dropAllBalls() {
+    if (phase != BreakerPhase.flying) return;
+
+    _ballsLeftToFire = 0;
+    final floor = launcherY * height;
+
+    for (final b in balls) {
+      if (!b.active) continue;
+      if (b.isFirst && _firstBallLandX == null) {
+        _firstBallLandX = b.x.clamp(ballRadius, width - ballRadius);
+      }
+      b.active = false;
+      b.y = floor;
+      b.vx = 0;
+      b.vy = 0;
+    }
+
+    _endVolley();
   }
 
   void _spawnNextBall() {
@@ -275,6 +354,8 @@ class BrickBreakerGame {
 
     if (phase == BreakerPhase.gameOver || phase == BreakerPhase.aiming) return;
 
+    _volleyTime += dt;
+
     if (_ballsLeftToFire > 0) {
       _fireCooldown -= dt;
       if (_fireCooldown <= 0) {
@@ -293,6 +374,7 @@ class BrickBreakerGame {
       _bounceOffWalls(b);
       _hitBricks(b);
       _hitPowerups(b);
+      _hitBallBoosters(b);
 
       final floor = launcherY * height;
       if (b.y >= floor) {
@@ -318,9 +400,9 @@ class BrickBreakerGame {
         if (brick == null || !brick.alive) continue;
 
         final left = c * brickW * width;
-        final top = r * brickH * height + 8;
+        final top = rowTopPx(r);
         final right = left + brickW * width - 4;
-        final bottom = top + brickH * height - 4;
+        final bottom = rowBottomPx(r) - 4;
 
         if (b.x + ballRadius < left ||
             b.x - ballRadius > right ||
@@ -351,28 +433,41 @@ class BrickBreakerGame {
         continue;
       }
 
+      if (!p.tryChargeFrom(b, _volleyTime)) continue;
+
       if (p.buried) {
         p.mineHp--;
         score += 5;
-        _reflectFromRect(b, rect.left, rect.top, rect.right, rect.bottom);
         if (p.mineHp <= 0) {
           p.phase = PowerupPhase.armed;
           p.readyForWave = false;
           score += 25;
         }
-        return;
+        continue;
       }
 
       if (p.armed && p.readyForWave) {
         p.waveHits++;
         score += 8;
-        return;
+      }
+      // Armed or buried — ball passes through, no bounce.
+    }
+  }
+
+  void _hitBallBoosters(BreakerBall b) {
+    for (var i = ballBoosters.length - 1; i >= 0; i--) {
+      final pick = ballBoosters[i];
+      final rect = cellRect(pick.row, pick.col);
+      if (b.x + ballRadius < rect.left ||
+          b.x - ballRadius > rect.right ||
+          b.y + ballRadius < rect.top ||
+          b.y - ballRadius > rect.bottom) {
+        continue;
       }
 
-      if (p.armed) {
-        _reflectFromRect(b, rect.left, rect.top, rect.right, rect.bottom);
-        return;
-      }
+      ballBoosters.removeAt(i);
+      ballsPerShot = (ballsPerShot + 1).clamp(1, 24);
+      score += 30;
     }
   }
 
@@ -459,6 +554,7 @@ class BrickBreakerGame {
     _resolveArmedPowerups();
 
     step++;
+    level++;
 
     if (_firstBallLandX != null) {
       launcherX = (_firstBallLandX! / width).clamp(0.08, 0.92);
@@ -473,7 +569,6 @@ class BrickBreakerGame {
     if (phase == BreakerPhase.gameOver) return;
 
     if (_allClear()) {
-      level++;
       score += 100 * level;
       _spawnLevel();
       phase = BreakerPhase.levelClear;
@@ -489,8 +584,7 @@ class BrickBreakerGame {
       for (var c = 0; c < cols; c++) {
         final brick = grid[r][c];
         if (brick == null || !brick.alive) continue;
-        final y = (r + 1) * brickH * height + 8;
-        if (y >= dangerY * height) {
+        if (rowBottomPx(r) >= dangerY * height) {
           phase = BreakerPhase.gameOver;
           highScore = math.max(highScore, score);
           return;
@@ -500,6 +594,16 @@ class BrickBreakerGame {
   }
 
   void _shiftWallDown() {
+    // Bottom row is the danger line — bricks here would fall off on the next push.
+    for (var c = 0; c < cols; c++) {
+      final brick = grid[rows - 1][c];
+      if (brick != null && brick.alive) {
+        phase = BreakerPhase.gameOver;
+        highScore = math.max(highScore, score);
+        return;
+      }
+    }
+
     for (var r = rows - 1; r > 0; r--) {
       for (var c = 0; c < cols; c++) {
         grid[r][c] = grid[r - 1][c];
@@ -512,6 +616,10 @@ class BrickBreakerGame {
       p.row++;
     }
     powerups.removeWhere((p) => p.row >= rows);
+    for (final pick in ballBoosters) {
+      pick.row++;
+    }
+    ballBoosters.removeWhere((p) => p.row >= rows);
   }
 
   bool _allClear() {

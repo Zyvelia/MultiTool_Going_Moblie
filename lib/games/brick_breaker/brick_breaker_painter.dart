@@ -61,12 +61,12 @@ class BrickBreakerPainter extends CustomPainter {
         if (brick == null || !brick.alive) continue;
 
         final left = c * BrickBreakerGame.brickW * size.width + 2;
-        final top = r * BrickBreakerGame.brickH * size.height + 8;
+        final top = game.rowTopPx(r) + 2;
         final rect = Rect.fromLTWH(
           left,
           top,
           BrickBreakerGame.brickW * size.width - 4,
-          BrickBreakerGame.brickH * size.height - 4,
+          game.rowBottomPx(r) - game.rowTopPx(r) - 4,
         );
         _drawBrick(canvas, rect, brick);
       }
@@ -83,6 +83,13 @@ class BrickBreakerPainter extends CustomPainter {
       } else {
         _drawArmedPowerup(canvas, Offset(cx, cy), p, dimmed: true);
       }
+    }
+
+    for (final pick in game.ballBoosters) {
+      final rect = game.cellRect(pick.row, pick.col);
+      final cx = (rect.left + rect.right) / 2;
+      final cy = (rect.top + rect.bottom) / 2;
+      _drawBallBooster(canvas, Offset(cx, cy));
     }
 
     if (game.phase == BreakerPhase.aiming) {
@@ -296,6 +303,43 @@ class BrickBreakerPainter extends CustomPainter {
       );
     }
     canvas.drawCircle(c, BrickBreakerGame.ballRadius, Paint()..color = Colors.white);
+  }
+
+  void _drawBallBooster(Canvas canvas, Offset c) {
+    canvas.drawCircle(
+      c,
+      13,
+      Paint()
+        ..color = AppColors.accent.withValues(alpha: 0.3)
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 6),
+    );
+    canvas.drawCircle(c, 5, Paint()..color = Colors.white);
+    final ring = Paint()
+      ..color = AppColors.accentGlow.withValues(alpha: 0.95)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2.4;
+    for (var i = 0; i < 4; i++) {
+      final start = i * math.pi / 2 + 0.35;
+      canvas.drawArc(
+        Rect.fromCircle(center: c, radius: 10),
+        start,
+        math.pi / 2 - 0.5,
+        false,
+        ring,
+      );
+    }
+    final plusTp = TextPainter(
+      text: const TextSpan(
+        text: '+1',
+        style: TextStyle(
+          color: Colors.white,
+          fontSize: 9,
+          fontWeight: FontWeight.bold,
+        ),
+      ),
+      textDirection: TextDirection.ltr,
+    )..layout();
+    plusTp.paint(canvas, Offset(c.dx + 8, c.dy - 10));
   }
 
   @override
