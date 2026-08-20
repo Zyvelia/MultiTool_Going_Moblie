@@ -132,70 +132,26 @@ jobs:
       - name: Generate launcher icons
         run: dart run flutter_launcher_icons
 
-      # Do NOT use `flutter build ios` — newer stable runs xcodebuild fine but
-      # then fails the Apple-team pre-check and never copies Runner.app.
-      # xcodebuild direct + signing disabled is the reliable unsigned path.
       - name: Patch iOS for unsigned build
         run: python3 scripts/patch_ios_unsigned.py
 
-      - name: Install pods
-        run: cd ios && pod install
-
-      - name: Build iOS with xcodebuild (unsigned)
+      # flutter build ios runs pod install + all Flutter Xcode phases itself.
+      # Raw xcodebuild skips embed/thin and breaks on [CP] Manifest.lock drift.
+      - name: Build iOS (unsigned, no codesign)
         run: |
-          set +e
-          # Clear macOS provenance xattrs — can break codesign on CI runners.
           xattr -cr . 2>/dev/null || true
+          flutter build ios --release --no-codesign
 
-          xcodebuild \
-            -workspace ios/Runner.xcworkspace \
-            -scheme Runner \
-            -configuration Release \
-            -sdk iphoneos \
-            -destination 'generic/platform=iOS' \
-            -derivedDataPath "$PWD/build/ios-derived" \
-            CODE_SIGNING_ALLOWED=NO \
-            CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGN_IDENTITY="-" \
-            CODE_SIGN_ENTITLEMENTS="" \
-            DEVELOPMENT_TEAM="" \
-            PROVISIONING_PROFILE_SPECIFIER="" \
-            EXPANDED_CODE_SIGN_IDENTITY="-" \
-            build 2>&1 | tee xcodebuild.log
-          XCODE_EXIT=${PIPESTATUS[0]}
-
-          APP="build/ios-derived/Build/Products/Release-iphoneos/Runner.app"
+      - name: Verify Runner.app bundle
+        run: |
+          APP="build/ios/iphoneos/Runner.app"
           if [ ! -d "$APP" ]; then
-            echo "xcodebuild failed with no Runner.app (exit ${XCODE_EXIT})"
-            grep -E 'error:|fatal error:|BUILD FAILED' xcodebuild.log | tail -40 || true
-            exit "${XCODE_EXIT:-1}"
-          fi
-
-          echo "Runner.app present after xcodebuild (exit ${XCODE_EXIT})"
-          chmod +x scripts/finalize_ios_bundle.sh
-          scripts/finalize_ios_bundle.sh "$APP"
-
-          if [ ! -f "$APP/Info.plist" ]; then
-            echo "ERROR: Info.plist still missing inside Runner.app"
+            echo "Runner.app not found at $APP — listing build/ios:" >&2
+            find build/ios -maxdepth 4 -type d 2>/dev/null || true
             exit 1
           fi
-
-          EXEC_NAME="$(python3 -c "import plistlib; print(plistlib.load(open('$APP/Info.plist','rb')).get('CFBundleExecutable','Runner'))")"
-          if [ ! -f "$APP/$EXEC_NAME" ]; then
-            echo "ERROR: main binary $APP/$EXEC_NAME missing — IPA would be uninstallable"
-            ls -la "$APP"
-            exit 1
-          fi
-          if [ ! -d "$APP/Frameworks/App.framework" ]; then
-            echo "ERROR: App.framework not embedded"
-            ls -la "$APP/Frameworks" 2>/dev/null || true
-            exit 1
-          fi
-          echo "Verified Runner binary + App.framework"
-
-          mkdir -p build/ios/iphoneos
-          rsync -a "$APP/" build/ios/iphoneos/Runner.app/
-          echo "Bundled Runner.app with Info.plist OK"
+          chmod +x scripts/verify_ios_bundle.sh
+          scripts/verify_ios_bundle.sh "$APP"
 
       - name: Package IPA
         run: |
