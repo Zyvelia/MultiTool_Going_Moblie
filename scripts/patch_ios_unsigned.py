@@ -6,28 +6,29 @@ import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+IOS_DEPLOYMENT_TARGET = "15.0"
 
-_PODFILE_TEMPLATE = """platform :ios, '13.0'
+_PODFILE_TEMPLATE = f"""platform :ios, '{IOS_DEPLOYMENT_TARGET}'
 
 ENV['COCOAPODS_DISABLE_STATS'] = 'true'
 
-project 'Runner', {
+project 'Runner', {{
   'Debug' => :debug,
   'Profile' => :release,
   'Release' => :release,
-}
+}}
 
 def flutter_root
   generated_xcode_build_settings_path = File.expand_path(File.join('..', 'Flutter', 'Generated.xcconfig'), __FILE__)
   unless File.exist?(generated_xcode_build_settings_path)
-    raise "#{generated_xcode_build_settings_path} must exist. Run flutter pub get first"
+    raise "#{{generated_xcode_build_settings_path}} must exist. Run flutter pub get first"
   end
 
   File.foreach(generated_xcode_build_settings_path) do |line|
     matches = line.match(/FLUTTER_ROOT=(.*)/)
     return matches[1].strip if matches
   end
-  raise "FLUTTER_ROOT not found in #{generated_xcode_build_settings_path}"
+  raise "FLUTTER_ROOT not found in #{{generated_xcode_build_settings_path}}"
 end
 
 require File.expand_path(File.join('packages', 'flutter_tools', 'bin', 'podhelper'), flutter_root)
@@ -44,6 +45,9 @@ end
 post_install do |installer|
   installer.pods_project.targets.each do |target|
     flutter_additional_ios_build_settings(target)
+    target.build_configurations.each do |config|
+      config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '{IOS_DEPLOYMENT_TARGET}'
+    end
   end
 end
 """
@@ -59,6 +63,14 @@ _POD_SIGNING_HOOK = """
     end
 """
 
+_DEPLOYMENT_TARGET_HOOK = f"""
+    installer.pods_project.targets.each do |target|
+      target.build_configurations.each do |config|
+        config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '{IOS_DEPLOYMENT_TARGET}'
+      end
+    end
+"""
+
 
 def ensure_podfile() -> None:
     path = ROOT / "ios/Podfile"
@@ -67,15 +79,53 @@ def ensure_podfile() -> None:
             raise SystemExit("ios/Podfile missing — run flutter pub get first")
         path.write_text(_PODFILE_TEMPLATE, encoding="utf-8")
         print(f"Created {path}")
+        return
 
     text = path.read_text(encoding="utf-8")
-    if "Unsigned CI" in text:
-        return
-    marker = "post_install do |installer|"
-    if marker not in text:
-        raise SystemExit(f"Could not find post_install in {path}")
-    path.write_text(text.replace(marker, marker + _POD_SIGNING_HOOK, 1), encoding="utf-8")
-    print(f"Patched pod signing in {path}")
+    original = text
+
+    # Raise platform floor — Flutter stable requires >= 15.0 on recent Xcode.
+    text = re.sub(
+        r"^#?\s*platform\s+:ios,\s*['\"]?\d+(?:\.\d+)?['\"]?\s*$",
+        f"platform :ios, '{IOS_DEPLOYMENT_TARGET}'",
+        text,
+        count=1,
+        flags=re.MULTILINE,
+    )
+    if not re.search(r"^platform\s+:ios,", text, flags=re.MULTILINE):
+        text = f"platform :ios, '{IOS_DEPLOYMENT_TARGET}'\n\n" + text
+
+    if "IPHONEOS_DEPLOYMENT_TARGET" not in text and "post_install do |installer|" in text:
+        text = text.replace(
+            "post_install do |installer|",
+            "post_install do |installer|" + _DEPLOYMENT_TARGET_HOOK,
+            1,
+        )
+
+    if "Unsigned CI" not in text and "post_install do |installer|" in text:
+        text = text.replace(
+            "post_install do |installer|",
+            "post_install do |installer|" + _POD_SIGNING_HOOK,
+            1,
+        )
+
+    if text != original:
+        path.write_text(text, encoding="utf-8")
+        print(f"Patched {path} (platform {IOS_DEPLOYMENT_TARGET})")
+
+
+def bump_pbxproj_deployment_target() -> None:
+    path = ROOT / "ios/Runner.xcodeproj/project.pbxproj"
+    text = path.read_text(encoding="utf-8")
+    original = text
+    text = re.sub(
+        r"IPHONEOS_DEPLOYMENT_TARGET = \d+(?:\.\d+)?;",
+        f"IPHONEOS_DEPLOYMENT_TARGET = {IOS_DEPLOYMENT_TARGET};",
+        text,
+    )
+    if text != original:
+        path.write_text(text, encoding="utf-8")
+        print(f"Set IPHONEOS_DEPLOYMENT_TARGET = {IOS_DEPLOYMENT_TARGET} in {path}")
 
 
 def strip_pbxproj_signing() -> None:
@@ -92,6 +142,7 @@ def strip_pbxproj_signing() -> None:
 
 def main() -> None:
     ensure_podfile()
+    bump_pbxproj_deployment_target()
     strip_pbxproj_signing()
     print("iOS unsigned-build patches applied.")
 
