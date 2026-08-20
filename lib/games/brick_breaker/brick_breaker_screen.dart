@@ -764,6 +764,14 @@ class _BrickBreakerScreenState extends State<BrickBreakerScreen>
                                           bottom: 8,
                                           child: _dropSideButton(),
                                         ),
+                                      if (_game.lastAnomaly != null)
+                                        Positioned(
+                                          left: 6,
+                                          right: 6,
+                                          top: 6,
+                                          child: _anomalyBanner(
+                                              _game.lastAnomaly!),
+                                        ),
                                     ],
                                   ),
                                 ),
@@ -1021,6 +1029,30 @@ class _BrickBreakerScreenState extends State<BrickBreakerScreen>
   String _dateKeyNow() {
     final n = DateTime.now();
     return '${n.year}-${n.month.toString().padLeft(2, '0')}-${n.day.toString().padLeft(2, '0')}';
+  }
+
+  /// Only rendered after a ball is retired abnormally, so a screenshot tells us
+  /// what the physics saw. Tap to dismiss.
+  Widget _anomalyBanner(String text) {
+    return GestureDetector(
+      onTap: () => setState(() => _game.lastAnomaly = null),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+        decoration: BoxDecoration(
+          color: Colors.red.withValues(alpha: 0.82),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Text(
+          text,
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 9,
+            height: 1.25,
+            fontFamily: 'monospace',
+          ),
+        ),
+      ),
+    );
   }
 
   Widget _dropSideButton() {

@@ -215,12 +215,31 @@ class BrickBreakerGame {
   double sideFlash = 0;
   double nukePulse = 0;
 
+  /// Set only when a ball is retired abnormally. Surfaced on screen so a
+  /// screenshot identifies the cause; stays null during healthy play.
+  String? lastAnomaly;
+
   final math.Random _rng = math.Random();
 
   void Function(String name)? onSfx;
   BrickBreakerGameplaySettings? gameplaySettings;
 
   void _sfx(String name) => onSfx?.call(name);
+
+  static String _fmt(double v) => v.isFinite ? v.toStringAsFixed(1) : '$v';
+
+  void _noteAnomaly(String why, BreakerBall? b, {String? extra}) {
+    lastAnomaly = [
+      why,
+      if (b != null) 'pos ${_fmt(b.x)},${_fmt(b.y)}',
+      if (b != null) 'vel ${_fmt(b.vx)},${_fmt(b.vy)}',
+      'board ${_fmt(width)}x${_fmt(height)}',
+      'lv$level balls$ballsPerShot left$_ballsLeftToFire',
+      'aim ${_fmt(aimAngle)} lx ${_fmt(launcherX)}',
+      't ${_fmt(_volleyTime)} mul ${_fmt(_lastBallSpeedMul)}',
+      if (extra != null) extra,
+    ].join('  ');
+  }
 
   void resize(double w, double h) {
     if (!w.isFinite || !h.isFinite || w <= 0 || h <= 0) return;
@@ -247,6 +266,7 @@ class BrickBreakerGame {
   void reset({bool keepHighScore = true}) {
     unawaited(BrickBreakerSave.clear(mode));
     _sfx('stopDangerWarn');
+    lastAnomaly = null;
     final hs = keepHighScore ? highScore : 0;
     score = 0;
     level = 1;
@@ -1062,6 +1082,7 @@ class BrickBreakerGame {
     _volleyTime += dt;
 
     if (phase == BreakerPhase.flying && _volleyTime > volleyTimeout) {
+      _noteAnomaly('volley timeout', _firstLeadBall());
       dropAllBalls();
       return;
     }
@@ -1088,6 +1109,7 @@ class BrickBreakerGame {
         _hitBallBoosters(b);
       } catch (e, st) {
         debugPrint('BrickBreaker ball step failed, retiring ball: $e\n$st');
+        _noteAnomaly('threw', b, extra: '$e');
         b.vx = double.nan;
       }
 
@@ -1103,6 +1125,9 @@ class BrickBreakerGame {
       // invisible and unable to ever reach the floor test below.
       final offBoard =
           finite && (b.x < -width || b.x > width * 2 || b.y < -height * 2);
+      if (!finite || offBoard) {
+        _noteAnomaly(finite ? 'off-board' : 'non-finite', b);
+      }
       if (!finite ||
           offBoard ||
           (b.y >= floor && (b.vy >= 0 || b.y > floor + ballRadius))) {
