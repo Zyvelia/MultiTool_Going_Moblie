@@ -33,6 +33,7 @@ flutter:
   assets:
     - assets/icon/icon.png
     - assets/games/brick_breaker/music/
+    - assets/games/brick_breaker/sfx/
 
 flutter_launcher_icons:
   android: true

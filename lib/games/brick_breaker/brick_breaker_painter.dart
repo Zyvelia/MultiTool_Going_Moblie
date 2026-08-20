@@ -31,8 +31,10 @@ class BrickBreakerPainter extends CustomPainter {
       Offset(0, dangerY),
       Offset(size.width, dangerY),
       Paint()
-        ..color = Colors.redAccent.withValues(alpha: 0.45)
-        ..strokeWidth = 1.2,
+        ..color = game.dangerWarning
+            ? Colors.redAccent.withValues(alpha: 0.95)
+            : Colors.redAccent.withValues(alpha: 0.45)
+        ..strokeWidth = game.dangerWarning ? 2.4 : 1.2,
     );
 
     for (final beam in game.laserBeams) {
@@ -45,7 +47,7 @@ class BrickBreakerPainter extends CustomPainter {
         ..color = Colors.white.withValues(alpha: alpha * 0.8)
         ..strokeWidth = 1.2;
 
-      final x = (beam.col + 0.5) * BrickBreakerGame.brickW * size.width;
+      final x = game.colLeftPx(beam.col) + BrickBreakerGame.brickW * size.width * 0.5;
       final y = game.rowCenterY(beam.row);
       final yTop = game.rowTopPx(0);
 
@@ -74,7 +76,7 @@ class BrickBreakerPainter extends CustomPainter {
         final brick = game.grid[r][c];
         if (brick == null || !brick.alive) continue;
 
-        final left = c * BrickBreakerGame.brickW * size.width + 2;
+        final left = game.colLeftPx(c) + 2;
         final top = game.rowTopPx(r) + 2;
         final rect = Rect.fromLTWH(
           left,

@@ -1,4 +1,7 @@
 import 'dart:math' as math;
+
+import 'brick_breaker_awards.dart';
+import 'brick_breaker_mode.dart';
 import 'dart:ui';
 
 enum BrickKind { normal, heavy, barrier }
@@ -120,6 +123,12 @@ class BrickBreakerGame {
   int ballsPerShot = 1;
   int step = 0;
   BreakerPhase phase = BreakerPhase.aiming;
+  BrickBreakerMode mode = BrickBreakerMode.endless;
+  double gridDriftY = 0;
+  double gridDriftX = 0;
+  double _siegeTime = 0;
+  bool dangerWarning = false;
+  int _lastWarnMs = 0;
 
   final List<BreakerBall> balls = [];
   final List<List<BreakerBrick?>> grid = [];
@@ -135,6 +144,10 @@ class BrickBreakerGame {
   final math.Random _rng = math.Random();
 
   void Function(String name)? onSfx;
+  void Function(int score)? onFullClear;
+
+  BrickBreakerScoreAward? lastClearAward;
+  BrickBreakerScoreAward? lastScoreAward;
 
   void _sfx(String name) => onSfx?.call(name);
 
@@ -145,6 +158,15 @@ class BrickBreakerGame {
 
   double get launcherPx => launcherX * width;
   double get launcherPy => launcherY * height;
+
+  void configureMode(BrickBreakerMode gameMode, {required int storedHighScore}) {
+    mode = gameMode;
+    gridDriftY = 0;
+    gridDriftX = 0;
+    _siegeTime = 0;
+    highScore = storedHighScore;
+    reset(keepHighScore: true);
+  }
 
   void reset({bool keepHighScore = true}) {
     final hs = keepHighScore ? highScore : 0;
@@ -162,6 +184,12 @@ class BrickBreakerGame {
     _ballsLeftToFire = 0;
     _fireCooldown = 0;
     _firstBallLandX = null;
+    lastClearAward = null;
+    lastScoreAward = null;
+    gridDriftY = 0;
+    gridDriftX = 0;
+    _siegeTime = 0;
+    dangerWarning = false;
     highScore = hs;
     _initEmptyGrid();
     _spawnStarterBrick();
@@ -279,11 +307,12 @@ class BrickBreakerGame {
     return null;
   }
 
-  double rowTopPx(int r) => (gridTopY + r * brickH) * height;
-  double rowBottomPx(int r) => (gridTopY + (r + 1) * brickH) * height;
+  double rowTopPx(int r) => (gridTopY + r * brickH) * height + gridDriftY;
+  double rowBottomPx(int r) => (gridTopY + (r + 1) * brickH) * height + gridDriftY;
+  double colLeftPx(int c) => c * brickW * width + gridDriftX;
 
   ({double left, double top, double right, double bottom}) cellRect(int r, int c) {
-    final left = c * brickW * width + 2;
+    final left = colLeftPx(c) + 2;
     final top = rowTopPx(r) + 2;
     return (
       left: left,
@@ -356,6 +385,16 @@ class BrickBreakerGame {
     for (var i = laserBeams.length - 1; i >= 0; i--) {
       laserBeams[i].life -= dt;
       if (laserBeams[i].life <= 0) laserBeams.removeAt(i);
+    }
+
+    if (mode == BrickBreakerMode.siege &&
+        phase != BreakerPhase.gameOver &&
+        phase != BreakerPhase.levelClear) {
+      _siegeUpdate(dt);
+    }
+
+    if (phase != BreakerPhase.gameOver && phase != BreakerPhase.levelClear) {
+      _updateDangerWarning();
     }
 
     if (phase == BreakerPhase.gameOver || phase == BreakerPhase.aiming) return;
@@ -533,10 +572,89 @@ class BrickBreakerGame {
     }
   }
 
+  double _dangerLinePx() => dangerY * height;
+
+  String _brickLineState(int r) {
+    final line = _dangerLinePx();
+    final top = rowTopPx(r);
+    final bottom = rowBottomPx(r);
+    if (top >= line) return 'over';
+    if (bottom >= line) return 'warn';
+    return 'safe';
+  }
+
+  void _updateDangerWarning() {
+    if (phase == BreakerPhase.gameOver || phase == BreakerPhase.levelClear) {
+      dangerWarning = false;
+      return;
+    }
+    var warn = false;
+    for (var r = 0; r < rows; r++) {
+      for (var c = 0; c < cols; c++) {
+        if (!_countsTowardLoss(grid[r][c])) continue;
+        if (_brickLineState(r) == 'warn') {
+          warn = true;
+          break;
+        }
+      }
+      if (warn) break;
+    }
+    dangerWarning = warn;
+    if (warn) {
+      final now = DateTime.now().millisecondsSinceEpoch;
+      if (now - _lastWarnMs > 1400) {
+        _lastWarnMs = now;
+        _sfx('dangerWarn');
+      }
+    }
+  }
+
+  bool _bottomRowBlocked() {
+    for (var c = 0; c < cols; c++) {
+      if (_countsTowardLoss(grid[rows - 1][c])) return true;
+    }
+    return false;
+  }
+
+  void _siegeUpdate(double dt) {
+    _siegeTime += dt;
+    final rowPx = brickH * height;
+    final speed = 10 + level * 1.4 + step * 0.12;
+    gridDriftY += speed * dt;
+    gridDriftX = math.sin(_siegeTime * 0.9) * (8 + level * 0.35);
+    while (gridDriftY >= rowPx) {
+      gridDriftY -= rowPx;
+      if (_shiftGridDown()) return;
+    }
+    _checkGameOver();
+  }
+
+  bool _shiftGridDown() {
+    for (var r = rows - 1; r > 0; r--) {
+      for (var c = 0; c < cols; c++) {
+        grid[r][c] = grid[r - 1][c];
+      }
+    }
+    for (var c = 0; c < cols; c++) {
+      grid[0][c] = null;
+    }
+    for (final p in lasers) {
+      p.row++;
+    }
+    lasers.removeWhere((p) => p.row >= rows);
+    for (final pick in ballBoosters) {
+      pick.row++;
+    }
+    ballBoosters.removeWhere((p) => p.row >= rows);
+    final rowPx = brickH * height;
+    gridDriftY = math.max(0, gridDriftY - rowPx);
+    return false;
+  }
+
   ({double left, double top, double right, double bottom})? _brickBoundsAt(int r, int c) {
     final brick = grid[r][c];
     if (brick == null || !brick.alive) return null;
-    final left = c * brickW * width;
+    final left = colLeftPx(c);
     final top = rowTopPx(r);
     return (
       left: left,
@@ -544,6 +662,11 @@ class BrickBreakerGame {
       right: left + brickW * width - 4,
       bottom: rowBottomPx(r) - 4,
     );
+  }
+
+  void _shiftWallDown() {
+    if (_bottomRowBlocked()) return;
+    _shiftGridDown();
   }
 
   bool _ballOverlapsRect(
@@ -633,9 +756,11 @@ class BrickBreakerGame {
 
     if (_allClear()) {
       score += 100 * level;
+      if (level >= 9999) score += 999999;
       _spawnLevel();
       phase = BreakerPhase.levelClear;
       _sfx('levelClear');
+      onFullClear?.call(score);
       return;
     }
 
@@ -651,43 +776,15 @@ class BrickBreakerGame {
       for (var c = 0; c < cols; c++) {
         final brick = grid[r][c];
         if (!_countsTowardLoss(brick)) continue;
-        if (rowBottomPx(r) >= dangerY * height) {
+        if (_brickLineState(r) == 'over') {
           phase = BreakerPhase.gameOver;
+          dangerWarning = false;
           highScore = math.max(highScore, score);
           _sfx('gameOver');
           return;
         }
       }
     }
-  }
-
-  void _shiftWallDown() {
-    // Bottom row is the danger line — destructible bricks here end the run on the next push.
-    for (var c = 0; c < cols; c++) {
-      if (_countsTowardLoss(grid[rows - 1][c])) {
-        phase = BreakerPhase.gameOver;
-        highScore = math.max(highScore, score);
-        _sfx('gameOver');
-        return;
-      }
-    }
-
-    for (var r = rows - 1; r > 0; r--) {
-      for (var c = 0; c < cols; c++) {
-        grid[r][c] = grid[r - 1][c];
-      }
-    }
-    for (var c = 0; c < cols; c++) {
-      grid[0][c] = null;
-    }
-    for (final p in lasers) {
-      p.row++;
-    }
-    lasers.removeWhere((p) => p.row >= rows);
-    for (final pick in ballBoosters) {
-      pick.row++;
-    }
-    ballBoosters.removeWhere((p) => p.row >= rows);
   }
 
   bool _allClear() {
@@ -702,6 +799,8 @@ class BrickBreakerGame {
   void acknowledgeLevelClear() {
     if (phase == BreakerPhase.levelClear) {
       phase = BreakerPhase.aiming;
+      lastClearAward = null;
+      lastScoreAward = null;
     }
   }
 

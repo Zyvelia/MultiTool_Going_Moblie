@@ -1,4 +1,6 @@
+import 'dart:async';
 import 'dart:convert';
+import 'dart:math';
 
 import 'package:flutter/services.dart';
 import 'package:just_audio/just_audio.dart';
@@ -66,9 +68,14 @@ class BrickBreakerAudio {
   BrickBreakerAudioSettings settings = BrickBreakerAudioSettings();
   int _currentLevel = 1;
   String? _playingAsset;
+  String? _randomAsset;
   bool _pausedForLifecycle = false;
   DateTime _lastBounce = DateTime.fromMillisecondsSinceEpoch(0);
   DateTime _lastHit = DateTime.fromMillisecondsSinceEpoch(0);
+  DateTime _lastDangerWarn = DateTime.fromMillisecondsSinceEpoch(0);
+  AudioPlayer? _warnPlayer;
+  bool _warnAssetReady = false;
+  StreamSubscription<PlayerState>? _playerSub;
 
   List<BrickBreakerSoundtrackOption> get soundtracks {
     final list = <BrickBreakerSoundtrackOption>[
@@ -77,20 +84,47 @@ class BrickBreakerAudio {
         label: 'Auto (changes with level)',
       ),
       const BrickBreakerSoundtrackOption(
-        id: brickBreakerDefaultMusic,
-        label: 'bgm.mp3',
-        asset: brickBreakerDefaultMusic,
+        id: 'random',
+        label: 'Random (shuffle on end)',
       ),
     ];
-    for (final entry in brickBreakerMusicLevels) {
-      final name = entry.asset.split('/').last;
+    for (final asset in brickBreakerMusicPool) {
+      final name = asset.split('/').last;
+      String label = name;
+      for (final entry in brickBreakerMusicLevels) {
+        if (entry.asset == asset) {
+          label = '$name (level ${entry.level}+)';
+          break;
+        }
+      }
+      for (final extra in brickBreakerExtraMusic) {
+        if (extra.asset == asset) {
+          label = extra.label;
+          break;
+        }
+      }
       list.add(BrickBreakerSoundtrackOption(
-        id: entry.asset,
-        label: '$name (level ${entry.level}+)',
-        asset: entry.asset,
+        id: asset,
+        label: label,
+        asset: asset,
       ));
     }
     return list;
+  }
+
+  String _pickRandomAsset({String? exclude}) {
+    final pool = brickBreakerMusicPool;
+    if (pool.isEmpty) return brickBreakerDefaultMusic;
+    if (pool.length == 1) return pool.first;
+    final candidates = exclude == null
+        ? pool
+        : pool.where((a) => a != exclude).toList();
+    final pickFrom = candidates.isEmpty ? pool : candidates;
+    return pickFrom[Random().nextInt(pickFrom.length)];
+  }
+
+  void _refreshRandomAsset({required bool forceNew}) {
+    _randomAsset = _pickRandomAsset(exclude: forceNew ? _randomAsset ?? _playingAsset : null);
   }
 
   Future<void> init() async {
@@ -103,8 +137,60 @@ class BrickBreakerAudio {
         );
       } catch (_) {}
     }
-    await _player.setLoopMode(LoopMode.one);
+    if (settings.soundtrackPick == 'random') {
+      _refreshRandomAsset(forceNew: false);
+    }
+    _playerSub = _player.playerStateStream.listen((state) {
+      if (state.processingState == ProcessingState.completed) {
+        unawaited(_onBgmCompleted());
+      }
+    });
+    await _applyLoopMode();
     await _applyVolume();
+    await _initWarnSfx();
+  }
+
+  Future<void> _applyLoopMode() async {
+    await _player.setLoopMode(
+      settings.soundtrackPick == 'random' ? LoopMode.off : LoopMode.one,
+    );
+  }
+
+  Future<void> _onBgmCompleted() async {
+    if (!settings.music || !settings.useCustomMusic) return;
+    if (settings.soundtrackPick != 'random') return;
+    _refreshRandomAsset(forceNew: true);
+    final asset = _randomAsset;
+    if (asset == null) return;
+    await _playAsset(asset, restart: true);
+  }
+
+  Future<void> _initWarnSfx() async {
+    try {
+      final player = AudioPlayer();
+      await player.setAsset(brickBreakerWarnSound);
+      await player.setVolume(brickBreakerWarnVolume);
+      _warnPlayer?.dispose();
+      _warnPlayer = player;
+      _warnAssetReady = true;
+    } catch (_) {
+      _warnAssetReady = false;
+    }
+  }
+
+  void dangerWarn() {
+    if (!settings.ui) return;
+    final now = DateTime.now();
+    if (now.difference(_lastDangerWarn).inMilliseconds < 1400) return;
+    _lastDangerWarn = now;
+    if (_warnAssetReady && _warnPlayer != null) {
+      _warnPlayer!
+        ..setVolume(brickBreakerWarnVolume)
+        ..seek(Duration.zero)
+        ..play();
+      return;
+    }
+    HapticFeedback.mediumImpact();
   }
 
   Future<void> _applyVolume() async {
@@ -117,14 +203,14 @@ class BrickBreakerAudio {
     await _applyVolume();
   }
 
-  Future<int> loadHighScore() async {
+  Future<int> loadHighScore({String? key}) async {
     final prefs = await SharedPreferences.getInstance();
-    return prefs.getInt(_hsKey) ?? 0;
+    return prefs.getInt(key ?? _hsKey) ?? 0;
   }
 
-  Future<void> saveHighScore(int score) async {
+  Future<void> saveHighScore(int score, {String? key}) async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setInt(_hsKey, score);
+    await prefs.setInt(key ?? _hsKey, score);
   }
 
   Future<void> saveSettings() async {
@@ -155,7 +241,13 @@ class BrickBreakerAudio {
 
   Future<void> setSoundtrackPick(String id) async {
     settings.soundtrackPick = id;
+    if (id == 'random') {
+      _refreshRandomAsset(forceNew: false);
+    } else {
+      _randomAsset = null;
+    }
     await saveSettings();
+    await _applyLoopMode();
     await _syncBgm(force: true);
   }
 
@@ -169,6 +261,10 @@ class BrickBreakerAudio {
 
   String? _resolveAsset() {
     if (!settings.music || !settings.useCustomMusic) return null;
+    if (settings.soundtrackPick == 'random') {
+      _randomAsset ??= _pickRandomAsset();
+      return _randomAsset;
+    }
     if (settings.soundtrackPick != 'auto') {
       for (final t in soundtracks) {
         if (t.id == settings.soundtrackPick && t.asset != null) return t.asset;
@@ -179,6 +275,12 @@ class BrickBreakerAudio {
 
   Future<void> setLevel(int level) async {
     _currentLevel = level;
+    if (settings.soundtrackPick == 'random') {
+      _refreshRandomAsset(forceNew: true);
+      final asset = _randomAsset;
+      if (asset != null) await _playAsset(asset, restart: false);
+      return;
+    }
     if (settings.soundtrackPick != 'auto') return;
     final next = _assetForLevel(level);
     if (next != null && next != _playingAsset) {
@@ -208,6 +310,7 @@ class BrickBreakerAudio {
     }
 
     _pausedForLifecycle = false;
+    await _applyLoopMode();
     await _applyVolume();
     if (!_player.playing) {
       await _player.play();
@@ -285,6 +388,8 @@ class BrickBreakerAudio {
   }
 
   Future<void> dispose() async {
+    await _playerSub?.cancel();
+    await _warnPlayer?.dispose();
     await _player.dispose();
   }
 }

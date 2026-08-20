@@ -2,11 +2,15 @@ import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import '../../theme/app_colors.dart';
 import 'brick_breaker_audio.dart';
+import 'brick_breaker_awards.dart';
 import 'brick_breaker_game.dart';
+import 'brick_breaker_mode.dart';
 import 'brick_breaker_painter.dart';
 
 class BrickBreakerScreen extends StatefulWidget {
-  const BrickBreakerScreen({super.key});
+  final BrickBreakerMode mode;
+
+  const BrickBreakerScreen({super.key, this.mode = BrickBreakerMode.endless});
 
   @override
   State<BrickBreakerScreen> createState() => _BrickBreakerScreenState();
@@ -19,6 +23,7 @@ class _BrickBreakerScreenState extends State<BrickBreakerScreen>
   late Ticker _ticker;
   Duration? _lastTick;
   bool _audioReady = false;
+  int _awardScoreSnapshot = 0;
 
   @override
   void initState() {
@@ -30,10 +35,11 @@ class _BrickBreakerScreenState extends State<BrickBreakerScreen>
 
   Future<void> _boot() async {
     await _audio.init();
-    final hs = await _audio.loadHighScore();
+    final hs = await _audio.loadHighScore(key: widget.mode.highScoreKey);
     _game.highScore = hs;
     _game.onSfx = _handleSfx;
-    _game.reset();
+    _game.onFullClear = _recordFullClear;
+    _game.configureMode(widget.mode, storedHighScore: hs);
     await _audio.setLevel(_game.level);
     if (mounted) {
       setState(() => _audioReady = true);
@@ -54,6 +60,8 @@ class _BrickBreakerScreenState extends State<BrickBreakerScreen>
         _audio.booster();
       case 'levelClear':
         _audio.levelClear();
+      case 'dangerWarn':
+        _audio.dangerWarn();
       case 'gameOver':
         _audio.gameOver();
         _persistHighScore();
@@ -62,7 +70,7 @@ class _BrickBreakerScreenState extends State<BrickBreakerScreen>
 
   Future<void> _persistHighScore() async {
     if (_game.highScore > 0) {
-      await _audio.saveHighScore(_game.highScore);
+      await _audio.saveHighScore(_game.highScore, key: widget.mode.highScoreKey);
     }
   }
 
@@ -73,6 +81,10 @@ class _BrickBreakerScreenState extends State<BrickBreakerScreen>
     final dt = (elapsed - prev).inMicroseconds / 1e6;
     final prevLevel = _game.level;
     _game.update(dt.clamp(0, 0.032));
+    if (_game.score != _awardScoreSnapshot) {
+      _awardScoreSnapshot = _game.score;
+      _checkScoreAward();
+    }
     if (_game.level != prevLevel && _audioReady) {
       _audio.setLevel(_game.level);
     }
@@ -127,10 +139,23 @@ class _BrickBreakerScreenState extends State<BrickBreakerScreen>
       setState(() {});
     } else if (_game.phase == BreakerPhase.gameOver) {
       _game.reset();
+      _awardScoreSnapshot = 0;
       _audio.setLevel(_game.level);
       _audio.startBgm(force: true);
       setState(() {});
     }
+  }
+
+  Future<void> _checkScoreAward() async {
+    final bump = await BrickBreakerAwards.updateScore(_game.score);
+    if (bump != null) _game.lastScoreAward = bump;
+  }
+
+  Future<void> _recordFullClear(int score) async {
+    final award = await BrickBreakerAwards.recordFullClear(score);
+    _game.lastClearAward = award;
+    if (award.isNew) _game.lastScoreAward = award;
+    _awardScoreSnapshot = score;
   }
 
   Future<void> _openSettings() async {
@@ -254,7 +279,12 @@ class _BrickBreakerScreenState extends State<BrickBreakerScreen>
     return Scaffold(
       backgroundColor: AppColors.bg,
       appBar: AppBar(
-        title: const Text('Brick Breaker'),
+        title: Text('Brick Breaker · ${widget.mode.title}'),
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          tooltip: 'Mode menu',
+          onPressed: () => Navigator.of(context).pop(),
+        ),
         actions: [
           IconButton(
             icon: const Icon(Icons.settings),
@@ -273,81 +303,94 @@ class _BrickBreakerScreenState extends State<BrickBreakerScreen>
           ),
         ],
       ),
-      body: Column(
+      body: Stack(
         children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
-            child: Row(
-              children: [
-                _chip('Score', '${_game.score}'),
-                const SizedBox(width: 8),
-                _chip('Level', '${_game.level}'),
-                const SizedBox(width: 8),
-                _chip('Balls', '${_game.ballsPerShot}'),
-                const Spacer(),
-                Text(
-                  'Best ${_game.highScore}',
-                  style: const TextStyle(color: AppColors.muted, fontSize: 12),
-                ),
-              ],
-            ),
-          ),
-          Expanded(
-            child: Padding(
-              padding: const EdgeInsets.all(12),
-              child: LayoutBuilder(
-                builder: (context, box) {
-                  return GestureDetector(
-                    onPanStart: (d) => _onPanStart(d, box),
-                    onPanUpdate: (d) => _onPanUpdate(d, box),
-                    onPanEnd: _onPanEnd,
-                    onTap: _onTap,
-                    child: DecoratedBox(
-                      decoration: BoxDecoration(
-                        color: AppColors.card,
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: AppColors.border),
-                        boxShadow: [
-                          BoxShadow(
-                            color: AppColors.accent.withValues(alpha: 0.08),
-                            blurRadius: 24,
-                          ),
-                        ],
-                      ),
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(12),
-                        child: Stack(
-                          fit: StackFit.expand,
-                          children: [
-                            CustomPaint(
-                              painter: BrickBreakerPainter(_game),
-                            ),
-                            if (_overlay() != null) _overlay()!,
-                            if (_game.phase == BreakerPhase.flying)
-                              Positioned(
-                                right: 6,
-                                top: 0,
-                                bottom: 0,
-                                child: Center(
-                                  child: _dropSideButton(),
-                                ),
-                              ),
-                          ],
-                        ),
-                      ),
+          Column(
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+                child: Row(
+                  children: [
+                    _chip('Score', '${_game.score}'),
+                    const SizedBox(width: 8),
+                    _chip('Level', '${_game.level}'),
+                    const SizedBox(width: 8),
+                    _chip('Mode', widget.mode.title),
+                    const SizedBox(width: 8),
+                    _chip('Balls', '${_game.ballsPerShot}'),
+                    const Spacer(),
+                    Text(
+                      'Best ${_game.highScore}',
+                      style: const TextStyle(color: AppColors.muted, fontSize: 12),
                     ),
-                  );
-                },
+                  ],
+                ),
               ),
-            ),
-          ),
-          const Padding(
-            padding: EdgeInsets.fromLTRB(16, 0, 16, 16),
-            child: Text(
-              'Drag to aim · Release to shoot · Fly through +1 orbs & lasers',
-              textAlign: TextAlign.center,
-              style: TextStyle(color: AppColors.muted, fontSize: 12),
-            ),
+              if (widget.mode == BrickBreakerMode.siege)
+                const Padding(
+                  padding: EdgeInsets.fromLTRB(16, 0, 16, 4),
+                  child: Text(
+                    'Siege: the wall keeps creeping — destroy bricks before they reach the line.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: AppColors.muted, fontSize: 11),
+                  ),
+                ),
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: LayoutBuilder(
+                    builder: (context, box) {
+                      return GestureDetector(
+                        onPanStart: (d) => _onPanStart(d, box),
+                        onPanUpdate: (d) => _onPanUpdate(d, box),
+                        onPanEnd: _onPanEnd,
+                        onTap: _onTap,
+                        child: DecoratedBox(
+                          decoration: BoxDecoration(
+                            color: AppColors.card,
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: AppColors.border),
+                            boxShadow: [
+                              BoxShadow(
+                                color: AppColors.accent.withValues(alpha: 0.08),
+                                blurRadius: 24,
+                              ),
+                            ],
+                          ),
+                          child: ClipRRect(
+                            borderRadius: BorderRadius.circular(12),
+                            child: Stack(
+                              fit: StackFit.expand,
+                              children: [
+                                CustomPaint(
+                                  painter: BrickBreakerPainter(_game),
+                                ),
+                                if (_overlay() != null) _overlay()!,
+                                if (_game.phase == BreakerPhase.flying)
+                                  Positioned(
+                                    right: 6,
+                                    top: 0,
+                                    bottom: 0,
+                                    child: Center(child: _dropSideButton()),
+                                  ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              ),
+              const Padding(
+                padding: EdgeInsets.fromLTRB(16, 0, 16, 12),
+                child: Text(
+                  'Drag to aim · Release to shoot · Fly through +1 orbs & lasers',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: AppColors.muted, fontSize: 12),
+                ),
+              ),
+            ],
           ),
         ],
       ),
@@ -463,7 +506,7 @@ class _BrickBreakerScreenState extends State<BrickBreakerScreen>
           child: Text(
             'Level ${_game.level - 1} cleared!\nTap for level ${_game.level}',
             textAlign: TextAlign.center,
-            style: const TextStyle(color: AppColors.accentGlow),
+            style: const TextStyle(color: AppColors.accentGlow, fontWeight: FontWeight.w600),
           ),
         ),
       );

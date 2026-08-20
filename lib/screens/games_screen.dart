@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import '../games/brick_breaker/brick_breaker_screen.dart';
+import '../games/brick_breaker/brick_breaker_menu_screen.dart';
 import '../games/neon_drift/neon_drift_screen.dart';
 import '../models/game.dart';
 import '../theme/app_colors.dart';
@@ -92,7 +92,7 @@ class _GamesScreenState extends State<GamesScreen> {
 
   void _openBrickBreaker() {
     Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => const BrickBreakerScreen()),
+      MaterialPageRoute(builder: (_) => const BrickBreakerMenuScreen()),
     );
   }
 
