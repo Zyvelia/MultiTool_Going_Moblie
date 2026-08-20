@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
 
+import 'package:audio_service/audio_service.dart';
+import 'package:audioplayers/audioplayers.dart' as ap;
 import 'package:flutter/services.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -73,9 +75,12 @@ class BrickBreakerAudio {
   DateTime _lastBounce = DateTime.fromMillisecondsSinceEpoch(0);
   DateTime _lastHit = DateTime.fromMillisecondsSinceEpoch(0);
   DateTime _lastDangerWarn = DateTime.fromMillisecondsSinceEpoch(0);
-  AudioPlayer? _warnPlayer;
+  final ap.AudioPlayer _warnPlayer = ap.AudioPlayer(playerId: 'bb_warn_sfx');
   bool _warnAssetReady = false;
   StreamSubscription<PlayerState>? _playerSub;
+
+  /// AssetSource paths are resolved against AudioCache's 'assets/' prefix.
+  static final _warnAssetPath = brickBreakerWarnSound.replaceFirst('assets/', '');
 
   List<BrickBreakerSoundtrackOption> get soundtracks {
     final list = <BrickBreakerSoundtrackOption>[
@@ -167,11 +172,22 @@ class BrickBreakerAudio {
 
   Future<void> _initWarnSfx() async {
     try {
-      final player = AudioPlayer();
-      await player.setAsset(brickBreakerWarnSound);
-      await player.setVolume(brickBreakerWarnVolume);
-      _warnPlayer?.dispose();
-      _warnPlayer = player;
+      // mixWithOthers keeps the blip from interrupting the soundtrack, which
+      // owns the shared session via audio_service.
+      await _warnPlayer.setAudioContext(
+        ap.AudioContext(
+          iOS: ap.AudioContextIOS(
+            options: {ap.AVAudioSessionOptions.mixWithOthers},
+          ),
+          android: ap.AudioContextAndroid(
+            audioFocus: ap.AndroidAudioFocus.none,
+          ),
+        ),
+      );
+      await _warnPlayer.setReleaseMode(ap.ReleaseMode.stop);
+      await _warnPlayer.setVolume(brickBreakerWarnVolume);
+      // Warm the cache so the first warning isn't late.
+      await ap.AudioCache.instance.load(_warnAssetPath);
       _warnAssetReady = true;
     } catch (_) {
       _warnAssetReady = false;
@@ -183,21 +199,28 @@ class BrickBreakerAudio {
     final now = DateTime.now();
     if (now.difference(_lastDangerWarn).inMilliseconds < 1400) return;
     _lastDangerWarn = now;
-    if (_warnAssetReady && _warnPlayer != null) {
-      _warnPlayer!
-        ..setVolume(brickBreakerWarnVolume)
-        ..seek(Duration.zero)
-        ..play();
+    if (_warnAssetReady) {
+      unawaited(_playWarn());
       return;
     }
     HapticFeedback.mediumImpact();
   }
 
+  Future<void> _playWarn() async {
+    try {
+      await _warnPlayer.stop();
+      await _warnPlayer.play(
+        ap.AssetSource(_warnAssetPath),
+        volume: brickBreakerWarnVolume,
+      );
+    } catch (_) {
+      HapticFeedback.mediumImpact();
+    }
+  }
+
   void stopDangerWarn() {
-    final player = _warnPlayer;
-    if (player == null) return;
-    player.stop();
-    player.seek(Duration.zero);
+    if (!_warnAssetReady) return;
+    unawaited(_warnPlayer.stop());
   }
 
   Future<void> _applyVolume() async {
@@ -305,12 +328,32 @@ class BrickBreakerAudio {
     await _playAsset(asset, restart: force);
   }
 
+  String _labelForAsset(String asset) {
+    for (final extra in brickBreakerExtraMusic) {
+      if (extra.asset == asset) return extra.label;
+    }
+    return asset.split('/').last.replaceAll('.mp3', '');
+  }
+
+  /// just_audio_background rejects any source without a MediaItem tag, so a
+  /// bare setAsset() throws and no game music ever plays.
+  AudioSource _sourceFor(String asset) {
+    return AudioSource.asset(
+      asset,
+      tag: MediaItem(
+        id: asset,
+        album: 'Brick Breaker',
+        title: _labelForAsset(asset),
+      ),
+    );
+  }
+
   Future<void> _playAsset(String asset, {required bool restart}) async {
     if (!settings.music || !settings.useCustomMusic) return;
     if (_playingAsset == asset && _player.playing && !restart) return;
 
     if (_playingAsset != asset) {
-      await _player.setAsset(asset);
+      await _player.setAudioSource(_sourceFor(asset));
       _playingAsset = asset;
     } else if (restart) {
       await _player.seek(Duration.zero);
@@ -396,7 +439,7 @@ class BrickBreakerAudio {
 
   Future<void> dispose() async {
     await _playerSub?.cancel();
-    await _warnPlayer?.dispose();
+    await _warnPlayer.dispose();
     await _player.dispose();
   }
 }

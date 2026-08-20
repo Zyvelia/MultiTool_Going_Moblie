@@ -14,6 +14,9 @@ dependencies:
   just_audio: ^0.9.40
   audio_service: ^0.18.15
   just_audio_background: ^0.0.1-beta.17
+  # Game SFX only. just_audio routes through audio_service, which would put a
+  # sub-second blip on the lock screen and require a MediaItem tag.
+  audioplayers: ^6.8.1
   share_plus: ^13.2.0
   shared_preferences: ^2.3.3
   path_provider: ^2.1.4
