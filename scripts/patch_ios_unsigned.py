@@ -59,6 +59,7 @@ _POD_SIGNING_HOOK = """
         config.build_settings['CODE_SIGNING_ALLOWED'] = 'NO'
         config.build_settings['CODE_SIGNING_REQUIRED'] = 'NO'
         config.build_settings['CODE_SIGNING_IDENTITY'] = ''
+        config.build_settings['EXPANDED_CODE_SIGN_IDENTITY'] = '-'
       end
     end
 """
@@ -128,6 +129,47 @@ def bump_pbxproj_deployment_target() -> None:
         print(f"Set IPHONEOS_DEPLOYMENT_TARGET = {IOS_DEPLOYMENT_TARGET} in {path}")
 
 
+def patch_pbxproj_code_signing() -> None:
+    """Disable signing on Runner target configs (not just strip DEVELOPMENT_TEAM)."""
+    path = ROOT / "ios/Runner.xcodeproj/project.pbxproj"
+    text = path.read_text(encoding="utf-8")
+    original = text
+
+    text = re.sub(r"\t\t\t\tCODE_SIGN_STYLE = Automatic;\n", "", text)
+    text = re.sub(r'\t\t\t\t"CODE_SIGN_IDENTITY\[sdk=iphoneos\*\]" = .*;\n', "", text)
+    text = re.sub(r"\t\t\t\tCODE_SIGN_IDENTITY = .*;\n", "", text)
+
+    signing_lines = (
+        "\t\t\t\tCODE_SIGNING_ALLOWED = NO;\n"
+        "\t\t\t\tCODE_SIGNING_REQUIRED = NO;\n"
+        "\t\t\t\tCODE_SIGN_IDENTITY = \"\";\n"
+        "\t\t\t\tEXPANDED_CODE_SIGN_IDENTITY = \"-\";\n"
+    )
+
+    def _inject_signing(match: re.Match[str]) -> str:
+        block = match.group(0)
+        if "PRODUCT_BUNDLE_IDENTIFIER" not in block:
+            return block
+        if "CODE_SIGNING_ALLOWED = NO" in block:
+            return block
+        return block.replace(
+            "\t\t\t};",
+            signing_lines + "\t\t\t};",
+            1,
+        )
+
+    text = re.sub(
+        r"\t\t\tisa = XCBuildConfiguration;\n\t\t\tbuildSettings = \{.*?\n\t\t\t\};",
+        _inject_signing,
+        text,
+        flags=re.DOTALL,
+    )
+
+    if text != original:
+        path.write_text(text, encoding="utf-8")
+        print(f"Patched Runner code signing in {path}")
+
+
 def strip_pbxproj_signing() -> None:
     path = ROOT / "ios/Runner.xcodeproj/project.pbxproj"
     text = path.read_text(encoding="utf-8")
@@ -144,6 +186,7 @@ def main() -> None:
     ensure_podfile()
     bump_pbxproj_deployment_target()
     strip_pbxproj_signing()
+    patch_pbxproj_code_signing()
     print("iOS unsigned-build patches applied.")
 
 
