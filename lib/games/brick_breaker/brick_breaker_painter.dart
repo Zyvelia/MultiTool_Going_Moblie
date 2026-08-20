@@ -148,11 +148,21 @@ class BrickBreakerPainter extends CustomPainter {
   }
 
   void _drawBrick(Canvas canvas, Rect rect, BreakerBrick brick) {
+    canvas.save();
+    canvas.translate(rect.center.dx, rect.center.dy);
+    canvas.rotate(brick.angle);
+    final local = Rect.fromCenter(
+      center: Offset.zero,
+      width: rect.width,
+      height: rect.height,
+    );
+
     if (brick.kind == BrickKind.barrier) {
       canvas.drawRRect(
-        RRect.fromRectAndRadius(rect, const Radius.circular(4)),
+        RRect.fromRectAndRadius(local, const Radius.circular(4)),
         Paint()..color = AppColors.border,
       );
+      canvas.restore();
       return;
     }
 
@@ -160,7 +170,7 @@ class BrickBreakerPainter extends CustomPainter {
       final t = (brick.hp / 18).clamp(0.0, 1.0);
       _fillBrick(
         canvas,
-        rect,
+        local,
         Color.lerp(const Color(0xFF2A1030), AppColors.wine, t)!,
         Color.lerp(AppColors.wine, AppColors.accent, 1 - t)!,
       );
@@ -168,12 +178,13 @@ class BrickBreakerPainter extends CustomPainter {
       final t = (brick.hp / 15).clamp(0.0, 1.0);
       _fillBrick(
         canvas,
-        rect,
+        local,
         Color.lerp(AppColors.wine, AppColors.accent, 1 - t)!,
         AppColors.accentGlow,
       );
     }
-    _drawLabel(canvas, rect.center, '${brick.hp}');
+    _drawLabel(canvas, Offset.zero, '${brick.hp}');
+    canvas.restore();
   }
 
   void _fillBrick(Canvas canvas, Rect rect, Color fill, Color stroke) {

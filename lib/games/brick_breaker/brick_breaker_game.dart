@@ -56,8 +56,13 @@ class BallBooster {
 class BreakerBrick {
   int hp;
   BrickKind kind;
+  final double angle;
 
-  BreakerBrick({required this.hp, this.kind = BrickKind.normal});
+  BreakerBrick({
+    required this.hp,
+    this.kind = BrickKind.normal,
+    required this.angle,
+  });
 
   bool get alive => kind == BrickKind.barrier || hp > 0;
 }
@@ -237,16 +242,17 @@ class BrickBreakerGame {
   }
 
   BreakerBrick _makeBrick({required int step}) {
+    final angle = (_rng.nextDouble() - 0.5) * 0.44;
     final roll = _rng.nextDouble();
     if (step >= 8 && roll < 0.05) {
-      return BreakerBrick(hp: 0, kind: BrickKind.barrier);
+      return BreakerBrick(hp: 0, kind: BrickKind.barrier, angle: angle);
     }
     if (step >= 2 && roll < 0.35) {
       final hp = (2 + _rng.nextInt(3) + step ~/ 8).clamp(2, 18);
-      return BreakerBrick(hp: hp, kind: BrickKind.heavy);
+      return BreakerBrick(hp: hp, kind: BrickKind.heavy, angle: angle);
     }
     final hp = (1 + _rng.nextInt(2) + step ~/ 10 + level).clamp(1, 15);
-    return BreakerBrick(hp: hp, kind: BrickKind.normal);
+    return BreakerBrick(hp: hp, kind: BrickKind.normal, angle: angle);
   }
 
   void _spawnTopRow() {
@@ -453,25 +459,28 @@ class BrickBreakerGame {
   void _hitBricks(BreakerBall b) {
     for (var r = 0; r < grid.length; r++) {
       for (var c = 0; c < grid[r].length; c++) {
-        final bounds = _brickBoundsAt(r, c);
-        if (bounds == null) continue;
+        final shape = _brickShapeAt(r, c);
+        if (shape == null) continue;
 
-        if (!_ballOverlapsRect(
+        final hit = _ballHitsRotRect(
           b.x,
           b.y,
-          bounds.left,
-          bounds.top,
-          bounds.right,
-          bounds.bottom,
-        )) {
-          continue;
-        }
+          ballRadius,
+          cx: shape.cx,
+          cy: shape.cy,
+          hw: shape.hw,
+          hh: shape.hh,
+          angle: shape.angle,
+        );
+        if (hit == null) continue;
 
         final brick = grid[r][c]!;
         if (brick.kind != BrickKind.barrier) {
           _damageBrick(r, c, 1);
         }
-        _reflectFromRect(b, bounds.left, bounds.top, bounds.right, bounds.bottom);
+        final (vx, vy) = _reflectVel(b.vx, b.vy, hit.nx, hit.ny);
+        b.vx = vx;
+        b.vy = vy;
         _sfx('bounce');
         return;
       }
@@ -663,17 +672,97 @@ class BrickBreakerGame {
     return false;
   }
 
-  ({double left, double top, double right, double bottom})? _brickBoundsAt(int r, int c) {
+  ({
+    double cx,
+    double cy,
+    double hw,
+    double hh,
+    double angle,
+    int r,
+    int c,
+  })? _brickShapeAt(int r, int c) {
     final brick = grid[r][c];
     if (brick == null || !brick.alive) return null;
-    final left = colLeftPx(c);
-    final top = rowTopPx(r);
+    final left = colLeftPx(c) + 2;
+    final top = rowTopPx(r) + 2;
+    final bw = brickW * width - 4;
+    final bh = rowBottomPx(r) - rowTopPx(r) - 4;
     return (
-      left: left,
-      top: top,
-      right: left + brickW * width - 4,
-      bottom: rowBottomPx(r) - 4,
+      cx: left + bw / 2,
+      cy: top + bh / 2,
+      hw: bw / 2,
+      hh: bh / 2,
+      angle: brick.angle,
+      r: r,
+      c: c,
     );
+  }
+
+  ({double nx, double ny})? _ballHitsRotRect(
+    double bx,
+    double by,
+    double br, {
+    required double cx,
+    required double cy,
+    required double hw,
+    required double hh,
+    required double angle,
+  }) {
+    final cos = math.cos(-angle);
+    final sin = math.sin(-angle);
+    final dx = bx - cx;
+    final dy = by - cy;
+    final lx = dx * cos - dy * sin;
+    final ly = dx * sin + dy * cos;
+
+    final clx = lx.clamp(-hw, hw);
+    final cly = ly.clamp(-hh, hh);
+    var nx = lx - clx;
+    var ny = ly - cly;
+    final lenSq = nx * nx + ny * ny;
+    if (lenSq >= br * br) return null;
+
+    double lnx;
+    double lny;
+    if (lenSq < 1e-8) {
+      final penL = lx + hw;
+      final penR = hw - lx;
+      final penT = ly + hh;
+      final penB = hh - ly;
+      var min = penL;
+      lnx = -1;
+      lny = 0;
+      if (penR < min) {
+        min = penR;
+        lnx = 1;
+        lny = 0;
+      }
+      if (penT < min) {
+        min = penT;
+        lnx = 0;
+        lny = -1;
+      }
+      if (penB < min) {
+        lnx = 0;
+        lny = 1;
+      }
+    } else {
+      final len = math.sqrt(lenSq);
+      lnx = nx / len;
+      lny = ny / len;
+    }
+
+    final cosW = math.cos(angle);
+    final sinW = math.sin(angle);
+    return (
+      nx: lnx * cosW - lny * sinW,
+      ny: lnx * sinW + lny * cosW,
+    );
+  }
+
+  (double vx, double vy) _reflectVel(double vx, double vy, double nx, double ny) {
+    final dot = vx * nx + vy * ny;
+    return (vx - 2 * dot * nx, vy - 2 * dot * ny);
   }
 
   void _shiftWallDown() {
@@ -695,49 +784,25 @@ class BrickBreakerGame {
         y - ballRadius > bottom);
   }
 
-  ({double left, double top, double right, double bottom})? _firstBrickHit(double x, double y) {
+  ({double nx, double ny})? _firstBrickHitNormal(double x, double y) {
     for (var r = 0; r < grid.length; r++) {
       for (var c = 0; c < grid[r].length; c++) {
-        final bounds = _brickBoundsAt(r, c);
-        if (bounds == null) continue;
-        if (_ballOverlapsRect(x, y, bounds.left, bounds.top, bounds.right, bounds.bottom)) {
-          return bounds;
-        }
+        final shape = _brickShapeAt(r, c);
+        if (shape == null) continue;
+        final hit = _ballHitsRotRect(
+          x,
+          y,
+          ballRadius,
+          cx: shape.cx,
+          cy: shape.cy,
+          hw: shape.hw,
+          hh: shape.hh,
+          angle: shape.angle,
+        );
+        if (hit != null) return hit;
       }
     }
     return null;
-  }
-
-  (double vx, double vy) _reflectedVelocity(
-    double x,
-    double y,
-    double vx,
-    double vy,
-    double left,
-    double top,
-    double right,
-    double bottom,
-  ) {
-    final cx = (left + right) / 2;
-    final cy = (top + bottom) / 2;
-    final dx = x - cx;
-    final dy = y - cy;
-    if (dx.abs() / (right - left) > dy.abs() / (bottom - top)) {
-      return (dx > 0 ? vx.abs() : -vx.abs(), vy);
-    }
-    return (vx, dy > 0 ? vy.abs() : -vy.abs());
-  }
-
-  void _reflectFromRect(
-    BreakerBall b,
-    double left,
-    double top,
-    double right,
-    double bottom,
-  ) {
-    final (vx, vy) = _reflectedVelocity(b.x, b.y, b.vx, b.vy, left, top, right, bottom);
-    b.vx = vx;
-    b.vy = vy;
   }
 
   void _endVolley() {
@@ -874,18 +939,9 @@ class BrickBreakerGame {
         bounced = true;
       }
 
-      final brick = _firstBrickHit(x, y);
-      if (brick != null) {
-        (dx, dy) = _reflectedVelocity(
-          x,
-          y,
-          dx,
-          dy,
-          brick.left,
-          brick.top,
-          brick.right,
-          brick.bottom,
-        );
+      final hit = _firstBrickHitNormal(x, y);
+      if (hit != null) {
+        (dx, dy) = _reflectVel(dx, dy, hit.nx, hit.ny);
         // Step back out of the brick so the path does not draw through it.
         x -= dx * stepLen * 0.35;
         y -= dy * stepLen * 0.35;
