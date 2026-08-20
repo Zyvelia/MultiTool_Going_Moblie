@@ -206,7 +206,7 @@ class BrickBreakerGame {
   void _spawnStarterBrick() {
     final col = _rng.nextInt(cols);
     grid[0][col] = _makeBrick(step: 0);
-    _seedBallBoosters(rowOnly: 0, extraChance: 0.35);
+    _seedBallBoosters(rowOnly: 0, extraChance: 0.22);
   }
 
   void _spawnLevel() {
@@ -259,15 +259,33 @@ class BrickBreakerGame {
     _seedBallBoosters(rowOnly: 0);
   }
 
-  void _seedBallBoosters({required int rowOnly, double extraChance = 0}) {
+  LaserKind _randomLaserKind() {
+    final roll = _rng.nextDouble();
+    if (roll < 0.42) return LaserKind.vertical;
+    if (roll < 0.84) return LaserKind.horizontal;
+    return LaserKind.cross;
+  }
+
+  List<int> _emptyCells(int rowOnly) {
+    final out = <int>[];
     for (var c = 0; c < cols; c++) {
       if (grid[rowOnly][c] != null) continue;
       if (_laserAt(rowOnly, c) != null) continue;
       if (_boosterAt(rowOnly, c) != null) continue;
-      final chance = extraChance > 0 ? extraChance : (0.16 + step * 0.005);
-      if (_rng.nextDouble() > chance) continue;
-      ballBoosters.add(BallBooster(row: rowOnly, col: c));
+      out.add(c);
     }
+    return out;
+  }
+
+  void _seedBallBoosters({required int rowOnly, double extraChance = 0}) {
+    final chance = extraChance > 0
+        ? extraChance
+        : math.min(0.22, 0.11 + step * 0.002);
+    if (_rng.nextDouble() > chance) return;
+    final empties = _emptyCells(rowOnly);
+    if (empties.isEmpty) return;
+    final c = empties[_rng.nextInt(empties.length)];
+    ballBoosters.add(BallBooster(row: rowOnly, col: c));
   }
 
   BallBooster? _boosterAt(int row, int col) {
@@ -277,19 +295,13 @@ class BrickBreakerGame {
     return null;
   }
 
-  LaserKind _randomLaserKind() {
-    final roll = _rng.nextDouble();
-    if (roll < 0.34) return LaserKind.vertical;
-    if (roll < 0.67) return LaserKind.horizontal;
-    return LaserKind.cross;
-  }
-
   void _seedBuriedLasers({required int rowOnly}) {
-    if (step < 2) return;
-    final chance = 0.10 + step * 0.002;
+    if (step < 3) return;
+    final chance = math.min(0.11, 0.055 + step * 0.001);
     for (var c = 0; c < cols; c++) {
       if (grid[rowOnly][c] != null) continue;
       if (_laserAt(rowOnly, c) != null) continue;
+      if (_boosterAt(rowOnly, c) != null) continue;
       if (_rng.nextDouble() > chance) continue;
       lasers.add(MapLaser(
         row: rowOnly,
