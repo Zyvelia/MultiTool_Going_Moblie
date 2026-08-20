@@ -134,6 +134,10 @@ class BrickBreakerGame {
 
   final math.Random _rng = math.Random();
 
+  void Function(String name)? onSfx;
+
+  void _sfx(String name) => onSfx?.call(name);
+
   void resize(double w, double h) {
     width = w;
     height = h;
@@ -313,6 +317,7 @@ class BrickBreakerGame {
     }
     _volleyTime = 0;
     phase = BreakerPhase.flying;
+    _sfx('shoot');
   }
 
   /// Stop the volley early — drops every ball to the floor and ends the turn.
@@ -416,6 +421,7 @@ class BrickBreakerGame {
           _damageBrick(r, c, 1);
         }
         _reflectFromRect(b, bounds.left, bounds.top, bounds.right, bounds.bottom);
+        _sfx('bounce');
         return;
       }
     }
@@ -455,6 +461,7 @@ class BrickBreakerGame {
     _fireLaser(laser);
     laser.waveHits++;
     score += 8;
+    _sfx('laser');
   }
 
   void _hitBallBoosters(BreakerBall b) {
@@ -471,6 +478,7 @@ class BrickBreakerGame {
       ballBoosters.removeAt(i);
       ballsPerShot = (ballsPerShot + 1).clamp(1, 24);
       score += 30;
+      _sfx('booster');
     }
   }
 
@@ -481,6 +489,7 @@ class BrickBreakerGame {
 
     brick.hp -= amount;
     score += 10;
+    _sfx('hit');
 
     if (brick.hp <= 0) {
       grid[r][c] = null;
@@ -502,7 +511,7 @@ class BrickBreakerGame {
 
   void _fireLaserVertical(int row, int col) {
     laserBeams.add(LaserBeam(row: row, col: col, shape: LaserBeamShape.vertical));
-    for (var r = 0; r <= row; r++) {
+    for (var r = 0; r < rows; r++) {
       _damageBrick(r, col, 1, fromLaser: true);
     }
   }
@@ -626,6 +635,7 @@ class BrickBreakerGame {
       score += 100 * level;
       _spawnLevel();
       phase = BreakerPhase.levelClear;
+      _sfx('levelClear');
       return;
     }
 
@@ -644,6 +654,7 @@ class BrickBreakerGame {
         if (rowBottomPx(r) >= dangerY * height) {
           phase = BreakerPhase.gameOver;
           highScore = math.max(highScore, score);
+          _sfx('gameOver');
           return;
         }
       }
@@ -656,6 +667,7 @@ class BrickBreakerGame {
       if (_countsTowardLoss(grid[rows - 1][c])) {
         phase = BreakerPhase.gameOver;
         highScore = math.max(highScore, score);
+        _sfx('gameOver');
         return;
       }
     }
@@ -697,13 +709,16 @@ class BrickBreakerGame {
     if (b.x < ballRadius) {
       b.x = ballRadius;
       b.vx = b.vx.abs();
+      _sfx('bounce');
     } else if (b.x > width - ballRadius) {
       b.x = width - ballRadius;
       b.vx = -b.vx.abs();
+      _sfx('bounce');
     }
     if (b.y < ballRadius) {
       b.y = ballRadius;
       b.vy = b.vy.abs();
+      _sfx('bounce');
     }
   }
 

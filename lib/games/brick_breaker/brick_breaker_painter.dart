@@ -48,12 +48,12 @@ class BrickBreakerPainter extends CustomPainter {
       final x = (beam.col + 0.5) * BrickBreakerGame.brickW * size.width;
       final y = game.rowCenterY(beam.row);
       final yTop = game.rowTopPx(0);
-      final yBottom = game.rowBottomPx(beam.row);
 
       switch (beam.shape) {
         case LaserBeamShape.vertical:
-          canvas.drawLine(Offset(x, yTop), Offset(x, yBottom), glowPaint);
-          canvas.drawLine(Offset(x, yTop), Offset(x, yBottom), corePaint);
+          final yFullBottom = game.rowBottomPx(BrickBreakerGame.rows - 1);
+          canvas.drawLine(Offset(x, yTop), Offset(x, yFullBottom), glowPaint);
+          canvas.drawLine(Offset(x, yTop), Offset(x, yFullBottom), corePaint);
         case LaserBeamShape.horizontal:
           canvas.drawLine(Offset(0, y), Offset(size.width, y), glowPaint);
           canvas.drawLine(Offset(0, y), Offset(size.width, y), corePaint);
@@ -282,6 +282,7 @@ class BrickBreakerPainter extends CustomPainter {
     switch (kind) {
       case LaserKind.vertical:
         _drawArrow(canvas, c, const Offset(0, -7), paint);
+        _drawArrow(canvas, c, const Offset(0, 7), paint);
       case LaserKind.horizontal:
         _drawArrow(canvas, c, const Offset(-7, 0), paint);
         _drawArrow(canvas, c, const Offset(7, 0), paint);
