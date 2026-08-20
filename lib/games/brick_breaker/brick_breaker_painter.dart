@@ -104,7 +104,7 @@ class BrickBreakerPainter extends CustomPainter {
       final rect = game.cellRect(pick.row, pick.col);
       final cx = (rect.left + rect.right) / 2;
       final cy = (rect.top + rect.bottom) / 2;
-      _drawBallBooster(canvas, Offset(cx, cy));
+      _drawBallBooster(canvas, Offset(cx, cy), pick.bonus);
     }
 
     if (game.phase == BreakerPhase.aiming) {
@@ -370,23 +370,31 @@ class BrickBreakerPainter extends CustomPainter {
     canvas.drawCircle(c, BrickBreakerGame.ballRadius, Paint()..color = Colors.white);
   }
 
-  void _drawBallBooster(Canvas canvas, Offset c) {
+  void _drawBallBooster(Canvas canvas, Offset c, int bonus) {
+    final color = bonus >= 5
+        ? const Color(0xFFFF9100)
+        : bonus >= 3
+            ? const Color(0xFFFFD54F)
+            : bonus >= 2
+                ? const Color(0xFF18FFFF)
+                : AppColors.accentGlow;
+    final orbR = bonus >= 5 ? 15.0 : bonus >= 3 ? 14.0 : 13.0;
     canvas.drawCircle(
       c,
-      13,
+      orbR,
       Paint()
-        ..color = AppColors.accent.withValues(alpha: 0.3)
+        ..color = color.withValues(alpha: 0.32)
         ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 6),
     );
     canvas.drawCircle(c, 5, Paint()..color = Colors.white);
     final ring = Paint()
-      ..color = AppColors.accentGlow.withValues(alpha: 0.95)
+      ..color = color.withValues(alpha: 0.95)
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 2.4;
+      ..strokeWidth = bonus >= 5 ? 2.8 : 2.4;
     for (var i = 0; i < 4; i++) {
       final start = i * math.pi / 2 + 0.35;
       canvas.drawArc(
-        Rect.fromCircle(center: c, radius: 10),
+        Rect.fromCircle(center: c, radius: orbR - 2),
         start,
         math.pi / 2 - 0.5,
         false,
@@ -394,11 +402,11 @@ class BrickBreakerPainter extends CustomPainter {
       );
     }
     final plusTp = TextPainter(
-      text: const TextSpan(
-        text: '+1',
+      text: TextSpan(
+        text: '+$bonus',
         style: TextStyle(
           color: Colors.white,
-          fontSize: 9,
+          fontSize: bonus >= 5 ? 10 : 9,
           fontWeight: FontWeight.bold,
         ),
       ),

@@ -39,4 +39,13 @@ extension BrickBreakerModeInfo on BrickBreakerMode {
         return 'zs_brick_breaker_high_score_siege';
     }
   }
+
+  String get progressSaveKey {
+    switch (this) {
+      case BrickBreakerMode.endless:
+        return 'zs_brick_breaker_save';
+      case BrickBreakerMode.siege:
+        return 'zs_brick_breaker_save_siege';
+    }
+  }
 }

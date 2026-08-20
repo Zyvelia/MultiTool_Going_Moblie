@@ -1,6 +1,9 @@
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'brick_breaker_awards.dart';
+import 'brick_breaker_save.dart';
+import 'brick_breaker_gameplay_settings.dart';
 import 'brick_breaker_mode.dart';
 import 'brick_breaker_shapes.dart';
 import 'dart:ui';
@@ -27,7 +30,8 @@ class MapLaser {
     required this.col,
     required this.kind,
     required this.mineHp,
-  }) : mineMax = mineHp;
+    int? mineMax,
+  }) : mineMax = mineMax ?? mineHp;
 
   bool get buried => !armed;
 
@@ -46,12 +50,13 @@ class MapLaser {
   }
 }
 
-/// Glowing +ball orb on empty cells — fly through to add a permanent ball.
+/// Glowing +ball orb on empty cells — fly through to add permanent balls.
 class BallBooster {
   int row;
   int col;
+  final int bonus;
 
-  BallBooster({required this.row, required this.col});
+  BallBooster({required this.row, required this.col, this.bonus = 1});
 }
 
 class BreakerBrick {
@@ -119,6 +124,9 @@ class BrickBreakerGame {
   static const brickH = (dangerY - gridTopY) / rows;
   static const speed = 420.0;
   static const fireGap = 0.07;
+  static const ballSepSlop = 0.85;
+  static const ballMaxCollideIters = 4;
+  static const ballSubstepDist = ballRadius * 0.75;
 
   double width = 1;
   double height = 1;
@@ -148,11 +156,14 @@ class BrickBreakerGame {
   double _fireCooldown = 0;
   double _volleyTime = 0;
   double? _firstBallLandX;
+  double _sessionTime = 0;
+  double _lastBallSpeedMul = 1;
 
   final math.Random _rng = math.Random();
 
   void Function(String name)? onSfx;
   void Function(int score)? onFullClear;
+  BrickBreakerGameplaySettings? gameplaySettings;
 
   BrickBreakerScoreAward? lastClearAward;
   BrickBreakerScoreAward? lastScoreAward;
@@ -167,16 +178,22 @@ class BrickBreakerGame {
   double get launcherPx => launcherX * width;
   double get launcherPy => launcherY * height;
 
-  void configureMode(BrickBreakerMode gameMode, {required int storedHighScore}) {
+  Future<void> configureMode(BrickBreakerMode gameMode, {required int storedHighScore}) async {
     mode = gameMode;
+    highScore = storedHighScore;
+    if (await BrickBreakerSave.tryRestore(gameMode, this)) {
+      dangerWarning = false;
+      return;
+    }
     gridDriftY = 0;
     gridDriftX = 0;
     _siegeTime = 0;
-    highScore = storedHighScore;
     reset(keepHighScore: true);
   }
 
   void reset({bool keepHighScore = true}) {
+    unawaited(BrickBreakerSave.clear(mode));
+    _sfx('stopDangerWarn');
     final hs = keepHighScore ? highScore : 0;
     score = 0;
     level = 1;
@@ -199,9 +216,147 @@ class BrickBreakerGame {
     _siegeTime = 0;
     dangerWarning = false;
     highScore = hs;
+    _sessionTime = 0;
+    _lastBallSpeedMul = 1;
     _initEmptyGrid();
     _spawnStarterBrick();
     phase = BreakerPhase.aiming;
+  }
+
+  Map<String, dynamic> toProgressJson() {
+    return {
+      'v': BrickBreakerSave.version,
+      'level': level,
+      'step': step,
+      'score': score,
+      'ballsPerShot': ballsPerShot,
+      'launcherX': launcherX,
+      'aimAngle': aimAngle,
+      'phase': phase == BreakerPhase.flying ? BreakerPhase.aiming.index : phase.index,
+      'grid': grid
+          .map(
+            (row) => row
+                .map(
+                  (b) => b == null
+                      ? null
+                      : {
+                          'hp': b.hp,
+                          'kind': b.kind.index,
+                          'angle': b.angle,
+                          'shape': b.shape.index,
+                        },
+                )
+                .toList(),
+          )
+          .toList(),
+      'lasers': lasers
+          .map(
+            (l) => {
+              'row': l.row,
+              'col': l.col,
+              'kind': l.kind.index,
+              'mineHp': l.mineHp,
+              'mineMax': l.mineMax,
+              'armed': l.armed,
+              'ready': l.readyForWave,
+              'waveHits': l.waveHits,
+            },
+          )
+          .toList(),
+      'boosters': ballBoosters
+          .map((b) => {'row': b.row, 'col': b.col, 'bonus': b.bonus})
+          .toList(),
+      'gridDriftY': gridDriftY,
+      'gridDriftX': gridDriftX,
+      'siegeTime': _siegeTime,
+      'sessionTime': _sessionTime,
+    };
+  }
+
+  bool restoreFromProgress(Map<String, dynamic> data) {
+    if (data['v'] != BrickBreakerSave.version) return false;
+    final phaseIndex = data['phase'] as int? ?? BreakerPhase.aiming.index;
+    if (phaseIndex == BreakerPhase.gameOver.index) return false;
+
+    level = data['level'] as int? ?? 1;
+    step = data['step'] as int? ?? 0;
+    score = data['score'] as int? ?? 0;
+    ballsPerShot = data['ballsPerShot'] as int? ?? 1;
+    launcherX = (data['launcherX'] as num?)?.toDouble() ?? 0.5;
+    aimAngle = (data['aimAngle'] as num?)?.toDouble() ?? -math.pi / 2;
+    gridDriftY = (data['gridDriftY'] as num?)?.toDouble() ?? 0;
+    gridDriftX = (data['gridDriftX'] as num?)?.toDouble() ?? 0;
+    _siegeTime = (data['siegeTime'] as num?)?.toDouble() ?? 0;
+    _sessionTime = (data['sessionTime'] as num?)?.toDouble() ?? 0;
+
+    balls.clear();
+    laserBeams.clear();
+    _ballsLeftToFire = 0;
+    _fireCooldown = 0;
+    _firstBallLandX = null;
+    dangerWarning = false;
+    phase = phaseIndex == BreakerPhase.flying.index
+        ? BreakerPhase.aiming
+        : BreakerPhase.values[phaseIndex.clamp(0, BreakerPhase.values.length - 1)];
+
+    grid.clear();
+    final rawGrid = data['grid'] as List<dynamic>? ?? [];
+    for (var r = 0; r < rows; r++) {
+      final row = <BreakerBrick?>[];
+      final rawRow = r < rawGrid.length ? rawGrid[r] as List<dynamic>? : null;
+      for (var c = 0; c < cols; c++) {
+        final rawBrick = rawRow != null && c < rawRow.length ? rawRow[c] : null;
+        if (rawBrick is! Map<String, dynamic>) {
+          row.add(null);
+          continue;
+        }
+        row.add(
+          BreakerBrick(
+            hp: rawBrick['hp'] as int? ?? 1,
+            kind: BrickKind.values[
+                (rawBrick['kind'] as int? ?? 0).clamp(0, BrickKind.values.length - 1)],
+            angle: (rawBrick['angle'] as num?)?.toDouble() ?? 0,
+            shape: BrickShape.values[
+                (rawBrick['shape'] as int? ?? 0).clamp(0, BrickShape.values.length - 1)],
+          ),
+        );
+      }
+      grid.add(row);
+    }
+
+    lasers.clear();
+    for (final raw in data['lasers'] as List<dynamic>? ?? []) {
+      if (raw is! Map<String, dynamic>) continue;
+      final mineHp = raw['mineHp'] as int? ?? 1;
+      lasers.add(
+        MapLaser(
+          row: raw['row'] as int? ?? 0,
+          col: raw['col'] as int? ?? 0,
+          kind: LaserKind.values[
+              (raw['kind'] as int? ?? 0).clamp(0, LaserKind.values.length - 1)],
+          mineHp: mineHp,
+          mineMax: raw['mineMax'] as int? ?? mineHp,
+        )
+          ..armed = raw['armed'] as bool? ?? false
+          ..readyForWave = raw['ready'] as bool? ?? false
+          ..waveHits = raw['waveHits'] as int? ?? 0,
+      );
+    }
+
+    ballBoosters.clear();
+    for (final raw in data['boosters'] as List<dynamic>? ?? []) {
+      if (raw is! Map<String, dynamic>) continue;
+      ballBoosters.add(
+        BallBooster(
+          row: raw['row'] as int? ?? 0,
+          col: raw['col'] as int? ?? 0,
+          bonus: raw['bonus'] as int? ?? 1,
+        ),
+      );
+    }
+
+    _lastBallSpeedMul = _ballSpeedMul();
+    return true;
   }
 
   void _initEmptyGrid() {
@@ -212,9 +367,12 @@ class BrickBreakerGame {
   }
 
   void _spawnStarterBrick() {
-    final col = _rng.nextInt(cols);
-    grid[0][col] = _makeBrick(step: 0);
-    _seedBallBoosters(rowOnly: 0, extraChance: 0.22);
+    final count = _bricksForStep(0).clamp(2, cols);
+    final slots = List.generate(cols, (i) => i)..shuffle(_rng);
+    for (var i = 0; i < count; i++) {
+      grid[0][slots[i]] = _makeBrick(step: 0);
+    }
+    _seedBallBoosters(rowOnly: 0, extraChance: 0.20);
   }
 
   void _spawnLevel() {
@@ -236,12 +394,12 @@ class BrickBreakerGame {
   }
 
   int _bricksForStep(int s) {
-    if (s <= 0) return 1;
-    if (s < 4) return 1 + _rng.nextInt(2);
-    if (s < 10) return 2 + _rng.nextInt(2);
-    if (s < 20) return 2 + _rng.nextInt(3);
-    if (s < 35) return 3 + _rng.nextInt(3);
-    return 4 + _rng.nextInt(4);
+    if (s <= 0) return 2;
+    if (s < 4) return 2 + _rng.nextInt(2);
+    if (s < 10) return 3 + _rng.nextInt(2);
+    if (s < 20) return 3 + _rng.nextInt(3);
+    if (s < 35) return 4 + _rng.nextInt(3);
+    return 5 + _rng.nextInt(2);
   }
 
   BreakerBrick _makeBrick({required int step}) {
@@ -286,15 +444,28 @@ class BrickBreakerGame {
     return out;
   }
 
+  int _pickBoosterBonus() {
+    final roll = _rng.nextDouble();
+    if (roll < 0.82) return 1;
+    if (roll < 0.93) return 2;
+    if (roll < 0.98) return step >= 8 ? 3 : 1;
+    return step >= 18 ? 5 : 2;
+  }
+
   void _seedBallBoosters({required int rowOnly, double extraChance = 0}) {
     final chance = extraChance > 0
         ? extraChance
-        : math.min(0.22, 0.11 + step * 0.002);
-    if (_rng.nextDouble() > chance) return;
-    final empties = _emptyCells(rowOnly);
-    if (empties.isEmpty) return;
-    final c = empties[_rng.nextInt(empties.length)];
-    ballBoosters.add(BallBooster(row: rowOnly, col: c));
+        : math.min(0.26, 0.16 + step * 0.0008);
+    var placed = 0;
+    for (var c = 0; c < cols; c++) {
+      if (placed >= 1) break;
+      if (grid[rowOnly][c] != null) continue;
+      if (_laserAt(rowOnly, c) != null) continue;
+      if (_boosterAt(rowOnly, c) != null) continue;
+      if (_rng.nextDouble() > chance) continue;
+      ballBoosters.add(BallBooster(row: rowOnly, col: c, bonus: _pickBoosterBonus()));
+      placed++;
+    }
   }
 
   BallBooster? _boosterAt(int row, int col) {
@@ -391,13 +562,35 @@ class BrickBreakerGame {
     _endVolley();
   }
 
+  double _ballSpeedMul() {
+    final g = gameplaySettings;
+    if (g == null || !g.ballRampEnabled || _sessionTime < g.ballRampDelaySec) return 1;
+    final t = math.min(_sessionTime - g.ballRampDelaySec, g.ballRampRiseSec);
+    return 1 + (t / g.ballRampRiseSec) * (g.ballRampMaxClamped - 1);
+  }
+
+  void _syncBallSpeedMul() {
+    final mul = _ballSpeedMul();
+    if (mul == _lastBallSpeedMul) return;
+    final ratio = mul / _lastBallSpeedMul;
+    for (final b in balls) {
+      if (!b.active) continue;
+      b.vx *= ratio;
+      b.vy *= ratio;
+    }
+    _lastBallSpeedMul = mul;
+  }
+
+  double _ballSpeed() => speed * _ballSpeedMul();
+
   void _spawnNextBall() {
     final isFirst = balls.isEmpty;
+    final spd = _ballSpeed();
     balls.add(BreakerBall(
       x: launcherPx,
       y: launcherPy,
-      vx: math.cos(aimAngle) * speed,
-      vy: math.sin(aimAngle) * speed,
+      vx: math.cos(aimAngle) * spd,
+      vy: math.sin(aimAngle) * spd,
       isFirst: isFirst,
     ));
   }
@@ -415,6 +608,8 @@ class BrickBreakerGame {
     }
 
     if (phase != BreakerPhase.gameOver && phase != BreakerPhase.levelClear) {
+      _sessionTime += dt;
+      _syncBallSpeedMul();
       _updateDangerWarning();
     }
 
@@ -435,10 +630,7 @@ class BrickBreakerGame {
     for (final b in balls) {
       if (!b.active) continue;
       anyActive = true;
-      b.x += b.vx * dt;
-      b.y += b.vy * dt;
-      _bounceOffWalls(b);
-      _hitBricks(b);
+      _moveBall(b, dt);
       _hitLasers(b);
       _hitBallBoosters(b);
 
@@ -459,36 +651,61 @@ class BrickBreakerGame {
     }
   }
 
-  void _hitBricks(BreakerBall b) {
-    for (var r = 0; r < grid.length; r++) {
-      for (var c = 0; c < grid[r].length; c++) {
-        final shape = _brickShapeAt(r, c);
-        if (shape == null) continue;
-
-        final hit = BrickShapeUtil.ballHit(
-          bx: b.x,
-          by: b.y,
-          br: ballRadius,
-          cx: shape.cx,
-          cy: shape.cy,
-          hw: shape.hw,
-          hh: shape.hh,
-          angle: shape.angle,
-          shape: shape.brickShape,
-        );
-        if (hit == null) continue;
-
-        final brick = grid[r][c]!;
-        if (brick.kind != BrickKind.barrier) {
-          _damageBrick(r, c, 1);
-        }
-        final (vx, vy) = _reflectVel(b.vx, b.vy, hit.nx, hit.ny);
-        b.vx = vx;
-        b.vy = vy;
-        _sfx('bounce');
-        return;
-      }
+  void _moveBall(BreakerBall b, double dt) {
+    final travel = math.hypot(b.vx * dt, b.vy * dt);
+    final steps = math.max(1, (travel / ballSubstepDist).ceil());
+    final subDt = dt / steps;
+    for (var s = 0; s < steps; s++) {
+      b.x += b.vx * subDt;
+      b.y += b.vy * subDt;
+      _bounceOffWalls(b);
+      _resolveBrickCollisions(b);
     }
+  }
+
+  void _resolveBrickCollisions(BreakerBall b) {
+    for (var iter = 0; iter < ballMaxCollideIters; iter++) {
+      var resolved = false;
+      for (var r = 0; r < grid.length; r++) {
+        for (var c = 0; c < grid[r].length; c++) {
+          final shape = _brickShapeAt(r, c);
+          if (shape == null) continue;
+
+          final hit = BrickShapeUtil.ballHit(
+            bx: b.x,
+            by: b.y,
+            br: ballRadius,
+            cx: shape.cx,
+            cy: shape.cy,
+            hw: shape.hw,
+            hh: shape.hh,
+            angle: shape.angle,
+            shape: shape.brickShape,
+          );
+          if (hit == null) continue;
+
+          final brick = grid[r][c]!;
+          if (brick.kind != BrickKind.barrier) {
+            _damageBrick(r, c, 1);
+          }
+          final (vx, vy) = _reflectVel(b.vx, b.vy, hit.nx, hit.ny);
+          b.vx = vx;
+          b.vy = vy;
+          final sep = math.max(hit.depth, 0) + ballSepSlop;
+          b.x += hit.nx * sep;
+          b.y += hit.ny * sep;
+          if (iter == 0) _sfx('bounce');
+          resolved = true;
+          break;
+        }
+        if (resolved) break;
+      }
+      if (!resolved) break;
+    }
+  }
+
+  void _hitBricks(BreakerBall b) {
+    _resolveBrickCollisions(b);
   }
 
   void _hitLasers(BreakerBall b) {
@@ -540,8 +757,9 @@ class BrickBreakerGame {
       }
 
       ballBoosters.removeAt(i);
-      ballsPerShot = (ballsPerShot + 1).clamp(1, 24);
-      score += 30;
+      final bonus = pick.bonus;
+      ballsPerShot = (ballsPerShot + bonus).clamp(1, 24);
+      score += 20 + bonus * 15;
       _sfx('booster');
     }
   }
@@ -608,9 +826,20 @@ class BrickBreakerGame {
     return 'safe';
   }
 
+  void _enterGameOver() {
+    _sfx('stopDangerWarn');
+    phase = BreakerPhase.gameOver;
+    dangerWarning = false;
+    highScore = math.max(highScore, score);
+    unawaited(BrickBreakerSave.clear(mode));
+    _sfx('gameOver');
+  }
+
   void _updateDangerWarning() {
+    final wasWarn = dangerWarning;
     if (phase == BreakerPhase.gameOver || phase == BreakerPhase.levelClear) {
       dangerWarning = false;
+      if (wasWarn) _sfx('stopDangerWarn');
       return;
     }
     var warn = false;
@@ -631,6 +860,8 @@ class BrickBreakerGame {
         _lastWarnMs = now;
         _sfx('dangerWarn');
       }
+    } else if (wasWarn) {
+      _sfx('stopDangerWarn');
     }
   }
 
@@ -648,8 +879,12 @@ class BrickBreakerGame {
     gridDriftY += speed * dt;
     gridDriftX = math.sin(_siegeTime * 0.9) * (8 + level * 0.35);
     while (gridDriftY >= rowPx) {
+      if (_bottomRowBlocked()) {
+        _enterGameOver();
+        return;
+      }
       gridDriftY -= rowPx;
-      if (_shiftGridDown()) return;
+      _shiftGridDown();
     }
     _checkGameOver();
   }
@@ -710,7 +945,10 @@ class BrickBreakerGame {
   }
 
   void _shiftWallDown() {
-    if (_bottomRowBlocked()) return;
+    if (_bottomRowBlocked()) {
+      _enterGameOver();
+      return;
+    }
     _shiftGridDown();
   }
 
@@ -772,6 +1010,7 @@ class BrickBreakerGame {
     if (phase == BreakerPhase.gameOver) return;
 
     _shiftWallDown();
+    if (phase == BreakerPhase.gameOver) return;
     _spawnTopRow();
     _checkGameOver();
     if (phase == BreakerPhase.gameOver) return;
@@ -799,10 +1038,7 @@ class BrickBreakerGame {
         final brick = grid[r][c];
         if (!_countsTowardLoss(brick)) continue;
         if (_brickLineState(r) == 'over') {
-          phase = BreakerPhase.gameOver;
-          dangerWarning = false;
-          highScore = math.max(highScore, score);
-          _sfx('gameOver');
+          _enterGameOver();
           return;
         }
       }

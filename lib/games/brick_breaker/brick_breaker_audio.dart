@@ -193,6 +193,13 @@ class BrickBreakerAudio {
     HapticFeedback.mediumImpact();
   }
 
+  void stopDangerWarn() {
+    final player = _warnPlayer;
+    if (player == null) return;
+    player.stop();
+    player.seek(Duration.zero);
+  }
+
   Future<void> _applyVolume() async {
     await _player.setVolume(settings.musicVolume.clamp(0.0, 1.0));
   }

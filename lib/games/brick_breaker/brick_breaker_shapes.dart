@@ -83,7 +83,7 @@ class BrickShapeUtil {
     return true;
   }
 
-  static ({double lnx, double lny})? _localHitRoundRect(
+  static ({double lnx, double lny, double depth})? _localHitRoundRect(
     double lx,
     double ly,
     double br,
@@ -97,16 +97,14 @@ class BrickShapeUtil {
     final lenSq = nx * nx + ny * ny;
     if (lenSq >= br * br) return null;
 
-    double lnx;
-    double lny;
     if (lenSq < 1e-8) {
       final penL = lx + hw;
       final penR = hw - lx;
       final penT = ly + hh;
       final penB = hh - ly;
       var min = penL;
-      lnx = -1;
-      lny = 0;
+      var lnx = -1.0;
+      var lny = 0.0;
       if (penR < min) {
         min = penR;
         lnx = 1;
@@ -118,18 +116,17 @@ class BrickShapeUtil {
         lny = -1;
       }
       if (penB < min) {
+        min = penB;
         lnx = 0;
         lny = 1;
       }
-    } else {
-      final len = math.sqrt(lenSq);
-      lnx = nx / len;
-      lny = ny / len;
+      return (lnx: lnx, lny: lny, depth: min);
     }
-    return (lnx: lnx, lny: lny);
+    final len = math.sqrt(lenSq);
+    return (lnx: nx / len, lny: ny / len, depth: br - len);
   }
 
-  static ({double lnx, double lny})? _localHitTriangle(
+  static ({double lnx, double lny, double depth})? _localHitTriangle(
     double lx,
     double ly,
     double br,
@@ -192,13 +189,13 @@ class BrickShapeUtil {
           lny = eny;
         }
       }
-      return (lnx: lnx, lny: lny);
+      return (lnx: lnx, lny: lny, depth: -minPen);
     }
     final len = math.max(math.hypot(nx, ny), 1e-8);
-    return (lnx: nx / len, lny: ny / len);
+    return (lnx: nx / len, lny: ny / len, depth: br - len);
   }
 
-  static ({double nx, double ny})? ballHit({
+  static ({double nx, double ny, double depth})? ballHit({
     required double bx,
     required double by,
     required double br,
@@ -216,7 +213,7 @@ class BrickShapeUtil {
     final lx = dx * cos - dy * sin;
     final ly = dx * sin + dy * cos;
 
-    final ({double lnx, double lny})? hit;
+    final ({double lnx, double lny, double depth})? hit;
     if (shape == BrickShape.round) {
       hit = _localHitRoundRect(lx, ly, br, hw, hh);
     } else {
@@ -229,6 +226,7 @@ class BrickShapeUtil {
     return (
       nx: hit.lnx * cosW - hit.lny * sinW,
       ny: hit.lnx * sinW + hit.lny * cosW,
+      depth: hit.depth,
     );
   }
 }

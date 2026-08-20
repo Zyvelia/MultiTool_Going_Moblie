@@ -4,8 +4,10 @@ import '../../theme/app_colors.dart';
 import 'brick_breaker_audio.dart';
 import 'brick_breaker_awards.dart';
 import 'brick_breaker_game.dart';
+import 'brick_breaker_gameplay_settings.dart';
 import 'brick_breaker_mode.dart';
 import 'brick_breaker_painter.dart';
+import 'brick_breaker_save.dart';
 
 class BrickBreakerScreen extends StatefulWidget {
   final BrickBreakerMode mode;
@@ -20,6 +22,7 @@ class _BrickBreakerScreenState extends State<BrickBreakerScreen>
     with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   final _game = BrickBreakerGame();
   final _audio = BrickBreakerAudio();
+  final _gameplay = BrickBreakerGameplaySettings();
   late Ticker _ticker;
   Duration? _lastTick;
   bool _audioReady = false;
@@ -35,11 +38,13 @@ class _BrickBreakerScreenState extends State<BrickBreakerScreen>
 
   Future<void> _boot() async {
     await _audio.init();
+    await _gameplay.load();
     final hs = await _audio.loadHighScore(key: widget.mode.highScoreKey);
     _game.highScore = hs;
+    _game.gameplaySettings = _gameplay;
     _game.onSfx = _handleSfx;
     _game.onFullClear = _recordFullClear;
-    _game.configureMode(widget.mode, storedHighScore: hs);
+    await _game.configureMode(widget.mode, storedHighScore: hs);
     await _audio.setLevel(_game.level);
     if (mounted) {
       setState(() => _audioReady = true);
@@ -62,6 +67,8 @@ class _BrickBreakerScreenState extends State<BrickBreakerScreen>
         _audio.levelClear();
       case 'dangerWarn':
         _audio.dangerWarn();
+      case 'stopDangerWarn':
+        _audio.stopDangerWarn();
       case 'gameOver':
         _audio.gameOver();
         _persistHighScore();
@@ -162,95 +169,401 @@ class _BrickBreakerScreenState extends State<BrickBreakerScreen>
     if (!_audioReady) return;
     await showModalBottomSheet<void>(
       context: context,
-      backgroundColor: AppColors.surface,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-      ),
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
       builder: (ctx) {
         return StatefulBuilder(
           builder: (context, setSheet) {
             final s = _audio.settings;
-            return Padding(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
-              child: SingleChildScrollView(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const Text(
-                      'Sound',
-                      style: TextStyle(
-                        color: AppColors.accentGlow,
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    _toggle(ctx, setSheet, 'Music', s.music, 'music'),
-                    Row(
-                      children: [
-                        const Expanded(
-                          child: Text(
-                            'Music volume',
-                            style: TextStyle(color: AppColors.onSurface, fontSize: 14),
-                          ),
-                        ),
-                        Text(
-                          '${(s.musicVolume * 100).round()}%',
-                          style: const TextStyle(color: AppColors.muted, fontSize: 13),
-                        ),
+            final gp = _gameplay;
+            return DraggableScrollableSheet(
+              initialChildSize: 0.72,
+              minChildSize: 0.45,
+              maxChildSize: 0.92,
+              builder: (_, scrollCtrl) {
+                return Container(
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [
+                        AppColors.card.withValues(alpha: 0.98),
+                        AppColors.surface,
                       ],
                     ),
-                    Slider(
-                      value: s.musicVolume,
-                      min: 0,
-                      max: 1,
-                      divisions: 20,
-                      activeColor: AppColors.accent,
-                      onChanged: (v) async {
-                        await _audio.setMusicVolume(v);
-                        setSheet(() {});
-                        setState(() {});
-                      },
-                    ),
-                    Padding(
-                      padding: const EdgeInsets.only(left: 12),
-                      child: _toggle(ctx, setSheet, 'Use my music files', s.useCustomMusic, 'useCustomMusic'),
-                    ),
-                    const SizedBox(height: 8),
-                    const Text('Soundtrack', style: TextStyle(color: AppColors.muted, fontSize: 13)),
-                    const SizedBox(height: 6),
-                    DropdownButtonFormField<String>(
-                      value: _audio.settings.soundtrackPick,
-                      dropdownColor: AppColors.card,
-                      decoration: InputDecoration(
-                        filled: true,
-                        fillColor: AppColors.card,
-                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                    borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+                    border: Border.all(color: AppColors.border.withValues(alpha: 0.9)),
+                    boxShadow: [
+                      BoxShadow(
+                        color: AppColors.accent.withValues(alpha: 0.12),
+                        blurRadius: 32,
+                        offset: const Offset(0, -4),
                       ),
-                      items: _audio.soundtracks
-                          .map((t) => DropdownMenuItem(value: t.id, child: Text(t.label)))
-                          .toList(),
-                      onChanged: (v) async {
-                        if (v == null) return;
-                        await _audio.setSoundtrackPick(v);
-                        setSheet(() {});
-                        setState(() {});
-                      },
-                    ),
-                    const SizedBox(height: 8),
-                    _toggle(ctx, setSheet, 'Ball (shoot & bounce)', s.ball, 'ball'),
-                    _toggle(ctx, setSheet, 'Brick hits', s.bricks, 'bricks'),
-                    _toggle(ctx, setSheet, 'Lasers', s.lasers, 'lasers'),
-                    _toggle(ctx, setSheet, 'Powerups (+1 orbs)', s.powerups, 'powerups'),
-                    _toggle(ctx, setSheet, 'Level clear & game over', s.ui, 'ui'),
-                  ],
-                ),
-              ),
+                    ],
+                  ),
+                  child: ListView(
+                    controller: scrollCtrl,
+                    padding: const EdgeInsets.fromLTRB(16, 10, 16, 28),
+                    children: [
+                      Center(
+                        child: Container(
+                          width: 42,
+                          height: 4,
+                          margin: const EdgeInsets.only(bottom: 14),
+                          decoration: BoxDecoration(
+                            color: AppColors.border,
+                            borderRadius: BorderRadius.circular(99),
+                          ),
+                        ),
+                      ),
+                      const Text(
+                        'Settings',
+                        style: TextStyle(
+                          color: AppColors.accentGlow,
+                          fontSize: 20,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      const Text(
+                        'Sound & gameplay',
+                        style: TextStyle(color: AppColors.muted, fontSize: 13),
+                      ),
+                      const SizedBox(height: 16),
+                      _settingsSectionCard(
+                        title: 'Sound',
+                        children: [
+                          _toggle(ctx, setSheet, 'Music', s.music, 'music'),
+                          _settingsSliderRow(
+                            label: 'Music volume',
+                            value: '${(s.musicVolume * 100).round()}%',
+                            child: Slider(
+                              value: s.musicVolume,
+                              min: 0,
+                              max: 1,
+                              divisions: 20,
+                              activeColor: AppColors.accent,
+                              onChanged: (v) async {
+                                await _audio.setMusicVolume(v);
+                                setSheet(() {});
+                                setState(() {});
+                              },
+                            ),
+                          ),
+                          Padding(
+                            padding: const EdgeInsets.only(left: 8),
+                            child: _toggle(
+                              ctx,
+                              setSheet,
+                              'Use my music files',
+                              s.useCustomMusic,
+                              'useCustomMusic',
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          const Text(
+                            'Soundtrack',
+                            style: TextStyle(color: AppColors.muted, fontSize: 13),
+                          ),
+                          const SizedBox(height: 6),
+                          DropdownButtonFormField<String>(
+                            value: _audio.settings.soundtrackPick,
+                            dropdownColor: AppColors.card,
+                            decoration: InputDecoration(
+                              filled: true,
+                              fillColor: AppColors.bg.withValues(alpha: 0.55),
+                              contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(10),
+                                borderSide: const BorderSide(color: AppColors.border),
+                              ),
+                              enabledBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(10),
+                                borderSide: const BorderSide(color: AppColors.border),
+                              ),
+                            ),
+                            items: _audio.soundtracks
+                                .map((t) => DropdownMenuItem(value: t.id, child: Text(t.label)))
+                                .toList(),
+                            onChanged: (v) async {
+                              if (v == null) return;
+                              await _audio.setSoundtrackPick(v);
+                              setSheet(() {});
+                              setState(() {});
+                            },
+                          ),
+                          const SizedBox(height: 4),
+                          _toggle(ctx, setSheet, 'Ball (shoot & bounce)', s.ball, 'ball'),
+                          _toggle(ctx, setSheet, 'Brick hits', s.bricks, 'bricks'),
+                          _toggle(ctx, setSheet, 'Lasers', s.lasers, 'lasers'),
+                          _toggle(ctx, setSheet, 'Powerups', s.powerups, 'powerups'),
+                          _toggle(ctx, setSheet, 'Level clear & game over', s.ui, 'ui'),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      _settingsSectionCard(
+                        title: 'Gameplay',
+                        children: [
+                          SwitchListTile(
+                            contentPadding: EdgeInsets.zero,
+                            title: const Text(
+                              'Ball speed-up on long games',
+                              style: TextStyle(color: AppColors.onSurface, fontSize: 14),
+                            ),
+                            value: gp.ballRampEnabled,
+                            activeTrackColor: AppColors.accent.withValues(alpha: 0.45),
+                            activeThumbColor: AppColors.accentGlow,
+                            onChanged: (v) async {
+                              gp.ballRampEnabled = v;
+                              await gp.save();
+                              setSheet(() {});
+                            },
+                          ),
+                          Opacity(
+                            opacity: gp.ballRampEnabled ? 1 : 0.42,
+                            child: IgnorePointer(
+                              ignoring: !gp.ballRampEnabled,
+                              child: Column(
+                                children: [
+                                  _timeSettingRow(
+                                    setSheet: setSheet,
+                                    gp: gp,
+                                    label: 'Grace period',
+                                    unit: gp.ballRampDelayUnit,
+                                    state: gp.delayControlState(),
+                                    onUnitChanged: (unit) async {
+                                      gp.ballRampDelayUnit = unit;
+                                      await gp.save();
+                                      setSheet(() {});
+                                    },
+                                    onDisplayChanged: (value) async {
+                                      gp.setDelayFromDisplay(value);
+                                      await gp.save();
+                                      setSheet(() {});
+                                    },
+                                  ),
+                                  _timeSettingRow(
+                                    setSheet: setSheet,
+                                    gp: gp,
+                                    label: 'Time to max speed',
+                                    unit: gp.ballRampRiseUnit,
+                                    state: gp.riseControlState(),
+                                    onUnitChanged: (unit) async {
+                                      gp.ballRampRiseUnit = unit;
+                                      await gp.save();
+                                      setSheet(() {});
+                                    },
+                                    onDisplayChanged: (value) async {
+                                      gp.setRiseFromDisplay(value);
+                                      await gp.save();
+                                      setSheet(() {});
+                                    },
+                                  ),
+                                  _settingsSliderRow(
+                                    label: 'Max speed multiplier',
+                                    value: '${gp.ballRampMaxClamped.toStringAsFixed(2)}×',
+                                    child: Slider(
+                                      value: gp.ballRampMax,
+                                      min: 1.25,
+                                      max: 5,
+                                      divisions: 75,
+                                      activeColor: AppColors.accent,
+                                      onChanged: (v) async {
+                                        gp.ballRampMax = v;
+                                        await gp.save();
+                                        setSheet(() {});
+                                      },
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                          _settingsHint('Speed ramp resets when you restart the game.'),
+                        ],
+                      ),
+                    ],
+                  ),
+                );
+              },
             );
           },
         );
       },
+    );
+  }
+
+  Widget _settingsSectionCard({required String title, required List<Widget> children}) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 8),
+      decoration: BoxDecoration(
+        color: AppColors.bg.withValues(alpha: 0.35),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppColors.border.withValues(alpha: 0.85)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 7,
+                height: 7,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: AppColors.accent,
+                  boxShadow: [
+                    BoxShadow(
+                      color: AppColors.accent.withValues(alpha: 0.55),
+                      blurRadius: 8,
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                title.toUpperCase(),
+                style: const TextStyle(
+                  color: AppColors.accentGlow,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 1.1,
+                ),
+              ),
+            ],
+          ),
+          const Divider(height: 20, thickness: 1, color: AppColors.border),
+          ...children,
+        ],
+      ),
+    );
+  }
+
+  Widget _timeSettingRow({
+    required StateSetter setSheet,
+    required BrickBreakerGameplaySettings gp,
+    required String label,
+    required BrickBreakerTimeUnit unit,
+    required BrickBreakerTimeControlState state,
+    required ValueChanged<BrickBreakerTimeUnit> onUnitChanged,
+    required ValueChanged<double> onDisplayChanged,
+  }) {
+    return _settingsSliderRow(
+      label: label,
+      value: state.label,
+      child: Row(
+        children: [
+          Expanded(
+            child: Slider(
+              value: state.display,
+              min: state.min,
+              max: state.max,
+              divisions: gp.sliderDivisions(state),
+              activeColor: AppColors.accent,
+              onChanged: onDisplayChanged,
+            ),
+          ),
+          const SizedBox(width: 8),
+          _timeUnitDropdown(
+            value: unit,
+            onChanged: (next) {
+              if (next == null) return;
+              onUnitChanged(next);
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _timeUnitDropdown({
+    required BrickBreakerTimeUnit value,
+    required ValueChanged<BrickBreakerTimeUnit?> onChanged,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8),
+      decoration: BoxDecoration(
+        color: AppColors.card,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: DropdownButtonHideUnderline(
+        child: DropdownButton<BrickBreakerTimeUnit>(
+          value: value,
+          isDense: true,
+          dropdownColor: AppColors.card,
+          style: const TextStyle(color: AppColors.onSurface, fontSize: 12),
+          items: BrickBreakerTimeUnit.values
+              .map(
+                (unit) => DropdownMenuItem(
+                  value: unit,
+                  child: Text(unit.label),
+                ),
+              )
+              .toList(),
+          onChanged: onChanged,
+        ),
+      ),
+    );
+  }
+
+  Widget _settingsSliderRow({
+    required String label,
+    required String value,
+    required Widget child,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 4),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  label,
+                  style: const TextStyle(color: AppColors.onSurface, fontSize: 14),
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: AppColors.accentMuted,
+                  borderRadius: BorderRadius.circular(99),
+                  border: Border.all(color: AppColors.accent.withValues(alpha: 0.28)),
+                ),
+                child: Text(
+                  value,
+                  style: const TextStyle(
+                    color: AppColors.accentGlow,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          child,
+        ],
+      ),
+    );
+  }
+
+  Widget _settingsHint(String text) {
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(top: 6, bottom: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: AppColors.accentMuted.withValues(alpha: 0.55),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: AppColors.accent.withValues(alpha: 0.12)),
+      ),
+      child: Text(
+        text,
+        style: const TextStyle(color: AppColors.muted, fontSize: 12, height: 1.35),
+      ),
     );
   }
 
@@ -263,9 +576,11 @@ class _BrickBreakerScreenState extends State<BrickBreakerScreen>
   ) {
     return SwitchListTile(
       contentPadding: EdgeInsets.zero,
+      dense: true,
       title: Text(label, style: const TextStyle(color: AppColors.onSurface, fontSize: 14)),
       value: value,
-      activeThumbColor: AppColors.accent,
+      activeTrackColor: AppColors.accent.withValues(alpha: 0.45),
+      activeThumbColor: AppColors.accentGlow,
       onChanged: (v) async {
         await _audio.setBoolSetting(key, v);
         setSheet(() {});
@@ -283,18 +598,23 @@ class _BrickBreakerScreenState extends State<BrickBreakerScreen>
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
           tooltip: 'Mode menu',
-          onPressed: () => Navigator.of(context).pop(),
+          onPressed: () async {
+            await BrickBreakerSave.save(widget.mode, _game);
+            if (!context.mounted) return;
+            Navigator.of(context).pop();
+          },
         ),
         actions: [
           IconButton(
             icon: const Icon(Icons.settings),
-            tooltip: 'Sound settings',
+            tooltip: 'Settings',
             onPressed: _openSettings,
           ),
           IconButton(
             icon: const Icon(Icons.refresh),
             tooltip: 'Restart',
             onPressed: () async {
+              await BrickBreakerSave.clear(widget.mode);
               _game.reset();
               await _audio.setLevel(_game.level);
               await _audio.startBgm(force: true);
