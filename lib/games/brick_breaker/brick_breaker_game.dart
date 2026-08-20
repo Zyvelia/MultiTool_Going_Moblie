@@ -184,6 +184,12 @@ class BrickBreakerGame {
   int _lastWarnMs = 0;
 
   final List<BreakerBall> balls = [];
+
+  /// Balls won during a volley. Staged here because boosters are collected
+  /// while iterating [balls]; appending directly would throw
+  /// ConcurrentModificationError and stall the frame.
+  final List<BreakerBall> _pendingBalls = [];
+
   final List<List<BreakerBrick?>> grid = [];
   final List<MapLaser> lasers = [];
   final List<BallBooster> ballBoosters = [];
@@ -208,6 +214,7 @@ class BrickBreakerGame {
   void _sfx(String name) => onSfx?.call(name);
 
   void resize(double w, double h) {
+    if (!w.isFinite || !h.isFinite || w <= 0 || h <= 0) return;
     width = w;
     height = h;
   }
@@ -240,6 +247,7 @@ class BrickBreakerGame {
     launcherX = 0.5;
     aimAngle = -math.pi / 2;
     balls.clear();
+    _pendingBalls.clear();
     lasers.clear();
     ballBoosters.clear();
     teleports.clear();
@@ -335,6 +343,7 @@ class BrickBreakerGame {
     _sessionTime = (data['sessionTime'] as num?)?.toDouble() ?? 0;
 
     balls.clear();
+    _pendingBalls.clear();
     laserBeams.clear();
     _ballsLeftToFire = 0;
     _fireCooldown = 0;
@@ -842,6 +851,7 @@ class BrickBreakerGame {
   void shoot() {
     if (phase != BreakerPhase.aiming) return;
     balls.clear();
+    _pendingBalls.clear();
     _firstBallLandX = null;
     _ballsLeftToFire = ballsPerShot;
     _fireCooldown = 0;
@@ -990,17 +1000,26 @@ class BrickBreakerGame {
     final lead = _firstLeadBall();
     if (lead == null) return;
     for (var i = 0; i < count; i++) {
-      balls.add(BreakerBall(
+      // Fan them out: cloning the lead velocity exactly would leave the new
+      // balls superimposed on it for the whole volley.
+      final spread = (i.isEven ? 1 : -1) * 0.14 * (i ~/ 2 + 1);
+      final cs = math.cos(spread);
+      final sn = math.sin(spread);
+      _pendingBalls.add(BreakerBall(
         x: lead.x,
         y: lead.y,
-        vx: lead.vx,
-        vy: lead.vy,
+        vx: lead.vx * cs - lead.vy * sn,
+        vy: lead.vx * sn + lead.vy * cs,
         isFirst: false,
       ));
     }
   }
 
   void update(double dt) {
+    // resize() runs during paint, which is after the ticker; stepping physics
+    // against the placeholder size puts the floor line on top of the launcher.
+    if (width <= 1 || height <= 1) return;
+
     if (sideFlash > 0) sideFlash = math.max(0, sideFlash - dt);
     if (nukePulse > 0) nukePulse = math.max(0, nukePulse - dt * 1.4);
     for (var i = laserBeams.length - 1; i >= 0; i--) {
@@ -1041,8 +1060,11 @@ class BrickBreakerGame {
       _hitLasers(b);
       _hitBallBoosters(b);
 
+      // Balls spawn exactly on the floor line, so only a ball travelling
+      // downward counts as landed. Without the direction test a launch on a
+      // zero-length frame is killed before it ever moves.
       final floor = launcherY * height;
-      if (b.y >= floor) {
+      if (b.y >= floor && b.vy >= 0) {
         if (b.isFirst && _firstBallLandX == null) {
           _firstBallLandX = b.x.clamp(ballRadius, width - ballRadius);
         }
@@ -1051,6 +1073,12 @@ class BrickBreakerGame {
         b.vx = 0;
         b.vy = 0;
       }
+    }
+
+    if (_pendingBalls.isNotEmpty) {
+      balls.addAll(_pendingBalls);
+      _pendingBalls.clear();
+      anyActive = true;
     }
 
     if (_ballsLeftToFire == 0 && !anyActive) {
@@ -1482,6 +1510,8 @@ class BrickBreakerGame {
   }
 
   void _endVolley() {
+    _pendingBalls.clear();
+
     // Used lasers leave after the wave; unused armed ones carry to the next turn.
     lasers.removeWhere((p) => p.armed && p.waveHits > 0);
     for (final p in lasers) {

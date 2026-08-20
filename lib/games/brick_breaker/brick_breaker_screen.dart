@@ -43,18 +43,42 @@ class _BrickBreakerScreenState extends State<BrickBreakerScreen>
     _ticker = createTicker(_onTick)..start();
   }
 
+  /// Boot steps run independently: on iOS a single failing step (audio session,
+  /// prefs, asset load) must not strand the screen with settings disabled.
+  Future<void> _step(String label, Future<void> Function() run) async {
+    try {
+      await run();
+    } catch (e, st) {
+      debugPrint('BrickBreaker boot step "$label" failed: $e\n$st');
+    }
+  }
+
   Future<void> _boot() async {
-    await _audio.init();
-    await _gameplay.load();
-    final hs = await _audio.loadHighScore(key: widget.mode.highScoreKey);
-    _game.highScore = hs;
-    _game.gameplaySettings = _gameplay;
-    _game.onSfx = _handleSfx;
-    await _game.configureMode(widget.mode, storedHighScore: hs);
-    _sideMeta = await SidePowerMeta.load();
-    await _audio.setLevel(_game.level);
-    if (mounted) {
-      setState(() => _audioReady = true);
+    try {
+      await _step('audio.init', _audio.init);
+      await _step('gameplay.load', _gameplay.load);
+
+      var hs = 0;
+      await _step('loadHighScore', () async {
+        hs = await _audio.loadHighScore(key: widget.mode.highScoreKey);
+      });
+      _game.highScore = hs;
+      _game.gameplaySettings = _gameplay;
+      _game.onSfx = _handleSfx;
+
+      await _step('configureMode', () async {
+        await _game.configureMode(widget.mode, storedHighScore: hs);
+      });
+      await _step('sidePowerMeta', () async {
+        _sideMeta = await SidePowerMeta.load();
+      });
+      await _step('audio.setLevel', () async {
+        await _audio.setLevel(_game.level);
+      });
+    } finally {
+      if (mounted) {
+        setState(() => _audioReady = true);
+      }
     }
   }
 
@@ -113,6 +137,7 @@ class _BrickBreakerScreenState extends State<BrickBreakerScreen>
     _lastTick = elapsed;
     if (prev == null) return;
     final dt = (elapsed - prev).inMicroseconds / 1e6;
+    if (dt <= 0) return;
     final prevLevel = _game.level;
     _game.update(dt.clamp(0, 0.032));
     if (_game.level != prevLevel && _audioReady) {
@@ -189,7 +214,6 @@ class _BrickBreakerScreenState extends State<BrickBreakerScreen>
   }
 
   Future<void> _openSettings() async {
-    if (!_audioReady) return;
     await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
@@ -199,6 +223,7 @@ class _BrickBreakerScreenState extends State<BrickBreakerScreen>
           builder: (context, setSheet) {
             final s = _audio.settings;
             final gp = _gameplay;
+            final tracks = _audio.soundtracks;
             return DraggableScrollableSheet(
               initialChildSize: 0.72,
               minChildSize: 0.45,
@@ -290,7 +315,11 @@ class _BrickBreakerScreenState extends State<BrickBreakerScreen>
                           ),
                           const SizedBox(height: 6),
                           DropdownButtonFormField<String>(
-                            value: _audio.settings.soundtrackPick,
+                            // A saved pick can reference a track that no longer
+                            // ships in this build; an unmatched value asserts.
+                            value: tracks.any((t) => t.id == s.soundtrackPick)
+                                ? s.soundtrackPick
+                                : 'auto',
                             dropdownColor: AppColors.card,
                             decoration: InputDecoration(
                               filled: true,
@@ -305,8 +334,14 @@ class _BrickBreakerScreenState extends State<BrickBreakerScreen>
                                 borderSide: const BorderSide(color: AppColors.border),
                               ),
                             ),
-                            items: _audio.soundtracks
-                                .map((t) => DropdownMenuItem(value: t.id, child: Text(t.label)))
+                            items: tracks
+                                .map((t) => DropdownMenuItem(
+                                      value: t.id,
+                                      child: Text(
+                                        t.label,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ))
                                 .toList(),
                             onChanged: (v) async {
                               if (v == null) return;
@@ -720,12 +755,14 @@ class _BrickBreakerScreenState extends State<BrickBreakerScreen>
                                         painter: BrickBreakerPainter(_game),
                                       ),
                                       if (_overlay() != null) _overlay()!,
+                                      // Below the brick field (which stops at
+                                      // BrickBreakerGame.dangerY) so it never
+                                      // covers play.
                                       if (_game.phase == BreakerPhase.flying)
                                         Positioned(
-                                          right: 6,
-                                          top: 0,
-                                          bottom: 0,
-                                          child: Center(child: _dropSideButton()),
+                                          right: 8,
+                                          bottom: 8,
+                                          child: _dropSideButton(),
                                         ),
                                     ],
                                   ),
@@ -988,30 +1025,29 @@ class _BrickBreakerScreenState extends State<BrickBreakerScreen>
 
   Widget _dropSideButton() {
     return Material(
-      color: AppColors.accentMuted,
-      borderRadius: BorderRadius.circular(14),
+      color: AppColors.accentMuted.withValues(alpha: 0.86),
+      borderRadius: BorderRadius.circular(999),
       child: InkWell(
         onTap: () {
           _game.dropAllBalls();
           setState(() {});
         },
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(999),
         child: Container(
-          width: 64,
-          padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 8),
+          padding: const EdgeInsets.fromLTRB(12, 11, 14, 11),
           decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(14),
+            borderRadius: BorderRadius.circular(999),
             border: Border.all(color: AppColors.border),
           ),
-          child: const Column(
+          child: const Row(
             mainAxisSize: MainAxisSize.min,
             children: [
               Icon(
                 Icons.keyboard_double_arrow_down,
                 color: AppColors.accentGlow,
-                size: 26,
+                size: 18,
               ),
-              SizedBox(height: 4),
+              SizedBox(width: 5),
               Text(
                 'DROP',
                 style: TextStyle(
