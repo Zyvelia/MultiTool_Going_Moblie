@@ -90,7 +90,11 @@ class BrickBreakerPainter extends CustomPainter {
       final rect = game.cellRect(p.row, p.col);
       final cx = (rect.left + rect.right) / 2;
       final cy = (rect.top + rect.bottom) / 2;
-      _drawBuriedLaser(canvas, Offset(cx, cy), p);
+      if (p.buried) {
+        _drawBuriedLaser(canvas, Offset(cx, cy), p);
+      } else {
+        _drawArmedLaser(canvas, Offset(cx, cy), p);
+      }
     }
 
     for (final pick in game.ballBoosters) {
@@ -216,7 +220,48 @@ class BrickBreakerPainter extends CustomPainter {
       Paint()..color = Colors.black.withValues(alpha: 0.45),
     );
     _drawLaserArrowIcon(canvas, c, p.kind, alpha: 0.35 + progress * 0.55);
-    _drawLabel(canvas, c, '${p.mineHp}');
+    if (p.mineHp > 0) {
+      _drawLabel(canvas, c, '${p.mineHp}');
+    }
+  }
+
+  void _drawArmedLaser(Canvas canvas, Offset c, MapLaser p) {
+    final color = _laserColor(p.kind);
+    final active = p.readyForWave;
+    final glow = active ? 0.35 : 0.18;
+    final stroke = active ? 0.9 : 0.55;
+
+    canvas.drawCircle(
+      c,
+      14,
+      Paint()
+        ..color = color.withValues(alpha: glow)
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 6),
+    );
+    canvas.drawCircle(
+      c,
+      10,
+      Paint()
+        ..color = color.withValues(alpha: stroke)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2.5,
+    );
+    _drawLaserArrowIcon(canvas, c, p.kind, alpha: active ? 1 : 0.65);
+
+    if (p.waveHits > 0) {
+      final chargeTp = TextPainter(
+        text: TextSpan(
+          text: '${p.waveHits}',
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 11,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        textDirection: TextDirection.ltr,
+      )..layout();
+      chargeTp.paint(canvas, Offset(c.dx + 10, c.dy - 12));
+    }
   }
 
   Color _laserColor(LaserKind kind) {

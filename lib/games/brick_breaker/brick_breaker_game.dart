@@ -7,13 +7,16 @@ enum LaserKind { vertical, horizontal, cross }
 
 enum LaserBeamShape { vertical, horizontal, cross }
 
-/// Buried laser pickup — mine it, then it fires immediately on unlock.
+/// Buried laser pickup — mine it, then each ball that passes through fires it until the wave ends.
 class MapLaser {
   int row;
   int col;
   LaserKind kind;
   int mineHp;
   final int mineMax;
+  bool armed = false;
+  bool readyForWave = false;
+  int waveHits = 0;
 
   MapLaser({
     required this.row,
@@ -21,6 +24,8 @@ class MapLaser {
     required this.kind,
     required this.mineHp,
   }) : mineMax = mineHp;
+
+  bool get buried => !armed;
 
   final Map<int, double> _nextHitFromBall = {};
   static const hitGap = 0.07;
@@ -30,6 +35,10 @@ class MapLaser {
     if (volleyTime < next) return false;
     _nextHitFromBall[ball.id] = volleyTime + hitGap;
     return true;
+  }
+
+  void resetVolleyCooldowns() {
+    _nextHitFromBall.clear();
   }
 }
 
@@ -295,6 +304,13 @@ class BrickBreakerGame {
     balls.clear();
     _firstBallLandX = null;
     _ballsLeftToFire = ballsPerShot;
+    _fireCooldown = 0;
+    for (final p in lasers) {
+      if (p.armed) {
+        p.readyForWave = true;
+        p.resetVolleyCooldowns();
+      }
+    }
     _volleyTime = 0;
     phase = BreakerPhase.flying;
   }
@@ -381,36 +397,31 @@ class BrickBreakerGame {
   void _hitBricks(BreakerBall b) {
     for (var r = 0; r < grid.length; r++) {
       for (var c = 0; c < grid[r].length; c++) {
-        final brick = grid[r][c];
-        if (brick == null || !brick.alive) continue;
+        final bounds = _brickBoundsAt(r, c);
+        if (bounds == null) continue;
 
-        final left = c * brickW * width;
-        final top = rowTopPx(r);
-        final right = left + brickW * width - 4;
-        final bottom = rowBottomPx(r) - 4;
-
-        if (b.x + ballRadius < left ||
-            b.x - ballRadius > right ||
-            b.y + ballRadius < top ||
-            b.y - ballRadius > bottom) {
+        if (!_ballOverlapsRect(
+          b.x,
+          b.y,
+          bounds.left,
+          bounds.top,
+          bounds.right,
+          bounds.bottom,
+        )) {
           continue;
         }
 
-        if (brick.kind == BrickKind.barrier) {
-          _reflectFromRect(b, left, top, right, bottom);
-          return;
+        final brick = grid[r][c]!;
+        if (brick.kind != BrickKind.barrier) {
+          _damageBrick(r, c, 1);
         }
-
-        _damageBrick(r, c, 1);
-        _reflectFromRect(b, left, top, right, bottom);
+        _reflectFromRect(b, bounds.left, bounds.top, bounds.right, bounds.bottom);
         return;
       }
     }
   }
 
   void _hitLasers(BreakerBall b) {
-    final unlocked = <MapLaser>[];
-
     for (final p in lasers) {
       final rect = cellRect(p.row, p.col);
       if (b.x + ballRadius < rect.left ||
@@ -422,18 +433,28 @@ class BrickBreakerGame {
 
       if (!p.tryChargeFrom(b, _volleyTime)) continue;
 
-      p.mineHp--;
-      score += 5;
-      if (p.mineHp <= 0) {
-        unlocked.add(p);
-        score += 25;
+      if (p.buried) {
+        p.mineHp--;
+        score += 5;
+        if (p.mineHp <= 0) {
+          p.armed = true;
+          p.readyForWave = true;
+          score += 25;
+          _triggerLaser(p);
+        }
+        continue;
+      }
+
+      if (p.armed && p.readyForWave) {
+        _triggerLaser(p);
       }
     }
+  }
 
-    for (final p in unlocked) {
-      _fireLaser(p);
-      lasers.remove(p);
-    }
+  void _triggerLaser(MapLaser laser) {
+    _fireLaser(laser);
+    laser.waveHits++;
+    score += 8;
   }
 
   void _hitBallBoosters(BreakerBall b) {
@@ -503,8 +524,51 @@ class BrickBreakerGame {
     }
   }
 
-  void _reflectFromRect(
-    BreakerBall b,
+  ({double left, double top, double right, double bottom})? _brickBoundsAt(int r, int c) {
+    final brick = grid[r][c];
+    if (brick == null || !brick.alive) return null;
+    final left = c * brickW * width;
+    final top = rowTopPx(r);
+    return (
+      left: left,
+      top: top,
+      right: left + brickW * width - 4,
+      bottom: rowBottomPx(r) - 4,
+    );
+  }
+
+  bool _ballOverlapsRect(
+    double x,
+    double y,
+    double left,
+    double top,
+    double right,
+    double bottom,
+  ) {
+    return !(x + ballRadius < left ||
+        x - ballRadius > right ||
+        y + ballRadius < top ||
+        y - ballRadius > bottom);
+  }
+
+  ({double left, double top, double right, double bottom})? _firstBrickHit(double x, double y) {
+    for (var r = 0; r < grid.length; r++) {
+      for (var c = 0; c < grid[r].length; c++) {
+        final bounds = _brickBoundsAt(r, c);
+        if (bounds == null) continue;
+        if (_ballOverlapsRect(x, y, bounds.left, bounds.top, bounds.right, bounds.bottom)) {
+          return bounds;
+        }
+      }
+    }
+    return null;
+  }
+
+  (double vx, double vy) _reflectedVelocity(
+    double x,
+    double y,
+    double vx,
+    double vy,
     double left,
     double top,
     double right,
@@ -512,16 +576,37 @@ class BrickBreakerGame {
   ) {
     final cx = (left + right) / 2;
     final cy = (top + bottom) / 2;
-    final dx = b.x - cx;
-    final dy = b.y - cy;
+    final dx = x - cx;
+    final dy = y - cy;
     if (dx.abs() / (right - left) > dy.abs() / (bottom - top)) {
-      b.vx = dx > 0 ? b.vx.abs() : -b.vx.abs();
-    } else {
-      b.vy = dy > 0 ? b.vy.abs() : -b.vy.abs();
+      return (dx > 0 ? vx.abs() : -vx.abs(), vy);
     }
+    return (vx, dy > 0 ? vy.abs() : -vy.abs());
+  }
+
+  void _reflectFromRect(
+    BreakerBall b,
+    double left,
+    double top,
+    double right,
+    double bottom,
+  ) {
+    final (vx, vy) = _reflectedVelocity(b.x, b.y, b.vx, b.vy, left, top, right, bottom);
+    b.vx = vx;
+    b.vy = vy;
   }
 
   void _endVolley() {
+    // Used lasers leave after the wave; unused armed ones carry to the next turn.
+    lasers.removeWhere((p) => p.armed && p.waveHits > 0);
+    for (final p in lasers) {
+      if (p.armed) {
+        p.readyForWave = false;
+        p.waveHits = 0;
+        p.resetVolleyCooldowns();
+      }
+    }
+
     step++;
     level++;
 
@@ -633,15 +718,21 @@ class BrickBreakerGame {
     var y = launcherPy;
     var dx = math.cos(aimAngle);
     var dy = math.sin(aimAngle);
-    const stepLen = 5.0;
-    const maxSteps = 320;
+    const stepLen = 3.0;
+    const maxSteps = 480;
     final floor = launcherY * height;
 
     for (var i = 0; i < maxSteps; i++) {
       x += dx * stepLen;
       y += dy * stepLen;
 
+      if (y >= floor) {
+        dots.add(Offset(x.clamp(ballRadius, width - ballRadius), floor));
+        break;
+      }
+
       var bounced = false;
+
       if (x < ballRadius) {
         x = ballRadius + (ballRadius - x);
         dx = dx.abs();
@@ -656,15 +747,33 @@ class BrickBreakerGame {
         dy = dy.abs();
         bounced = true;
       }
-      if (y >= floor) break;
+
+      final brick = _firstBrickHit(x, y);
+      if (brick != null) {
+        (dx, dy) = _reflectedVelocity(
+          x,
+          y,
+          dx,
+          dy,
+          brick.left,
+          brick.top,
+          brick.right,
+          brick.bottom,
+        );
+        // Step back out of the brick so the path does not draw through it.
+        x -= dx * stepLen * 0.35;
+        y -= dy * stepLen * 0.35;
+        bounced = true;
+      }
 
       if (bounced) {
         bounces.add(Offset(x, y));
-        if (bounces.length > 12) break;
+        if (bounces.length > 14) break;
       } else if (i % 3 == 0) {
         dots.add(Offset(x, y));
       }
     }
+
     return (dots: dots, bounces: bounces);
   }
 }
