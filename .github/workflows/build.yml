@@ -135,12 +135,11 @@ jobs:
       - name: Patch iOS for unsigned build
         run: python3 scripts/patch_ios_unsigned.py
 
-      # flutter build ios runs pod install + all Flutter Xcode phases itself.
-      # Raw xcodebuild skips embed/thin and breaks on [CP] Manifest.lock drift.
+      # After patch: no Podfile / no [CP] Manifest.lock — SPM plugins only.
       - name: Build iOS (unsigned, no codesign)
         run: |
           xattr -cr . 2>/dev/null || true
-          flutter build ios --release --no-codesign
+          flutter build ios --release --no-codesign --no-pub
 
       - name: Verify Runner.app bundle
         run: |

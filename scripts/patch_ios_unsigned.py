@@ -1,122 +1,26 @@
 #!/usr/bin/env python3
-"""Minimal iOS patches for unsigned CI builds (no flutter build ios)."""
+"""Patches for unsigned iOS CI builds (no Apple Developer team).
+
+Flutter 3.47+ ships iOS plugins as Swift Packages. Legacy CocoaPods
+integration from `flutter create` triggers Manifest.lock drift on CI.
+This script deintegrates CocoaPods and disables code signing on Runner.
+"""
 from __future__ import annotations
 
 import re
+import shutil
+import subprocess
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+IOS = ROOT / "ios"
 IOS_DEPLOYMENT_TARGET = "15.0"
-
-_PODFILE_TEMPLATE = f"""platform :ios, '{IOS_DEPLOYMENT_TARGET}'
-
-ENV['COCOAPODS_DISABLE_STATS'] = 'true'
-
-project 'Runner', {{
-  'Debug' => :debug,
-  'Profile' => :release,
-  'Release' => :release,
-}}
-
-def flutter_root
-  generated_xcode_build_settings_path = File.expand_path(File.join('..', 'Flutter', 'Generated.xcconfig'), __FILE__)
-  unless File.exist?(generated_xcode_build_settings_path)
-    raise "#{{generated_xcode_build_settings_path}} must exist. Run flutter pub get first"
-  end
-
-  File.foreach(generated_xcode_build_settings_path) do |line|
-    matches = line.match(/FLUTTER_ROOT=(.*)/)
-    return matches[1].strip if matches
-  end
-  raise "FLUTTER_ROOT not found in #{{generated_xcode_build_settings_path}}"
-end
-
-require File.expand_path(File.join('packages', 'flutter_tools', 'bin', 'podhelper'), flutter_root)
-
-flutter_ios_podfile_setup
-
-target 'Runner' do
-  use_frameworks!
-  use_modular_headers!
-
-  flutter_install_all_ios_pods File.dirname(File.realpath(__FILE__))
-end
-
-post_install do |installer|
-  installer.pods_project.targets.each do |target|
-    flutter_additional_ios_build_settings(target)
-    target.build_configurations.each do |config|
-      config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '{IOS_DEPLOYMENT_TARGET}'
-    end
-  end
-end
-"""
-
-_POD_SIGNING_HOOK = """
-    # Unsigned CI — pods must not require a Development Team.
-    installer.pods_project.targets.each do |target|
-      target.build_configurations.each do |config|
-        config.build_settings['CODE_SIGNING_ALLOWED'] = 'NO'
-        config.build_settings['CODE_SIGNING_REQUIRED'] = 'NO'
-        config.build_settings['CODE_SIGNING_IDENTITY'] = ''
-        config.build_settings['EXPANDED_CODE_SIGN_IDENTITY'] = '-'
-      end
-    end
-"""
-
-_DEPLOYMENT_TARGET_HOOK = f"""
-    installer.pods_project.targets.each do |target|
-      target.build_configurations.each do |config|
-        config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '{IOS_DEPLOYMENT_TARGET}'
-      end
-    end
-"""
-
-
-def ensure_podfile() -> None:
-    path = ROOT / "ios/Podfile"
-    if not path.is_file():
-        if not (ROOT / "ios/Flutter/Generated.xcconfig").is_file():
-            raise SystemExit("ios/Podfile missing — run flutter pub get first")
-        path.write_text(_PODFILE_TEMPLATE, encoding="utf-8")
-        print(f"Created {path}")
-        return
-
-    text = path.read_text(encoding="utf-8")
-    original = text
-
-    # Raise platform floor — Flutter stable requires >= 15.0 on recent Xcode.
-    text = re.sub(
-        r"^#?\s*platform\s+:ios,\s*['\"]?\d+(?:\.\d+)?['\"]?\s*$",
-        f"platform :ios, '{IOS_DEPLOYMENT_TARGET}'",
-        text,
-        count=1,
-        flags=re.MULTILINE,
-    )
-    if not re.search(r"^platform\s+:ios,", text, flags=re.MULTILINE):
-        text = f"platform :ios, '{IOS_DEPLOYMENT_TARGET}'\n\n" + text
-
-    if "IPHONEOS_DEPLOYMENT_TARGET" not in text and "post_install do |installer|" in text:
-        text = text.replace(
-            "post_install do |installer|",
-            "post_install do |installer|" + _DEPLOYMENT_TARGET_HOOK,
-            1,
-        )
-
-    if "Unsigned CI" not in text and "post_install do |installer|" in text:
-        text = text.replace(
-            "post_install do |installer|",
-            "post_install do |installer|" + _POD_SIGNING_HOOK,
-            1,
-        )
-
-    if text != original:
-        path.write_text(text, encoding="utf-8")
-        print(f"Patched {path} (platform {IOS_DEPLOYMENT_TARGET})")
 
 
 def bump_pbxproj_deployment_target() -> None:
-    path = ROOT / "ios/Runner.xcodeproj/project.pbxproj"
+    path = IOS / "Runner.xcodeproj/project.pbxproj"
+    if not path.is_file():
+        return
     text = path.read_text(encoding="utf-8")
     original = text
     text = re.sub(
@@ -131,7 +35,9 @@ def bump_pbxproj_deployment_target() -> None:
 
 def patch_pbxproj_code_signing() -> None:
     """Disable signing on Runner target configs (not just strip DEVELOPMENT_TEAM)."""
-    path = ROOT / "ios/Runner.xcodeproj/project.pbxproj"
+    path = IOS / "Runner.xcodeproj/project.pbxproj"
+    if not path.is_file():
+        return
     text = path.read_text(encoding="utf-8")
     original = text
 
@@ -152,11 +58,7 @@ def patch_pbxproj_code_signing() -> None:
             return block
         if "CODE_SIGNING_ALLOWED = NO" in block:
             return block
-        return block.replace(
-            "\t\t\t};",
-            signing_lines + "\t\t\t};",
-            1,
-        )
+        return block.replace("\t\t\t};", signing_lines + "\t\t\t};", 1)
 
     text = re.sub(
         r"\t\t\tisa = XCBuildConfiguration;\n\t\t\tbuildSettings = \{.*?\n\t\t\t\};",
@@ -171,7 +73,9 @@ def patch_pbxproj_code_signing() -> None:
 
 
 def strip_pbxproj_signing() -> None:
-    path = ROOT / "ios/Runner.xcodeproj/project.pbxproj"
+    path = IOS / "Runner.xcodeproj/project.pbxproj"
+    if not path.is_file():
+        return
     text = path.read_text(encoding="utf-8")
     original = text
     text = re.sub(r"\t\t\t\tDEVELOPMENT_TEAM = .*;\n", "", text)
@@ -182,11 +86,87 @@ def strip_pbxproj_signing() -> None:
         print(f"Stripped signing from {path}")
 
 
+def _scrub_cocoapods_from_pbxproj() -> None:
+    """Remove CocoaPods build phases + xcconfig refs left after deintegrate."""
+    path = IOS / "Runner.xcodeproj/project.pbxproj"
+    if not path.is_file():
+        return
+    text = path.read_text(encoding="utf-8")
+    original = text
+
+    text = re.sub(
+        r"\t\t[A-F0-9]{24} /\* \[CP\] [^\n]+ \*/ = \{.*?\n\t\t\};\n",
+        "",
+        text,
+        flags=re.DOTALL,
+    )
+    text = re.sub(
+        r"\t\t\t\t[A-F0-9]{24} /\* \[CP\] [^\n]+ \*/,\n",
+        "",
+        text,
+    )
+    text = re.sub(
+        r'\t\t\tbaseConfigurationReference = [A-F0-9]{24} /\* Pods-Runner\.[^"]+\.xcconfig \*/;\n',
+        "",
+        text,
+    )
+    text = re.sub(
+        r'\t\t\tbaseConfigurationReference = [A-F0-9]{24} /\* Pods-RunnerTests\.[^"]+\.xcconfig \*/;\n',
+        "",
+        text,
+    )
+
+    if text != original:
+        path.write_text(text, encoding="utf-8")
+        print(f"Scrubbed CocoaPods references from {path}")
+
+
+def deintegrate_cocoapods() -> None:
+    """Drop CocoaPods — Flutter 3.47+ plugins here are Swift Packages."""
+    podfile = IOS / "Podfile"
+    if not podfile.is_file():
+        _scrub_cocoapods_from_pbxproj()
+        return
+
+    try:
+        result = subprocess.run(
+            ["pod", "deintegrate"],
+            cwd=IOS,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode == 0:
+            print("pod deintegrate OK")
+        else:
+            print(f"pod deintegrate exit {result.returncode}: {result.stderr or result.stdout}")
+    except FileNotFoundError:
+        print("pod CLI not found — scrubbing project manually")
+
+    _scrub_cocoapods_from_pbxproj()
+
+    for rel in ("Podfile", "Podfile.lock"):
+        p = IOS / rel
+        if p.is_file():
+            p.unlink()
+            print(f"Removed {p}")
+
+    pods_dir = IOS / "Pods"
+    if pods_dir.is_dir():
+        shutil.rmtree(pods_dir)
+        print(f"Removed {pods_dir}")
+
+    workspace = IOS / "Runner.xcworkspace"
+    if workspace.is_dir():
+        shutil.rmtree(workspace)
+        print(f"Removed {workspace}")
+
+
 def main() -> None:
-    ensure_podfile()
     bump_pbxproj_deployment_target()
     strip_pbxproj_signing()
     patch_pbxproj_code_signing()
+    deintegrate_cocoapods()
     print("iOS unsigned-build patches applied.")
 
 
