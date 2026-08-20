@@ -2,6 +2,7 @@ import 'dart:math' as math;
 
 import 'brick_breaker_awards.dart';
 import 'brick_breaker_mode.dart';
+import 'brick_breaker_shapes.dart';
 import 'dart:ui';
 
 enum BrickKind { normal, heavy, barrier }
@@ -57,11 +58,13 @@ class BreakerBrick {
   int hp;
   BrickKind kind;
   final double angle;
+  final BrickShape shape;
 
   BreakerBrick({
     required this.hp,
     this.kind = BrickKind.normal,
     required this.angle,
+    this.shape = BrickShape.round,
   });
 
   bool get alive => kind == BrickKind.barrier || hp > 0;
@@ -247,12 +250,13 @@ class BrickBreakerGame {
     if (step >= 8 && roll < 0.05) {
       return BreakerBrick(hp: 0, kind: BrickKind.barrier, angle: angle);
     }
+    final shape = BrickShapeUtil.pick(_rng);
     if (step >= 2 && roll < 0.35) {
       final hp = (2 + _rng.nextInt(3) + step ~/ 8).clamp(2, 18);
-      return BreakerBrick(hp: hp, kind: BrickKind.heavy, angle: angle);
+      return BreakerBrick(hp: hp, kind: BrickKind.heavy, angle: angle, shape: shape);
     }
     final hp = (1 + _rng.nextInt(2) + step ~/ 10 + level).clamp(1, 15);
-    return BreakerBrick(hp: hp, kind: BrickKind.normal, angle: angle);
+    return BreakerBrick(hp: hp, kind: BrickKind.normal, angle: angle, shape: shape);
   }
 
   void _spawnTopRow() {
@@ -462,15 +466,16 @@ class BrickBreakerGame {
         final shape = _brickShapeAt(r, c);
         if (shape == null) continue;
 
-        final hit = _ballHitsRotRect(
-          b.x,
-          b.y,
-          ballRadius,
+        final hit = BrickShapeUtil.ballHit(
+          bx: b.x,
+          by: b.y,
+          br: ballRadius,
           cx: shape.cx,
           cy: shape.cy,
           hw: shape.hw,
           hh: shape.hh,
           angle: shape.angle,
+          shape: shape.brickShape,
         );
         if (hit == null) continue;
 
@@ -678,6 +683,7 @@ class BrickBreakerGame {
     double hw,
     double hh,
     double angle,
+    BrickShape brickShape,
     int r,
     int c,
   })? _brickShapeAt(int r, int c) {
@@ -693,70 +699,9 @@ class BrickBreakerGame {
       hw: bw / 2,
       hh: bh / 2,
       angle: brick.angle,
+      brickShape: brick.shape,
       r: r,
       c: c,
-    );
-  }
-
-  ({double nx, double ny})? _ballHitsRotRect(
-    double bx,
-    double by,
-    double br, {
-    required double cx,
-    required double cy,
-    required double hw,
-    required double hh,
-    required double angle,
-  }) {
-    final cos = math.cos(-angle);
-    final sin = math.sin(-angle);
-    final dx = bx - cx;
-    final dy = by - cy;
-    final lx = dx * cos - dy * sin;
-    final ly = dx * sin + dy * cos;
-
-    final clx = lx.clamp(-hw, hw);
-    final cly = ly.clamp(-hh, hh);
-    var nx = lx - clx;
-    var ny = ly - cly;
-    final lenSq = nx * nx + ny * ny;
-    if (lenSq >= br * br) return null;
-
-    double lnx;
-    double lny;
-    if (lenSq < 1e-8) {
-      final penL = lx + hw;
-      final penR = hw - lx;
-      final penT = ly + hh;
-      final penB = hh - ly;
-      var min = penL;
-      lnx = -1;
-      lny = 0;
-      if (penR < min) {
-        min = penR;
-        lnx = 1;
-        lny = 0;
-      }
-      if (penT < min) {
-        min = penT;
-        lnx = 0;
-        lny = -1;
-      }
-      if (penB < min) {
-        lnx = 0;
-        lny = 1;
-      }
-    } else {
-      final len = math.sqrt(lenSq);
-      lnx = nx / len;
-      lny = ny / len;
-    }
-
-    final cosW = math.cos(angle);
-    final sinW = math.sin(angle);
-    return (
-      nx: lnx * cosW - lny * sinW,
-      ny: lnx * sinW + lny * cosW,
     );
   }
 
@@ -789,15 +734,16 @@ class BrickBreakerGame {
       for (var c = 0; c < grid[r].length; c++) {
         final shape = _brickShapeAt(r, c);
         if (shape == null) continue;
-        final hit = _ballHitsRotRect(
-          x,
-          y,
-          ballRadius,
+        final hit = BrickShapeUtil.ballHit(
+          bx: x,
+          by: y,
+          br: ballRadius,
           cx: shape.cx,
           cy: shape.cy,
           hw: shape.hw,
           hh: shape.hh,
           angle: shape.angle,
+          shape: shape.brickShape,
         );
         if (hit != null) return hit;
       }

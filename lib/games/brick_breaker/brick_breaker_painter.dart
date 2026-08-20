@@ -2,6 +2,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import '../../theme/app_colors.dart';
 import 'brick_breaker_game.dart';
+import 'brick_breaker_shapes.dart';
 
 class BrickBreakerPainter extends CustomPainter {
   final BrickBreakerGame game;
@@ -151,6 +152,8 @@ class BrickBreakerPainter extends CustomPainter {
     canvas.save();
     canvas.translate(rect.center.dx, rect.center.dy);
     canvas.rotate(brick.angle);
+    final hw = rect.width / 2;
+    final hh = rect.height / 2;
     final local = Rect.fromCenter(
       center: Offset.zero,
       width: rect.width,
@@ -166,25 +169,61 @@ class BrickBreakerPainter extends CustomPainter {
       return;
     }
 
-    if (brick.kind == BrickKind.heavy) {
-      final t = (brick.hp / 18).clamp(0.0, 1.0);
-      _fillBrick(
-        canvas,
-        local,
-        Color.lerp(const Color(0xFF2A1030), AppColors.wine, t)!,
-        Color.lerp(AppColors.wine, AppColors.accent, 1 - t)!,
-      );
+    if (brick.shape == BrickShape.round) {
+      if (brick.kind == BrickKind.heavy) {
+        final t = (brick.hp / 18).clamp(0.0, 1.0);
+        _fillBrick(
+          canvas,
+          local,
+          Color.lerp(const Color(0xFF2A1030), AppColors.wine, t)!,
+          Color.lerp(AppColors.wine, AppColors.accent, 1 - t)!,
+        );
+      } else {
+        final t = (brick.hp / 15).clamp(0.0, 1.0);
+        _fillBrick(
+          canvas,
+          local,
+          Color.lerp(AppColors.wine, AppColors.accent, 1 - t)!,
+          AppColors.accentGlow,
+        );
+      }
     } else {
-      final t = (brick.hp / 15).clamp(0.0, 1.0);
-      _fillBrick(
-        canvas,
-        local,
-        Color.lerp(AppColors.wine, AppColors.accent, 1 - t)!,
-        AppColors.accentGlow,
-      );
+      final path = BrickShapeUtil.brickPath(brick.shape, hw, hh);
+      if (brick.kind == BrickKind.heavy) {
+        final t = (brick.hp / 18).clamp(0.0, 1.0);
+        _fillBrickPath(
+          canvas,
+          path,
+          Color.lerp(const Color(0xFF2A1030), AppColors.wine, t)!,
+          Color.lerp(AppColors.wine, AppColors.accent, 1 - t)!,
+        );
+      } else {
+        final t = (brick.hp / 15).clamp(0.0, 1.0);
+        _fillBrickPath(
+          canvas,
+          path,
+          Color.lerp(AppColors.wine, AppColors.accent, 1 - t)!,
+          AppColors.accentGlow,
+        );
+      }
     }
     _drawLabel(canvas, Offset.zero, '${brick.hp}');
     canvas.restore();
+  }
+
+  void _fillBrickPath(Canvas canvas, Path path, Color fill, Color stroke) {
+    canvas.drawPath(
+      path,
+      Paint()..color = fill.withValues(alpha: 0.88),
+    );
+    canvas.drawPath(
+      path,
+      Paint()
+        ..color = stroke.withValues(alpha: 0.7)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.2
+        ..strokeJoin = StrokeJoin.round,
+    );
   }
 
   void _fillBrick(Canvas canvas, Rect rect, Color fill, Color stroke) {
