@@ -141,15 +141,6 @@ jobs:
       - name: Install pods
         run: cd ios && pod install
 
-      - name: Assemble Flutter iOS release bundle
-        run: |
-          flutter assemble \
-            -dTargetPlatform=ios \
-            -dTargetFile=lib/main.dart \
-            -dBuildMode=release \
-            -dIosArchs=arm64 \
-            ios_release_bundle
-
       - name: Build iOS with xcodebuild (unsigned)
         run: |
           set +e
