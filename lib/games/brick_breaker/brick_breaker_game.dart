@@ -163,6 +163,9 @@ class BrickBreakerGame {
   static const ballSepSlop = 0.85;
   static const ballMaxCollideIters = 4;
   static const teleportCooldown = 0.42;
+  /// Ceiling on the persistent ball count. Every gain is clamped to this, so a
+  /// low value silently eats pickups once the player is near it.
+  static const maxBallsPerShot = 50;
   /// Longest a volley may run before it is force-ended. Real volleys finish well
   /// inside this; anything longer means a ball has wedged and the round would
   /// otherwise sit there until the player hits DROP.
@@ -361,7 +364,7 @@ class BrickBreakerGame {
     level = data['level'] as int? ?? 1;
     step = data['step'] as int? ?? 0;
     score = data['score'] as int? ?? 0;
-    ballsPerShot = (data['ballsPerShot'] as int? ?? 1).clamp(1, 24);
+    ballsPerShot = (data['ballsPerShot'] as int? ?? 1).clamp(1, maxBallsPerShot);
     // Aim is not part of the save -- the player sets it fresh each turn, and
     // restoring it only risks carrying a bad angle into a new session.
     launcherX = 0.5;
@@ -882,7 +885,7 @@ class BrickBreakerGame {
     balls.clear();
     _pendingBalls.clear();
     _firstBallLandX = null;
-    _ballsLeftToFire = ballsPerShot.clamp(1, 24);
+    _ballsLeftToFire = ballsPerShot.clamp(1, maxBallsPerShot);
     _fireCooldown = 0;
     for (final p in lasers) {
       if (p.armed) {
@@ -962,9 +965,9 @@ class BrickBreakerGame {
 
   bool _sideMegaBalls() {
     const add = 10;
-    ballsPerShot = (ballsPerShot + add).clamp(1, 24);
+    ballsPerShot = (ballsPerShot + add).clamp(1, maxBallsPerShot);
     if (phase == BreakerPhase.flying) {
-      _ballsLeftToFire = (_ballsLeftToFire + add).clamp(0, 24);
+      _ballsLeftToFire = (_ballsLeftToFire + add).clamp(0, maxBallsPerShot);
     }
     score += 25;
     _sfx('booster');
@@ -1376,7 +1379,7 @@ class BrickBreakerGame {
 
       ballBoosters.removeAt(i);
       final bonus = pick.bonus;
-      ballsPerShot = (ballsPerShot + bonus).clamp(1, 24);
+      ballsPerShot = (ballsPerShot + bonus).clamp(1, maxBallsPerShot);
       if (phase == BreakerPhase.flying) _spawnBonusBalls(bonus);
       score += 20 + bonus * 15;
       _sfx('booster');

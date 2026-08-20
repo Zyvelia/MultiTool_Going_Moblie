@@ -138,6 +138,8 @@ class _BrickBreakerScreenState extends State<BrickBreakerScreen>
     if (prev == null) return;
     final dt = (elapsed - prev).inMicroseconds / 1e6;
     if (dt <= 0) return;
+    // The game is still default-constructed until configureMode() lands.
+    if (!_audioReady) return;
     final prevLevel = _game.level;
     _game.update(dt.clamp(0, 0.032));
     if (_game.level != prevLevel && _audioReady) {
@@ -174,6 +176,7 @@ class _BrickBreakerScreenState extends State<BrickBreakerScreen>
   }
 
   void _onPanUpdate(DragUpdateDetails d, BoxConstraints box) {
+    if (!_audioReady) return;
     if (_game.phase != BreakerPhase.aiming) return;
     final nx = (d.localPosition.dx / box.maxWidth).clamp(0.0, 1.0);
     final ny = (d.localPosition.dy / box.maxHeight).clamp(0.0, 1.0);
@@ -182,6 +185,9 @@ class _BrickBreakerScreenState extends State<BrickBreakerScreen>
   }
 
   void _onPanEnd(DragEndDetails _) {
+    // configureMode() finishes with balls.clear(); a shot fired before boot
+    // completes is deleted mid-flight and looks like the ball vanished.
+    if (!_audioReady) return;
     if (_game.phase == BreakerPhase.aiming) {
       _game.shoot();
       setState(() {});
@@ -694,14 +700,23 @@ class _BrickBreakerScreenState extends State<BrickBreakerScreen>
                 padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
                 child: Row(
                   children: [
-                    _chip('Score', '${_game.score}'),
+                    // Chips scroll rather than shove "Best" off the edge on
+                    // narrow screens.
+                    Expanded(
+                      child: SingleChildScrollView(
+                        scrollDirection: Axis.horizontal,
+                        child: Row(
+                          children: [
+                            _chip('Score', '${_game.score}'),
+                            const SizedBox(width: 8),
+                            _chip('Level', '${_game.level}'),
+                            const SizedBox(width: 8),
+                            _chip('Mode', widget.mode.title),
+                          ],
+                        ),
+                      ),
+                    ),
                     const SizedBox(width: 8),
-                    _chip('Level', '${_game.level}'),
-                    const SizedBox(width: 8),
-                    _chip('Mode', widget.mode.title),
-                    const SizedBox(width: 8),
-                    _chip('Balls', '${_game.ballsPerShot}'),
-                    const Spacer(),
                     Text(
                       'Best ${_game.highScore}',
                       style: const TextStyle(color: AppColors.muted, fontSize: 12),
