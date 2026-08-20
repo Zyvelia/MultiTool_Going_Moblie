@@ -107,6 +107,19 @@ class BrickBreakerPainter extends CustomPainter {
       _drawBallBooster(canvas, Offset(cx, cy), pick.bonus);
     }
 
+    for (final portal in game.teleports) {
+      final rect = game.cellRect(portal.row, portal.col);
+      final cx = (rect.left + rect.right) / 2;
+      final cy = (rect.top + rect.bottom) / 2;
+      _drawTeleportPortal(
+        canvas,
+        Offset(cx, cy),
+        rect.right - rect.left,
+        portal.color,
+        game.portalFacingAngle(portal),
+      );
+    }
+
     if (game.phase == BreakerPhase.aiming) {
       final preview = game.aimPreview();
       final dotPaint = Paint()
@@ -145,6 +158,22 @@ class BrickBreakerPainter extends CustomPainter {
         textDirection: TextDirection.ltr,
       )..layout();
       countTp.paint(canvas, Offset(lx + 10, ly - 8));
+    }
+
+    if (game.sideFlash > 0) {
+      canvas.drawRect(
+        Offset.zero & size,
+        Paint()..color = Color.fromRGBO(255, 82, 82, game.sideFlash * 0.42),
+      );
+    }
+    if (game.nukePulse > 0) {
+      canvas.drawRect(
+        Rect.fromLTWH(2, 2, size.width - 4, size.height - 4),
+        Paint()
+          ..color = Colors.white.withValues(alpha: game.nukePulse * 0.55)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 3,
+      );
     }
   }
 
@@ -413,6 +442,54 @@ class BrickBreakerPainter extends CustomPainter {
       textDirection: TextDirection.ltr,
     )..layout();
     plusTp.paint(canvas, Offset(c.dx + 8, c.dy - 10));
+  }
+
+  void _drawTeleportPortal(
+    Canvas canvas,
+    Offset c,
+    double cellW,
+    TeleportColor color,
+    double angle,
+  ) {
+    final portalColor = color == TeleportColor.orange
+        ? const Color(0xFFFF9100)
+        : const Color(0xFF40C4FF);
+    final r = cellW * 0.28;
+    canvas.save();
+    canvas.translate(c.dx, c.dy);
+    canvas.rotate(angle);
+    canvas.drawCircle(
+      Offset.zero,
+      r,
+      Paint()..color = portalColor.withValues(alpha: 0.22),
+    );
+    final ring = Paint()
+      ..color = portalColor.withValues(alpha: 0.92)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2.2
+      ..strokeCap = StrokeCap.round;
+    const outerStart = -math.pi * 0.62;
+    const outerSweep = math.pi * 1.24;
+    canvas.drawArc(
+      Rect.fromCircle(center: Offset.zero, radius: r * 0.72),
+      outerStart,
+      outerSweep,
+      false,
+      ring,
+    );
+    canvas.drawArc(
+      Rect.fromCircle(center: Offset.zero, radius: r * 0.44),
+      outerStart + 0.28,
+      outerSweep,
+      false,
+      ring,
+    );
+    canvas.drawCircle(
+      Offset(r * 0.18, 0),
+      r * 0.12,
+      Paint()..color = Colors.white.withValues(alpha: 0.85),
+    );
+    canvas.restore();
   }
 
   @override

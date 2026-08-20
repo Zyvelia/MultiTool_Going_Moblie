@@ -104,6 +104,29 @@ jobs:
           print("Patched Info.plist for AirPrint discovery")
           PY
 
+      # Quick Send — save downloaded photos/videos to the camera roll.
+      - name: Patch Info.plist for Photo Library save
+        run: |
+          python3 - <<'PY'
+          path = "ios/Runner/Info.plist"
+          with open(path) as f:
+              plist = f.read()
+
+          block = (
+              "\t<key>NSPhotoLibraryAddUsageDescription</key>\n"
+              "\t<string>Save photos and videos received from your PC via Quick Send.</string>\n"
+              "\t<key>NSPhotoLibraryUsageDescription</key>\n"
+              "\t<string>Pick photos to send to your PC via Quick Send.</string>\n"
+          )
+          if "NSPhotoLibraryAddUsageDescription" not in plist:
+              plist = plist.replace("<dict>\n", "<dict>\n" + block, 1)
+              with open(path, "w") as f:
+                  f.write(plist)
+              print("Patched Info.plist for Quick Send photos")
+          else:
+              print("Info.plist already has photo library keys")
+          PY
+
       - run: flutter pub get
 
       - name: Generate launcher icons

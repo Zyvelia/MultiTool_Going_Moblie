@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import '../../theme/app_colors.dart';
@@ -9,6 +11,7 @@ import 'brick_breaker_mode.dart';
 import 'brick_breaker_painter.dart';
 import '../../services/settings_service.dart';
 import 'brick_breaker_save.dart';
+import 'brick_breaker_side_powerups.dart';
 
 class BrickBreakerScreen extends StatefulWidget {
   final BrickBreakerMode mode;
@@ -29,6 +32,8 @@ class _BrickBreakerScreenState extends State<BrickBreakerScreen>
   Duration? _lastTick;
   bool _audioReady = false;
   String? _lastLeaderboardMessage;
+  SidePowerMeta? _sideMeta;
+  final _sideRng = math.Random();
 
   @override
   void initState() {
@@ -46,6 +51,7 @@ class _BrickBreakerScreenState extends State<BrickBreakerScreen>
     _game.gameplaySettings = _gameplay;
     _game.onSfx = _handleSfx;
     await _game.configureMode(widget.mode, storedHighScore: hs);
+    _sideMeta = await SidePowerMeta.load();
     await _audio.setLevel(_game.level);
     if (mounted) {
       setState(() => _audioReady = true);
@@ -682,43 +688,52 @@ class _BrickBreakerScreenState extends State<BrickBreakerScreen>
                   padding: const EdgeInsets.all(12),
                   child: LayoutBuilder(
                     builder: (context, box) {
-                      return GestureDetector(
-                        onPanStart: (d) => _onPanStart(d, box),
-                        onPanUpdate: (d) => _onPanUpdate(d, box),
-                        onPanEnd: _onPanEnd,
-                        onTap: _onTap,
-                        child: DecoratedBox(
-                          decoration: BoxDecoration(
-                            color: AppColors.card,
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(color: AppColors.border),
-                            boxShadow: [
-                              BoxShadow(
-                                color: AppColors.accent.withValues(alpha: 0.08),
-                                blurRadius: 24,
-                              ),
-                            ],
-                          ),
-                          child: ClipRRect(
-                            borderRadius: BorderRadius.circular(12),
-                            child: Stack(
-                              fit: StackFit.expand,
-                              children: [
-                                CustomPaint(
-                                  painter: BrickBreakerPainter(_game),
+                      return Row(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Center(child: _sidePanel()),
+                          Expanded(
+                            child: GestureDetector(
+                              behavior: HitTestBehavior.opaque,
+                              onPanStart: (d) => _onPanStart(d, box),
+                              onPanUpdate: (d) => _onPanUpdate(d, box),
+                              onPanEnd: _onPanEnd,
+                              onTap: _onTap,
+                              child: DecoratedBox(
+                                decoration: BoxDecoration(
+                                  color: AppColors.card,
+                                  borderRadius: BorderRadius.circular(12),
+                                  border: Border.all(color: AppColors.border),
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: AppColors.accent.withValues(alpha: 0.08),
+                                      blurRadius: 24,
+                                    ),
+                                  ],
                                 ),
-                                if (_overlay() != null) _overlay()!,
-                                if (_game.phase == BreakerPhase.flying)
-                                  Positioned(
-                                    right: 6,
-                                    top: 0,
-                                    bottom: 0,
-                                    child: Center(child: _dropSideButton()),
+                                child: ClipRRect(
+                                  borderRadius: BorderRadius.circular(12),
+                                  child: Stack(
+                                    fit: StackFit.expand,
+                                    children: [
+                                      CustomPaint(
+                                        painter: BrickBreakerPainter(_game),
+                                      ),
+                                      if (_overlay() != null) _overlay()!,
+                                      if (_game.phase == BreakerPhase.flying)
+                                        Positioned(
+                                          right: 6,
+                                          top: 0,
+                                          bottom: 0,
+                                          child: Center(child: _dropSideButton()),
+                                        ),
+                                    ],
                                   ),
-                              ],
+                                ),
+                              ),
                             ),
                           ),
-                        ),
+                        ],
                       );
                     },
                   ),
@@ -727,7 +742,7 @@ class _BrickBreakerScreenState extends State<BrickBreakerScreen>
               const Padding(
                 padding: EdgeInsets.fromLTRB(16, 0, 16, 12),
                 child: Text(
-                  'Drag to aim · Release to shoot · Fly through +1 orbs & lasers',
+                  'Drag to aim · Daily chest on the side (resets each week)',
                   textAlign: TextAlign.center,
                   style: TextStyle(color: AppColors.muted, fontSize: 12),
                 ),
@@ -737,6 +752,238 @@ class _BrickBreakerScreenState extends State<BrickBreakerScreen>
         ],
       ),
     );
+  }
+
+  Widget _sidePanel() {
+    final meta = _sideMeta;
+    if (meta == null) return const SizedBox(width: 58);
+
+    return SizedBox(
+      width: 58,
+      child: Padding(
+        padding: const EdgeInsets.only(right: 4),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _chestButton(meta),
+            const SizedBox(height: 8),
+            for (final type in SidePowerType.values) ...[
+              _sidePowerButton(meta, type),
+              if (type != SidePowerType.values.last) const SizedBox(height: 8),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _chestButton(SidePowerMeta meta) {
+    final ready = meta.chestReady;
+    return Material(
+      color: ready
+          ? const Color(0xFFFFC107).withValues(alpha: 0.28)
+          : const Color(0xFFFFC107).withValues(alpha: 0.12),
+      borderRadius: BorderRadius.circular(14),
+      child: InkWell(
+        onTap: ready ? _openChest : null,
+        borderRadius: BorderRadius.circular(14),
+        child: Container(
+          width: 58,
+          padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 4),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(
+              color: ready
+                  ? const Color(0xFFFFD54F).withValues(alpha: 0.65)
+                  : AppColors.border,
+            ),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text('🎁', style: TextStyle(fontSize: 20)),
+              const SizedBox(height: 2),
+              const Text(
+                'CHEST',
+                style: TextStyle(
+                  color: Color(0xFFFFD54F),
+                  fontSize: 9,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: 0.5,
+                ),
+              ),
+              Text(
+                formatChestStatus(meta),
+                style: TextStyle(
+                  color: ready ? const Color(0xFFFFE082) : AppColors.muted,
+                  fontSize: 9,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _sidePowerButton(SidePowerMeta meta, SidePowerType type) {
+    final def = sidePowerDefs[type]!;
+    final count = meta.count(type);
+    return Material(
+      color: AppColors.card,
+      borderRadius: BorderRadius.circular(14),
+      child: InkWell(
+        onTap: count > 0 ? () => _useSidePower(type) : null,
+        borderRadius: BorderRadius.circular(14),
+        child: Opacity(
+          opacity: count > 0 ? 1 : 0.35,
+          child: Container(
+            width: 58,
+            padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: AppColors.border),
+            ),
+            child: Stack(
+              clipBehavior: Clip.none,
+              children: [
+                Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      width: 26,
+                      height: 26,
+                      alignment: Alignment.center,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: def.color.withValues(alpha: 0.22),
+                        border: Border.all(color: def.color.withValues(alpha: 0.55)),
+                      ),
+                      child: Text(
+                        def.icon,
+                        style: TextStyle(
+                          color: def.color,
+                          fontSize: def.icon.length > 1 ? 11 : 14,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      def.label.toUpperCase(),
+                      style: const TextStyle(
+                        color: AppColors.muted,
+                        fontSize: 8,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 0.4,
+                      ),
+                    ),
+                  ],
+                ),
+                Positioned(
+                  top: -2,
+                  right: 0,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                    decoration: BoxDecoration(
+                      color: AppColors.accent.withValues(alpha: 0.45),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Text(
+                      '$count',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 9,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _useSidePower(SidePowerType type) async {
+    final meta = _sideMeta;
+    if (meta == null || meta.count(type) <= 0) return;
+    if (_game.phase == BreakerPhase.gameOver ||
+        _game.phase == BreakerPhase.levelClear) {
+      return;
+    }
+    if (!_game.useSidePower(type)) return;
+    final inv = Map<SidePowerType, int>.from(meta.inventory);
+    inv[type] = math.max(0, (inv[type] ?? 0) - 1);
+    _sideMeta = meta.copyWith(inventory: inv);
+    await _sideMeta!.save();
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _openChest() async {
+    var meta = _sideMeta?.normalized();
+    if (meta == null || !meta.chestReady) return;
+    final day = meta.nextChestDay;
+    final lastDaily = day >= 7;
+    final rewards = pickChestRewards(_sideRng, lastDailyOfWeek: lastDaily);
+    final inv = Map<SidePowerType, int>.from(meta.inventory);
+    for (final e in rewards.entries) {
+      inv[e.key] = (inv[e.key] ?? 0) + e.value;
+    }
+    _sideMeta = meta.copyWith(
+      inventory: inv,
+      lastChestDate: _dateKeyNow(),
+      chestsThisWeek: math.min(7, meta.chestsThisWeek + 1),
+    );
+    await _sideMeta!.save();
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.surface,
+        title: const Text(
+          'Chest opened!',
+          style: TextStyle(color: AppColors.accentGlow),
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              lastDaily
+                  ? 'Weekly finale — guaranteed Board Nuke 💥 plus bonus powerups!'
+                  : 'Daily chest (${day}/7 this week). Come back tomorrow!',
+              style: const TextStyle(color: AppColors.muted, fontSize: 13),
+            ),
+            const SizedBox(height: 12),
+            for (final e in rewards.entries)
+              if (e.value > 0)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: Text(
+                    '${sidePowerDefs[e.key]!.icon} ${sidePowerDefs[e.key]!.title} ×${e.value}',
+                    style: const TextStyle(color: AppColors.onSurface),
+                  ),
+                ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Nice!'),
+          ),
+        ],
+      ),
+    );
+    if (mounted) setState(() {});
+  }
+
+  String _dateKeyNow() {
+    final n = DateTime.now();
+    return '${n.year}-${n.month.toString().padLeft(2, '0')}-${n.day.toString().padLeft(2, '0')}';
   }
 
   Widget _dropSideButton() {
