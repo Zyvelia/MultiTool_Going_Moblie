@@ -38,7 +38,10 @@ const brickBreakerMusicPool = <String>[
   'assets/games/brick_breaker/music/level-10.mp3',
   'assets/games/brick_breaker/music/level-25.mp3',
   'assets/games/brick_breaker/music/level-50.mp3',
-  ...brickBreakerExtraMusic.map((t) => t.asset),
+  // Keep asset paths in sync with brickBreakerExtraMusic.
+  'assets/games/brick_breaker/music/volo-theme.mp3',
+  'assets/games/brick_breaker/music/cynthia-battle.mp3',
+  'assets/games/brick_breaker/music/cynthia-approach.mp3',
 ];
 
 const brickBreakerWarnSound = 'assets/games/brick_breaker/sfx/low-health.mp3';
