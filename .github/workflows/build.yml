@@ -16,20 +16,14 @@ jobs:
         with:
           channel: 'stable'
 
-      # This repo ships only lib/ + pubspec.yaml (no android/ios folders).
-      # `flutter create .` scaffolds the missing platform folders in place
-      # without touching lib/ or pubspec.yaml.
       - name: Scaffold platform folders
         run: flutter create --platforms=android,ios --org com.zsmultitool --no-pub .
 
-      - name: Patch Android project (manifest, audio, compileSdk, Kotlin)
+      - name: Patch Android project
         run: python3 scripts/patch_android.py
 
       - run: flutter pub get
 
-      # Regenerates android/app/src/main/res/mipmap-*/ic_launcher.png (and
-      # adaptive icon layers) from assets/icon/icon.png. Needed every run
-      # since android/ is scaffolded fresh above, not committed.
       - name: Generate launcher icons
         run: dart run flutter_launcher_icons
 
@@ -46,8 +40,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Select Xcode version
-        uses: maxim-lobanov/setup-xcode@v1
+      - uses: maxim-lobanov/setup-xcode@v1
         with:
           xcode-version: '16.4'
 
@@ -55,115 +48,14 @@ jobs:
         with:
           channel: 'stable'
 
-      - name: Scaffold platform folders
-        run: flutter create --platforms=android,ios --org com.zsmultitool .
-
-      # audio_service (Music tab) needs background audio mode declared in
-      # Info.plist — ios/ is scaffolded fresh every run.
-      - name: Patch Info.plist for background audio
+      - name: Scaffold + deps
         run: |
-          python3 - <<'PY'
-          path = "ios/Runner/Info.plist"
-          with open(path) as f:
-              plist = f.read()
+          flutter create --platforms=android,ios --org com.zsmultitool .
+          flutter pub get
+          dart run flutter_launcher_icons
 
-          block = (
-              "\t<key>UIBackgroundModes</key>\n"
-              "\t<array>\n"
-              "\t\t<string>audio</string>\n"
-              "\t</array>\n"
-          )
-          plist = plist.replace("<dict>\n", "<dict>\n" + block, 1)
-
-          with open(path, "w") as f:
-              f.write(plist)
-          print("Patched Info.plist for background audio")
-          PY
-
-      # AirPrint / Bonjour for the Notes print button (printing package).
-      - name: Patch Info.plist for AirPrint discovery
-        run: |
-          python3 - <<'PY'
-          path = "ios/Runner/Info.plist"
-          with open(path) as f:
-              plist = f.read()
-
-          block = (
-              "\t<key>NSLocalNetworkUsageDescription</key>\n"
-              "\t<string>Used to find printers on your Wi-Fi network so notes can be printed.</string>\n"
-              "\t<key>NSBonjourServices</key>\n"
-              "\t<array>\n"
-              "\t\t<string>_ipp._tcp</string>\n"
-              "\t\t<string>_ipps._tcp</string>\n"
-              "\t</array>\n"
-          )
-          plist = plist.replace("<dict>\n", "<dict>\n" + block, 1)
-
-          with open(path, "w") as f:
-              f.write(plist)
-          print("Patched Info.plist for AirPrint discovery")
-          PY
-
-      # Quick Send — save downloaded photos/videos to the camera roll.
-      - name: Patch Info.plist for Photo Library save
-        run: |
-          python3 - <<'PY'
-          path = "ios/Runner/Info.plist"
-          with open(path) as f:
-              plist = f.read()
-
-          block = (
-              "\t<key>NSPhotoLibraryAddUsageDescription</key>\n"
-              "\t<string>Save photos and videos received from your PC via Quick Send.</string>\n"
-              "\t<key>NSPhotoLibraryUsageDescription</key>\n"
-              "\t<string>Pick photos to send to your PC via Quick Send.</string>\n"
-          )
-          if "NSPhotoLibraryAddUsageDescription" not in plist:
-              plist = plist.replace("<dict>\n", "<dict>\n" + block, 1)
-              with open(path, "w") as f:
-                  f.write(plist)
-              print("Patched Info.plist for Quick Send photos")
-          else:
-              print("Info.plist already has photo library keys")
-          PY
-
-      - run: flutter pub get
-
-      - name: Generate launcher icons
-        run: dart run flutter_launcher_icons
-
-      - name: Patch iOS for unsigned build
-        run: python3 scripts/patch_ios_unsigned.py
-
-      # After patch: no Podfile / no [CP] Manifest.lock — SPM plugins only.
-      - name: Build iOS (unsigned, no codesign)
-        run: |
-          xattr -cr . 2>/dev/null || true
-          flutter build ios --release --no-codesign --no-pub
-
-      - name: Verify Runner.app bundle
-        run: |
-          APP="build/ios/iphoneos/Runner.app"
-          if [ ! -d "$APP" ]; then
-            echo "Runner.app not found at $APP — listing build/ios:" >&2
-            find build/ios -maxdepth 4 -type d 2>/dev/null || true
-            exit 1
-          fi
-          chmod +x scripts/verify_ios_bundle.sh
-          scripts/verify_ios_bundle.sh "$APP"
-
-      - name: Package IPA
-        run: |
-          APP="build/ios/iphoneos/Runner.app"
-          test -f "$APP/Info.plist" || { echo "Refusing to package IPA without Info.plist"; exit 1; }
-          EXEC_NAME="$(python3 -c "import plistlib; print(plistlib.load(open('$APP/Info.plist','rb')).get('CFBundleExecutable','Runner'))")"
-          test -f "$APP/$EXEC_NAME" || { echo "Refusing to package IPA without main binary $EXEC_NAME"; exit 1; }
-          cd build/ios/iphoneos
-          rm -rf Payload MultiToolRemote-unsigned.ipa
-          mkdir -p Payload
-          cp -r Runner.app Payload/Runner.app
-          zip -r MultiToolRemote-unsigned.ipa Payload
-          echo "IPA packaged — Payload/Runner.app/$EXEC_NAME present"
+      - name: Build unsigned IPA
+        run: bash scripts/build_ios_unsigned.sh
 
       - uses: actions/upload-artifact@v4
         with:

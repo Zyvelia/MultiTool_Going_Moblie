@@ -42,6 +42,7 @@ def patch_pbxproj_code_signing() -> None:
     original = text
 
     text = re.sub(r"\t\t\t\tCODE_SIGN_STYLE = Automatic;\n", "", text)
+    text = re.sub(r"\t\t\t\tCODE_SIGN_STYLE = Manual;\n", "", text)
     text = re.sub(r'\t\t\t\t"CODE_SIGN_IDENTITY\[sdk=iphoneos\*\]" = .*;\n', "", text)
     text = re.sub(r"\t\t\t\tCODE_SIGN_IDENTITY = .*;\n", "", text)
 
