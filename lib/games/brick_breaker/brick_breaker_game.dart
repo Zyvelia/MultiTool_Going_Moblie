@@ -245,18 +245,17 @@ class BrickBreakerGame {
   }
 
   BreakerBrick _makeBrick({required int step}) {
-    final angle = (_rng.nextDouble() - 0.5) * 0.44;
     final roll = _rng.nextDouble();
     if (step >= 8 && roll < 0.05) {
-      return BreakerBrick(hp: 0, kind: BrickKind.barrier, angle: angle);
+      return BreakerBrick(hp: 0, kind: BrickKind.barrier, angle: 0);
     }
     final shape = BrickShapeUtil.pick(_rng);
     if (step >= 2 && roll < 0.35) {
       final hp = (2 + _rng.nextInt(3) + step ~/ 8).clamp(2, 18);
-      return BreakerBrick(hp: hp, kind: BrickKind.heavy, angle: angle, shape: shape);
+      return BreakerBrick(hp: hp, kind: BrickKind.heavy, angle: 0, shape: shape);
     }
     final hp = (1 + _rng.nextInt(2) + step ~/ 10 + level).clamp(1, 15);
-    return BreakerBrick(hp: hp, kind: BrickKind.normal, angle: angle, shape: shape);
+    return BreakerBrick(hp: hp, kind: BrickKind.normal, angle: 0, shape: shape);
   }
 
   void _spawnTopRow() {
