@@ -127,7 +127,7 @@ class BrickBreakerGameplaySettings {
 
   double get ballRampRiseSec => _clampTimeMs(ballRampRiseMs, riseMsMax) / 1000.0;
 
-  double get ballRampMaxClamped => ballRampMax.clamp(1.1, 5.0);
+  double get ballRampMaxClamped => ballRampMax.clamp(1.1, 25.0);
 
   static int _clampTimeMs(int ms, int maxMs) =>
       ms.clamp(timeMsMin, maxMs);

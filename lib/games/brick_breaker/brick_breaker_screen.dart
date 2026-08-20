@@ -2,11 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import '../../theme/app_colors.dart';
 import 'brick_breaker_audio.dart';
-import 'brick_breaker_awards.dart';
 import 'brick_breaker_game.dart';
 import 'brick_breaker_gameplay_settings.dart';
+import 'brick_breaker_leaderboard.dart';
 import 'brick_breaker_mode.dart';
 import 'brick_breaker_painter.dart';
+import '../../services/settings_service.dart';
 import 'brick_breaker_save.dart';
 
 class BrickBreakerScreen extends StatefulWidget {
@@ -23,10 +24,11 @@ class _BrickBreakerScreenState extends State<BrickBreakerScreen>
   final _game = BrickBreakerGame();
   final _audio = BrickBreakerAudio();
   final _gameplay = BrickBreakerGameplaySettings();
+  final _leaderboard = BrickBreakerLeaderboardService();
   late Ticker _ticker;
   Duration? _lastTick;
   bool _audioReady = false;
-  int _awardScoreSnapshot = 0;
+  String? _lastLeaderboardMessage;
 
   @override
   void initState() {
@@ -43,7 +45,6 @@ class _BrickBreakerScreenState extends State<BrickBreakerScreen>
     _game.highScore = hs;
     _game.gameplaySettings = _gameplay;
     _game.onSfx = _handleSfx;
-    _game.onFullClear = _recordFullClear;
     await _game.configureMode(widget.mode, storedHighScore: hs);
     await _audio.setLevel(_game.level);
     if (mounted) {
@@ -72,6 +73,26 @@ class _BrickBreakerScreenState extends State<BrickBreakerScreen>
       case 'gameOver':
         _audio.gameOver();
         _persistHighScore();
+        _submitLeaderboardScore();
+    }
+  }
+
+  Future<void> _submitLeaderboardScore() async {
+    final result = await _leaderboard.submit(
+      mode: widget.mode,
+      score: _game.score,
+    );
+    if (!mounted) return;
+    if (result.ok) {
+      setState(() {
+        _lastLeaderboardMessage = result.rank != null
+            ? 'Leaderboard: #${result.rank} with ${_game.score} pts!'
+            : 'Score submitted to leaderboard!';
+      });
+    } else if (result.error == 'no_name') {
+      setState(() {
+        _lastLeaderboardMessage = 'Set your name in Leaderboard to post scores.';
+      });
     }
   }
 
@@ -88,10 +109,6 @@ class _BrickBreakerScreenState extends State<BrickBreakerScreen>
     final dt = (elapsed - prev).inMicroseconds / 1e6;
     final prevLevel = _game.level;
     _game.update(dt.clamp(0, 0.032));
-    if (_game.score != _awardScoreSnapshot) {
-      _awardScoreSnapshot = _game.score;
-      _checkScoreAward();
-    }
     if (_game.level != prevLevel && _audioReady) {
       _audio.setLevel(_game.level);
     }
@@ -146,23 +163,23 @@ class _BrickBreakerScreenState extends State<BrickBreakerScreen>
       setState(() {});
     } else if (_game.phase == BreakerPhase.gameOver) {
       _game.reset();
-      _awardScoreSnapshot = 0;
+      _lastLeaderboardMessage = null;
       _audio.setLevel(_game.level);
       _audio.startBgm(force: true);
       setState(() {});
     }
   }
 
-  Future<void> _checkScoreAward() async {
-    final bump = await BrickBreakerAwards.updateScore(_game.score);
-    if (bump != null) _game.lastScoreAward = bump;
-  }
-
-  Future<void> _recordFullClear(int score) async {
-    final award = await BrickBreakerAwards.recordFullClear(score);
-    _game.lastClearAward = award;
-    if (award.isNew) _game.lastScoreAward = award;
-    _awardScoreSnapshot = score;
+  Future<void> _openLeaderboard() async {
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => _LeaderboardSheet(
+        mode: widget.mode,
+        leaderboard: _leaderboard,
+      ),
+    );
   }
 
   Future<void> _openSettings() async {
@@ -365,8 +382,8 @@ class _BrickBreakerScreenState extends State<BrickBreakerScreen>
                                     child: Slider(
                                       value: gp.ballRampMax,
                                       min: 1.25,
-                                      max: 5,
-                                      divisions: 75,
+                                      max: 25,
+                                      divisions: 95,
                                       activeColor: AppColors.accent,
                                       onChanged: (v) async {
                                         gp.ballRampMax = v;
@@ -606,6 +623,11 @@ class _BrickBreakerScreenState extends State<BrickBreakerScreen>
         ),
         actions: [
           IconButton(
+            icon: const Icon(Icons.leaderboard),
+            tooltip: 'Leaderboard',
+            onPressed: _openLeaderboard,
+          ),
+          IconButton(
             icon: const Icon(Icons.settings),
             tooltip: 'Settings',
             onPressed: _openSettings,
@@ -804,6 +826,14 @@ class _BrickBreakerScreenState extends State<BrickBreakerScreen>
                 'Score ${_game.score}',
                 style: const TextStyle(color: AppColors.onSurface),
               ),
+              if (_lastLeaderboardMessage != null) ...[
+                const SizedBox(height: 8),
+                Text(
+                  _lastLeaderboardMessage!,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(color: AppColors.accentGlow, fontSize: 12),
+                ),
+              ],
               const SizedBox(height: 12),
               const Text(
                 'Tap to play again',
@@ -832,5 +862,345 @@ class _BrickBreakerScreenState extends State<BrickBreakerScreen>
       );
     }
     return null;
+  }
+}
+
+class _LeaderboardSheet extends StatefulWidget {
+  final BrickBreakerMode mode;
+  final BrickBreakerLeaderboardService leaderboard;
+
+  const _LeaderboardSheet({
+    required this.mode,
+    required this.leaderboard,
+  });
+
+  @override
+  State<_LeaderboardSheet> createState() => _LeaderboardSheetState();
+}
+
+class _LeaderboardSheetState extends State<_LeaderboardSheet> {
+  final _nameCtrl = TextEditingController();
+  final _apiCtrl = TextEditingController();
+  late BrickBreakerMode _viewMode;
+  BrickBreakerLeaderboardSource _source = BrickBreakerLeaderboardSource.pc;
+  String _connectionHint = '';
+  bool _loading = true;
+  String _status = 'Loading…';
+  List<LeaderboardEntry> _entries = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _viewMode = widget.mode;
+    _boot();
+  }
+
+  Future<void> _boot() async {
+    final name = await widget.leaderboard.getName();
+    final public = await SettingsService().getBrickBreakerLeaderboardUrl();
+    final source = await widget.leaderboard.getSource();
+    final hint = await widget.leaderboard.describeConnection();
+    if (mounted) {
+      _nameCtrl.text = name ?? '';
+      _apiCtrl.text = public ?? '';
+      _source = source;
+      _connectionHint = hint;
+    }
+    await _load();
+  }
+
+  Future<void> _setSource(BrickBreakerLeaderboardSource source) async {
+    await widget.leaderboard.setSource(source);
+    final hint = await widget.leaderboard.describeConnection();
+    if (!mounted) return;
+    setState(() {
+      _source = source;
+      _connectionHint = hint;
+    });
+    await _load();
+  }
+
+  Future<void> _load() async {
+    setState(() {
+      _loading = true;
+      _status = 'Loading…';
+    });
+    final hint = await widget.leaderboard.describeConnection();
+    final result = await widget.leaderboard.fetch(mode: _viewMode);
+    if (!mounted) return;
+    setState(() {
+      _loading = false;
+      _connectionHint = hint;
+      if (!result.ok) {
+        _status = _source == BrickBreakerLeaderboardSource.public
+            ? 'Public leaderboard offline — check API URL and try again.'
+            : 'PC leaderboard offline — open Brick Breaker on your PC (port 8450) and confirm Tailscale hostname in app settings.';
+        _entries = [];
+      } else {
+        _status = result.entries.isEmpty
+            ? 'No scores yet — be the first!'
+            : 'Top ${result.entries.length} — ${_viewMode.title}';
+        _entries = result.entries;
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _nameCtrl.dispose();
+    _apiCtrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final you = _nameCtrl.text.trim().toLowerCase();
+    return DraggableScrollableSheet(
+      initialChildSize: 0.72,
+      minChildSize: 0.45,
+      maxChildSize: 0.92,
+      builder: (context, scrollCtrl) {
+        return Container(
+          decoration: const BoxDecoration(
+            color: AppColors.surface,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+            border: Border(top: BorderSide(color: AppColors.border)),
+          ),
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+          child: ListView(
+            controller: scrollCtrl,
+            children: [
+              Center(
+                child: Container(
+                  width: 40,
+                  height: 4,
+                  margin: const EdgeInsets.only(bottom: 12),
+                  decoration: BoxDecoration(
+                    color: AppColors.border,
+                    borderRadius: BorderRadius.circular(99),
+                  ),
+                ),
+              ),
+              const Text(
+                'Leaderboard',
+                style: TextStyle(
+                  color: AppColors.onSurface,
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Expanded(
+                    child: _modeTab('Endless', BrickBreakerMode.endless),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: _modeTab('Siege', BrickBreakerMode.siege),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              const Text(
+                'Leaderboard source',
+                style: TextStyle(color: AppColors.muted, fontSize: 12),
+              ),
+              const SizedBox(height: 6),
+              Row(
+                children: [
+                  Expanded(
+                    child: _sourceTab(
+                      'My PC',
+                      BrickBreakerLeaderboardSource.pc,
+                      'Tailscale :8450',
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: _sourceTab(
+                      'Public',
+                      BrickBreakerLeaderboardSource.public,
+                      'Cloud / web board',
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Text(
+                _connectionHint,
+                style: const TextStyle(color: AppColors.muted, fontSize: 11),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: _nameCtrl,
+                maxLength: 20,
+                decoration: const InputDecoration(
+                  labelText: 'Your name',
+                  counterText: '',
+                  hintText: 'Shown on the board',
+                ),
+                onSubmitted: (_) async {
+                  await widget.leaderboard.setName(_nameCtrl.text);
+                  _load();
+                },
+              ),
+              if (_source == BrickBreakerLeaderboardSource.public) ...[
+                const SizedBox(height: 8),
+                TextField(
+                  controller: _apiCtrl,
+                  decoration: const InputDecoration(
+                    labelText: 'Public API URL',
+                    hintText: SettingsService.brickBreakerLeaderboardDefaultUrl,
+                  ),
+                  onSubmitted: (_) => _saveApiUrl(),
+                ),
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: TextButton(
+                    onPressed: _saveApiUrl,
+                    child: const Text('Save URL & refresh'),
+                  ),
+                ),
+              ],
+              const SizedBox(height: 8),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: AppColors.accentMuted.withValues(alpha: 0.55),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: AppColors.border),
+                ),
+                child: Text(
+                  _status,
+                  style: const TextStyle(color: AppColors.onSurface, fontSize: 12),
+                ),
+              ),
+              const SizedBox(height: 10),
+              if (_loading)
+                const Center(child: Padding(
+                  padding: EdgeInsets.all(24),
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ))
+              else if (_entries.isEmpty)
+                const Padding(
+                  padding: EdgeInsets.all(16),
+                  child: Text(
+                    'Play a run — scores submit on game over when your name is set.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: AppColors.muted, fontSize: 12),
+                  ),
+                )
+              else
+                ..._entries.map((e) {
+                  final isYou = you.isNotEmpty && e.name.toLowerCase() == you;
+                  return Container(
+                    margin: const EdgeInsets.only(bottom: 6),
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: isYou ? AppColors.accentMuted : AppColors.card,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                        color: isYou
+                            ? AppColors.accent.withValues(alpha: 0.45)
+                            : AppColors.border,
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        SizedBox(
+                          width: 32,
+                          child: Text(
+                            '#${e.rank}',
+                            style: const TextStyle(
+                              color: AppColors.accentGlow,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                        Expanded(
+                          child: Text(
+                            e.name,
+                            style: const TextStyle(
+                              color: AppColors.onSurface,
+                              fontWeight: FontWeight.w600,
+                            ),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        Text(
+                          BrickBreakerLeaderboardService.formatScore(e.score),
+                          style: const TextStyle(
+                            color: AppColors.onSurface,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          BrickBreakerLeaderboardService.formatWhen(e.ts),
+                          style: const TextStyle(color: AppColors.muted, fontSize: 10),
+                        ),
+                      ],
+                    ),
+                  );
+                }),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _sourceTab(String label, BrickBreakerLeaderboardSource source, String subtitle) {
+    final active = _source == source;
+    return OutlinedButton(
+      onPressed: () => _setSource(source),
+      style: OutlinedButton.styleFrom(
+        padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
+        backgroundColor: active ? AppColors.accentMuted : AppColors.card,
+        foregroundColor: active ? AppColors.accentGlow : AppColors.muted,
+        side: BorderSide(
+          color: active ? AppColors.accent.withValues(alpha: 0.45) : AppColors.border,
+        ),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(label, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
+          const SizedBox(height: 2),
+          Text(subtitle, style: const TextStyle(fontSize: 10)),
+        ],
+      ),
+    );
+  }
+
+  Widget _modeTab(String label, BrickBreakerMode mode) {
+    final active = _viewMode == mode;
+    return OutlinedButton(
+      onPressed: () async {
+        await widget.leaderboard.setName(_nameCtrl.text);
+        setState(() => _viewMode = mode);
+        _load();
+      },
+      style: OutlinedButton.styleFrom(
+        backgroundColor: active ? AppColors.accentMuted : AppColors.card,
+        foregroundColor: active ? AppColors.accentGlow : AppColors.muted,
+        side: BorderSide(
+          color: active ? AppColors.accent.withValues(alpha: 0.45) : AppColors.border,
+        ),
+      ),
+      child: Text(label),
+    );
+  }
+
+  Future<void> _saveApiUrl() async {
+    final settings = SettingsService();
+    await settings.setBrickBreakerLeaderboardUrl(_apiCtrl.text);
+    if (_source != BrickBreakerLeaderboardSource.public) {
+      await widget.leaderboard.setSource(BrickBreakerLeaderboardSource.public);
+      if (mounted) setState(() => _source = BrickBreakerLeaderboardSource.public);
+    }
+    await _load();
   }
 }

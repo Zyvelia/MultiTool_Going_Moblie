@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'dart:math' as math;
 
-import 'brick_breaker_awards.dart';
+import 'brick_breaker_gameplay_settings.dart';
 import 'brick_breaker_save.dart';
 import 'brick_breaker_gameplay_settings.dart';
 import 'brick_breaker_mode.dart';
@@ -162,11 +162,7 @@ class BrickBreakerGame {
   final math.Random _rng = math.Random();
 
   void Function(String name)? onSfx;
-  void Function(int score)? onFullClear;
   BrickBreakerGameplaySettings? gameplaySettings;
-
-  BrickBreakerScoreAward? lastClearAward;
-  BrickBreakerScoreAward? lastScoreAward;
 
   void _sfx(String name) => onSfx?.call(name);
 
@@ -209,8 +205,6 @@ class BrickBreakerGame {
     _ballsLeftToFire = 0;
     _fireCooldown = 0;
     _firstBallLandX = null;
-    lastClearAward = null;
-    lastScoreAward = null;
     gridDriftY = 0;
     gridDriftX = 0;
     _siegeTime = 0;
@@ -1021,7 +1015,6 @@ class BrickBreakerGame {
       _spawnLevel();
       phase = BreakerPhase.levelClear;
       _sfx('levelClear');
-      onFullClear?.call(score);
       return;
     }
 
@@ -1057,8 +1050,6 @@ class BrickBreakerGame {
   void acknowledgeLevelClear() {
     if (phase == BreakerPhase.levelClear) {
       phase = BreakerPhase.aiming;
-      lastClearAward = null;
-      lastScoreAward = null;
     }
   }
 

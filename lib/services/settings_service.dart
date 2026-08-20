@@ -15,6 +15,7 @@ class ModulePorts {
   static const notes = 8448;
   static const send = 8449;
   static const clipboard = 8451;
+  static const brickBreaker = 8450;
 }
 
 class SettingsService {
@@ -27,8 +28,13 @@ class SettingsService {
   // everything else stays Tailscale-only, matching the fixed
   // ModulePorts scheme above.
   static const _musicPublicUrlKey = 'music_public_base_url';
+  static const _brickBreakerLbUrlKey = 'brick_breaker_leaderboard_url';
   static const _musicPreferredServerKey = 'music_preferred_server';
   static const _musicWifiOnlyKey = 'music_wifi_only_downloads';
+
+  /// Default global leaderboard (Cloudflare Worker) — same board as the web game.
+  static const brickBreakerLeaderboardDefaultUrl =
+      'https://brick-breaker-leaderboard.itszyvelia.workers.dev';
 
   // Backed by iOS Keychain / Android EncryptedSharedPreferences instead of
   // shared_preferences. shared_preferences data lives in the app sandbox
@@ -99,6 +105,7 @@ class SettingsService {
       'notes' => ModulePorts.notes,
       'send' => ModulePorts.send,
       'clipboard' => ModulePorts.clipboard,
+      'brick_breaker' => ModulePorts.brickBreaker,
       _ => throw ArgumentError('unknown module $moduleKey'),
     };
     return 'https://$host:$port';
@@ -124,6 +131,44 @@ class SettingsService {
     }
     u = u.replaceFirst(RegExp(r'/+$'), '');
     await _storage.write(key: _musicPublicUrlKey, value: u);
+  }
+
+  /// Optional public leaderboard API (Cloudflare Worker).
+  /// Falls back to [brickBreakerLeaderboardDefaultUrl] when unset.
+  Future<String?> getBrickBreakerLeaderboardUrl() async {
+    final stored = await _storage.read(key: _brickBreakerLbUrlKey);
+    if (stored != null && stored.isNotEmpty) return stored;
+    return brickBreakerLeaderboardDefaultUrl;
+  }
+
+  Future<void> setBrickBreakerLeaderboardUrl(String url) async {
+    var u = url.trim();
+    if (u.isEmpty) {
+      await _storage.delete(key: _brickBreakerLbUrlKey);
+      return;
+    }
+    if (!u.startsWith('http://') && !u.startsWith('https://')) {
+      u = 'https://$u';
+    }
+    u = u.replaceFirst(RegExp(r'/+$'), '');
+    await _storage.write(key: _brickBreakerLbUrlKey, value: u);
+  }
+
+  static const _brickBreakerLbSourceKey = 'brick_breaker_leaderboard_source';
+
+  /// `pc` (Tailscale :8450) or `public` (Cloudflare Worker URL).
+  /// New installs default to `public`.
+  Future<String> getBrickBreakerLeaderboardSourceKey() async {
+    final v = await _storage.read(key: _brickBreakerLbSourceKey);
+    if (v == null) return 'public';
+    return v == 'public' ? 'public' : 'pc';
+  }
+
+  Future<void> setBrickBreakerLeaderboardSourceKey(String source) async {
+    await _storage.write(
+      key: _brickBreakerLbSourceKey,
+      value: source == 'public' ? 'public' : 'pc',
+    );
   }
 
   /// Private (Tailscale) base URL for music specifically, using the
