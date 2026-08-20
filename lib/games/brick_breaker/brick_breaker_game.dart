@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart';
+
 import 'brick_breaker_gameplay_settings.dart';
 import 'brick_breaker_save.dart';
 import 'brick_breaker_mode.dart';
@@ -161,9 +163,16 @@ class BrickBreakerGame {
   static const ballSepSlop = 0.85;
   static const ballMaxCollideIters = 4;
   static const teleportCooldown = 0.42;
+  /// Longest a volley may run before it is force-ended. Real volleys finish well
+  /// inside this; anything longer means a ball has wedged and the round would
+  /// otherwise sit there until the player hits DROP.
+  static const volleyTimeout = 45.0;
   static const teleportMinColGap = 3;
   static const maxTeleportPairs = 2;
   static const ballSubstepDist = ballRadius * 0.75;
+  /// Ceiling on per-frame collision substeps. A runaway velocity would other-
+  /// wise ask for millions of iterations and hang the frame.
+  static const maxBallSubsteps = 240;
 
   double width = 1;
   double height = 1;
@@ -275,8 +284,6 @@ class BrickBreakerGame {
       'step': step,
       'score': score,
       'ballsPerShot': ballsPerShot,
-      'launcherX': launcherX,
-      'aimAngle': aimAngle,
       'phase': phase == BreakerPhase.flying ? BreakerPhase.aiming.index : phase.index,
       'grid': grid
           .map(
@@ -334,9 +341,11 @@ class BrickBreakerGame {
     level = data['level'] as int? ?? 1;
     step = data['step'] as int? ?? 0;
     score = data['score'] as int? ?? 0;
-    ballsPerShot = data['ballsPerShot'] as int? ?? 1;
-    launcherX = (data['launcherX'] as num?)?.toDouble() ?? 0.5;
-    aimAngle = (data['aimAngle'] as num?)?.toDouble() ?? -math.pi / 2;
+    ballsPerShot = (data['ballsPerShot'] as int? ?? 1).clamp(1, 24);
+    // Aim is not part of the save -- the player sets it fresh each turn, and
+    // restoring it only risks carrying a bad angle into a new session.
+    launcherX = 0.5;
+    aimAngle = -math.pi / 2;
     gridDriftY = (data['gridDriftY'] as num?)?.toDouble() ?? 0;
     gridDriftX = (data['gridDriftX'] as num?)?.toDouble() ?? 0;
     _siegeTime = (data['siegeTime'] as num?)?.toDouble() ?? 0;
@@ -853,7 +862,7 @@ class BrickBreakerGame {
     balls.clear();
     _pendingBalls.clear();
     _firstBallLandX = null;
-    _ballsLeftToFire = ballsPerShot;
+    _ballsLeftToFire = ballsPerShot.clamp(1, 24);
     _fireCooldown = 0;
     for (final p in lasers) {
       if (p.armed) {
@@ -876,7 +885,9 @@ class BrickBreakerGame {
     for (final b in balls) {
       if (!b.active) continue;
       if (b.isFirst && _firstBallLandX == null) {
-        _firstBallLandX = b.x.clamp(ballRadius, width - ballRadius);
+        final landX = b.x.isFinite ? b.x : launcherPx;
+        _firstBallLandX =
+            landX.clamp(ballRadius, math.max(ballRadius, width - ballRadius));
       }
       b.active = false;
       b.y = floor;
@@ -896,7 +907,14 @@ class BrickBreakerGame {
 
   void _syncBallSpeedMul() {
     final mul = _ballSpeedMul();
+    // This scales every live ball, so a bad multiplier here poisons the whole
+    // volley at once rather than just one ball.
+    if (!mul.isFinite || mul <= 0) return;
     if (mul == _lastBallSpeedMul) return;
+    if (!_lastBallSpeedMul.isFinite || _lastBallSpeedMul <= 0) {
+      _lastBallSpeedMul = mul;
+      return;
+    }
     final ratio = mul / _lastBallSpeedMul;
     for (final b in balls) {
       if (!b.active) continue;
@@ -1043,6 +1061,11 @@ class BrickBreakerGame {
 
     _volleyTime += dt;
 
+    if (phase == BreakerPhase.flying && _volleyTime > volleyTimeout) {
+      dropAllBalls();
+      return;
+    }
+
     if (_ballsLeftToFire > 0) {
       _fireCooldown -= dt;
       if (_fireCooldown <= 0) {
@@ -1056,17 +1079,37 @@ class BrickBreakerGame {
     for (final b in balls) {
       if (!b.active) continue;
       anyActive = true;
-      _moveBall(b, dt);
-      _hitLasers(b);
-      _hitBallBoosters(b);
+      // One bad ball must not take the frame with it. An exception escaping
+      // here re-throws every tick, which freezes the board while the DROP
+      // button still responds -- the volley then only ends by hand.
+      try {
+        _moveBall(b, dt);
+        _hitLasers(b);
+        _hitBallBoosters(b);
+      } catch (e, st) {
+        debugPrint('BrickBreaker ball step failed, retiring ball: $e\n$st');
+        b.vx = double.nan;
+      }
 
-      // Balls spawn exactly on the floor line, so only a ball travelling
-      // downward counts as landed. Without the direction test a launch on a
-      // zero-length frame is killed before it ever moves.
+      // Balls spawn exactly on the floor line, so a ball still travelling
+      // upward is not landed yet -- otherwise a launch on a zero-length frame
+      // dies before it moves. Everything else here is an escape hatch: a ball
+      // that is non-finite or has sunk past the floor can never satisfy the
+      // normal test, and leaving it active strands the whole volley.
       final floor = launcherY * height;
-      if (b.y >= floor && b.vy >= 0) {
+      final finite =
+          b.x.isFinite && b.y.isFinite && b.vx.isFinite && b.vy.isFinite;
+      // A collision push can fling a ball clear of the board, where it is both
+      // invisible and unable to ever reach the floor test below.
+      final offBoard =
+          finite && (b.x < -width || b.x > width * 2 || b.y < -height * 2);
+      if (!finite ||
+          offBoard ||
+          (b.y >= floor && (b.vy >= 0 || b.y > floor + ballRadius))) {
         if (b.isFirst && _firstBallLandX == null) {
-          _firstBallLandX = b.x.clamp(ballRadius, width - ballRadius);
+          final landX = b.x.isFinite ? b.x : launcherPx;
+          _firstBallLandX =
+              landX.clamp(ballRadius, math.max(ballRadius, width - ballRadius));
         }
         b.active = false;
         b.y = floor;
@@ -1081,14 +1124,22 @@ class BrickBreakerGame {
       anyActive = true;
     }
 
-    if (_ballsLeftToFire == 0 && !anyActive) {
+    if (_ballsLeftToFire <= 0 && !anyActive) {
       _endVolley();
     }
   }
 
   void _moveBall(BreakerBall b, double dt) {
+    // ceil() throws UnsupportedError on NaN/infinity, which would escape the
+    // whole update and stall every frame until the player hits DROP. Bail out
+    // and let the landing check below retire the ball properly.
+    if (!b.x.isFinite || !b.y.isFinite || !b.vx.isFinite || !b.vy.isFinite) {
+      return;
+    }
     final travel = hypot(b.vx * dt, b.vy * dt);
-    final steps = math.max(1, (travel / ballSubstepDist).ceil());
+    final steps = travel.isFinite
+        ? (travel / ballSubstepDist).ceil().clamp(1, maxBallSubsteps)
+        : 1;
     final subDt = dt / steps;
     for (var s = 0; s < steps; s++) {
       b.x += b.vx * subDt;
@@ -1256,8 +1307,33 @@ class BrickBreakerGame {
     final outLen = math.max(hypot(vx, vy), 1.0);
     vx = (vx / outLen) * spd;
     vy = (vy / outLen) * spd;
-    b.x = exitC.dx + tx * (ballRadius + 4);
-    b.y = exitC.dy + ty * (ballRadius + 4);
+
+    // Carry the entry offset across the link. A pair shares a row, so without
+    // this the exit pins the ball to that row's centre line on every hop and a
+    // shallow shot can orbit between the two portals for the rest of time.
+    final px = -ty;
+    final py = tx;
+    final perp = (b.x - entryC.dx) * px + (b.y - entryC.dy) * py;
+
+    // Leave the exit cell along the outgoing heading. Landing inside it lets
+    // brick resolution shove the ball back through the link on the next step.
+    final rect = cellRect(exit.row, exit.col);
+    final ux = vx / spd;
+    final uy = vy / spd;
+    final clearX = (rect.right - rect.left) / 2 + ballRadius + 2;
+    final clearY = (rect.bottom - rect.top) / 2 + ballRadius + 2;
+    var clear = math.min(
+      ux.abs() > 1e-4 ? clearX / ux.abs() : double.infinity,
+      uy.abs() > 1e-4 ? clearY / uy.abs() : double.infinity,
+    );
+    if (!clear.isFinite) clear = clearX;
+
+    final nx = exitC.dx + px * perp + ux * clear;
+    final ny = exitC.dy + py * perp + uy * clear;
+    b.x = nx.isFinite
+        ? nx.clamp(ballRadius, math.max(ballRadius, width - ballRadius))
+        : exitC.dx;
+    b.y = ny.isFinite ? math.max(ballRadius, ny) : exitC.dy;
     b.vx = vx;
     b.vy = vy;
   }
