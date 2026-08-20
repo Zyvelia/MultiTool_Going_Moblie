@@ -380,7 +380,7 @@ class BrickBreakerGame {
       used.add(_rng.nextInt(cols));
     }
     for (final c in used) {
-      grid[0][c] = _makeBrick(step: step + level * 3);
+      grid[0][c] = _makeBrick(step: step);
     }
     _seedBuriedLasers(rowOnly: 0);
     _seedBallBoosters(rowOnly: 0);
@@ -396,18 +396,85 @@ class BrickBreakerGame {
     return 5 + _rng.nextInt(2);
   }
 
-  BreakerBrick _makeBrick({required int step}) {
+  static const heavyUnlockLevel = 35;
+  static const maxBoostersOnBoard = 3;
+
+  double _barrierChance(int lv) {
+    if (lv < 8) return 0;
+    if (lv >= 60) return 0.025;
+    if (lv >= 30) return 0.035;
+    return 0.05;
+  }
+
+  double _heavySpawnChanceForLevel(int lv) {
+    if (lv < heavyUnlockLevel) return 0;
+    return (0.18 - (lv - heavyUnlockLevel) * 0.0015).clamp(0.07, 0.18);
+  }
+
+  int get normalBrickHpCap => level + 4;
+
+  int get heavyBrickHpCap => level + 8;
+
+  int _hpFromSourceLevel(int sourceLv) {
+    if (sourceLv <= 3) return (1 + _rng.nextInt(3)).clamp(1, 3);
+    return math.max(1, sourceLv - 4 + _rng.nextInt(9));
+  }
+
+  int _sourceLevelForSpawn(int currentLv) {
+    if (currentLv <= 8) {
+      return math.max(1, currentLv - _rng.nextInt(3));
+    }
+    if (currentLv <= 19) {
+      final roll = _rng.nextDouble();
+      if (roll < 0.14) {
+        return 1 + _rng.nextInt(math.min(5, currentLv));
+      }
+      if (roll < 0.32) {
+        return 1 + _rng.nextInt(math.max(1, (currentLv * 0.45).floor()));
+      }
+      final t = _rng.nextDouble();
+      return math.max(1, (1 + (1 - t * t) * (currentLv - 1)).floor());
+    }
     final roll = _rng.nextDouble();
-    if (step >= 8 && roll < 0.05) {
+    if (roll < 0.12) {
+      return 1 + _rng.nextInt(math.max(1, (currentLv * 0.4).floor()));
+    }
+    final lo = math.max(1, (currentLv * 0.65).floor());
+    final hi = currentLv + _rng.nextInt(3);
+    return lo + _rng.nextInt(hi - lo + 1);
+  }
+
+  int _hpForLevel(int lv) {
+    if (lv <= 3) return (1 + _rng.nextInt(3)).clamp(1, 3);
+    return _hpFromSourceLevel(_sourceLevelForSpawn(lv));
+  }
+
+  int _heavyHpForLevel(int lv) {
+    final source = _sourceLevelForSpawn(lv);
+    return _hpFromSourceLevel(source) + 2 + _rng.nextInt(3);
+  }
+
+  BreakerBrick _makeBrick({required int step}) {
+    final lv = level;
+    final shape = BrickShapeUtil.pick(_rng);
+    if (lv >= 8 && _rng.nextDouble() < _barrierChance(lv)) {
       return BreakerBrick(hp: 0, kind: BrickKind.barrier, angle: 0);
     }
-    final shape = BrickShapeUtil.pick(_rng);
-    if (step >= 2 && roll < 0.35) {
-      final hp = (2 + _rng.nextInt(3) + step ~/ 8).clamp(2, 18);
-      return BreakerBrick(hp: hp, kind: BrickKind.heavy, angle: 0, shape: shape);
+    if (lv >= heavyUnlockLevel &&
+        _rng.nextDouble() < _heavySpawnChanceForLevel(lv)) {
+      return BreakerBrick(
+        hp: _heavyHpForLevel(lv),
+        kind: BrickKind.heavy,
+        angle: 0,
+        shape: shape,
+      );
     }
-    final hp = (1 + _rng.nextInt(2) + step ~/ 10 + level).clamp(1, 15);
-    return BreakerBrick(hp: hp, kind: BrickKind.normal, angle: 0, shape: shape);
+    return BreakerBrick(
+      hp: _hpForLevel(lv),
+      kind: BrickKind.normal,
+      angle: 0,
+      shape: shape,
+    );
   }
 
   void _spawnTopRow() {
@@ -440,16 +507,23 @@ class BrickBreakerGame {
 
   int _pickBoosterBonus() {
     final roll = _rng.nextDouble();
-    if (roll < 0.82) return 1;
-    if (roll < 0.93) return 2;
+    final high = level >= 20 || step >= 35;
+    if (roll < (high ? 0.72 : 0.82)) return 1;
+    if (roll < (high ? 0.90 : 0.93)) return 2;
     if (roll < 0.98) return step >= 8 ? 3 : 1;
     return step >= 18 ? 5 : 2;
   }
 
+  double _boosterSpawnChance() {
+    final lv = level;
+    if (lv <= 15) return (0.14 + lv * 0.004).clamp(0.14, 0.22);
+    if (lv <= 40) return (0.22 - (lv - 15) * 0.003).clamp(0.11, 0.22);
+    return 0.1;
+  }
+
   void _seedBallBoosters({required int rowOnly, double extraChance = 0}) {
-    final chance = extraChance > 0
-        ? extraChance
-        : math.min(0.26, 0.16 + step * 0.0008);
+    if (extraChance <= 0 && ballBoosters.length >= maxBoostersOnBoard) return;
+    final chance = extraChance > 0 ? extraChance : _boosterSpawnChance();
     var placed = 0;
     for (var c = 0; c < cols; c++) {
       if (placed >= 1) break;
@@ -867,11 +941,10 @@ class BrickBreakerGame {
   }
 
   void _siegeUpdate(double dt) {
-    _siegeTime += dt;
     final rowPx = brickH * height;
     final speed = 10 + level * 1.4 + step * 0.12;
     gridDriftY += speed * dt;
-    gridDriftX = math.sin(_siegeTime * 0.9) * (8 + level * 0.35);
+    gridDriftX = 0;
     while (gridDriftY >= rowPx) {
       if (_bottomRowBlocked()) {
         _enterGameOver();
@@ -995,7 +1068,6 @@ class BrickBreakerGame {
 
     step++;
     level++;
-
     if (_firstBallLandX != null) {
       launcherX = (_firstBallLandX! / width).clamp(0.08, 0.92);
     }

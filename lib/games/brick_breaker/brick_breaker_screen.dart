@@ -380,10 +380,10 @@ class _BrickBreakerScreenState extends State<BrickBreakerScreen>
                                     label: 'Max speed multiplier',
                                     value: '${gp.ballRampMaxClamped.toStringAsFixed(2)}×',
                                     child: Slider(
-                                      value: gp.ballRampMax,
+                                      value: gp.ballRampMaxClamped,
                                       min: 1.25,
-                                      max: 25,
-                                      divisions: 95,
+                                      max: BrickBreakerGameplaySettings.ballRampMaxCap,
+                                      divisions: 35,
                                       activeColor: AppColors.accent,
                                       onChanged: (v) async {
                                         gp.ballRampMax = v;

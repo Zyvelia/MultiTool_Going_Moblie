@@ -171,7 +171,7 @@ class BrickBreakerPainter extends CustomPainter {
 
     if (brick.shape == BrickShape.round) {
       if (brick.kind == BrickKind.heavy) {
-        final t = (brick.hp / 18).clamp(0.0, 1.0);
+        final t = (brick.hp / game.heavyBrickHpCap).clamp(0.0, 1.0);
         _fillBrick(
           canvas,
           local,
@@ -179,7 +179,7 @@ class BrickBreakerPainter extends CustomPainter {
           Color.lerp(AppColors.wine, AppColors.accent, 1 - t)!,
         );
       } else {
-        final t = (brick.hp / 15).clamp(0.0, 1.0);
+        final t = (brick.hp / game.normalBrickHpCap).clamp(0.0, 1.0);
         _fillBrick(
           canvas,
           local,
@@ -190,7 +190,7 @@ class BrickBreakerPainter extends CustomPainter {
     } else {
       final path = BrickShapeUtil.brickPath(brick.shape, hw, hh);
       if (brick.kind == BrickKind.heavy) {
-        final t = (brick.hp / 18).clamp(0.0, 1.0);
+        final t = (brick.hp / game.heavyBrickHpCap).clamp(0.0, 1.0);
         _fillBrickPath(
           canvas,
           path,
@@ -198,7 +198,7 @@ class BrickBreakerPainter extends CustomPainter {
           Color.lerp(AppColors.wine, AppColors.accent, 1 - t)!,
         );
       } else {
-        final t = (brick.hp / 15).clamp(0.0, 1.0);
+        final t = (brick.hp / game.normalBrickHpCap).clamp(0.0, 1.0);
         _fillBrickPath(
           canvas,
           path,

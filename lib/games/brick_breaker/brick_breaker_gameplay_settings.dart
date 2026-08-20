@@ -127,7 +127,9 @@ class BrickBreakerGameplaySettings {
 
   double get ballRampRiseSec => _clampTimeMs(ballRampRiseMs, riseMsMax) / 1000.0;
 
-  double get ballRampMaxClamped => ballRampMax.clamp(1.1, 25.0);
+  static const ballRampMaxCap = 3.0;
+
+  double get ballRampMaxClamped => ballRampMax.clamp(1.1, ballRampMaxCap);
 
   static int _clampTimeMs(int ms, int maxMs) =>
       ms.clamp(timeMsMin, maxMs);
@@ -212,7 +214,8 @@ class BrickBreakerGameplaySettings {
       ballRampRiseMs: _clampTimeMs(riseMs ?? 10 * 60 * 1000, riseMsMax),
       ballRampDelayUnit: brickBreakerTimeUnitFromKey(json['ballRampDelayUnit'] as String?),
       ballRampRiseUnit: brickBreakerTimeUnitFromKey(json['ballRampRiseUnit'] as String?),
-      ballRampMax: (json['ballRampMax'] as num?)?.toDouble() ?? 2.25,
+      ballRampMax: ((json['ballRampMax'] as num?)?.toDouble() ?? 2.25)
+          .clamp(1.1, ballRampMaxCap),
     );
   }
 
