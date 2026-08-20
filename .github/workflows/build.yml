@@ -142,19 +142,29 @@ jobs:
           XCODE_EXIT=${PIPESTATUS[0]}
 
           APP="build/ios-derived/Build/Products/Release-iphoneos/Runner.app"
-          if [ -d "$APP" ]; then
-            echo "Runner.app built (xcodebuild exit ${XCODE_EXIT})"
-          else
+          if [ ! -d "$APP" ]; then
             echo "xcodebuild failed with no Runner.app (exit ${XCODE_EXIT})"
             grep -E 'error:|fatal error:|BUILD FAILED' xcodebuild.log | tail -40 || true
             exit "${XCODE_EXIT:-1}"
           fi
 
+          echo "Runner.app present after xcodebuild (exit ${XCODE_EXIT})"
+          chmod +x scripts/finalize_ios_bundle.sh
+          scripts/finalize_ios_bundle.sh "$APP"
+
+          if [ ! -f "$APP/Info.plist" ]; then
+            echo "ERROR: Info.plist still missing inside Runner.app"
+            exit 1
+          fi
+
           mkdir -p build/ios/iphoneos
           rsync -a "$APP/" build/ios/iphoneos/Runner.app/
+          echo "Bundled Runner.app with Info.plist OK"
 
       - name: Package IPA
         run: |
+          APP="build/ios/iphoneos/Runner.app"
+          test -f "$APP/Info.plist" || { echo "Refusing to package IPA without Info.plist"; exit 1; }
           cd build/ios/iphoneos
           mkdir -p Payload
           cp -r Runner.app Payload/Runner.app
