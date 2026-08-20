@@ -141,6 +141,15 @@ jobs:
       - name: Install pods
         run: cd ios && pod install
 
+      - name: Assemble Flutter iOS release bundle
+        run: |
+          flutter assemble \
+            -dTargetPlatform=ios \
+            -dTargetFile=lib/main.dart \
+            -dBuildMode=release \
+            -dIosArchs=arm64 \
+            ios_release_bundle
+
       - name: Build iOS with xcodebuild (unsigned)
         run: |
           set +e
@@ -180,6 +189,19 @@ jobs:
             exit 1
           fi
 
+          EXEC_NAME="$(python3 -c "import plistlib; print(plistlib.load(open('$APP/Info.plist','rb')).get('CFBundleExecutable','Runner'))")"
+          if [ ! -f "$APP/$EXEC_NAME" ]; then
+            echo "ERROR: main binary $APP/$EXEC_NAME missing — IPA would be uninstallable"
+            ls -la "$APP"
+            exit 1
+          fi
+          if [ ! -d "$APP/Frameworks/App.framework" ]; then
+            echo "ERROR: App.framework not embedded"
+            ls -la "$APP/Frameworks" 2>/dev/null || true
+            exit 1
+          fi
+          echo "Verified Runner binary + App.framework"
+
           mkdir -p build/ios/iphoneos
           rsync -a "$APP/" build/ios/iphoneos/Runner.app/
           echo "Bundled Runner.app with Info.plist OK"
@@ -188,10 +210,14 @@ jobs:
         run: |
           APP="build/ios/iphoneos/Runner.app"
           test -f "$APP/Info.plist" || { echo "Refusing to package IPA without Info.plist"; exit 1; }
+          EXEC_NAME="$(python3 -c "import plistlib; print(plistlib.load(open('$APP/Info.plist','rb')).get('CFBundleExecutable','Runner'))")"
+          test -f "$APP/$EXEC_NAME" || { echo "Refusing to package IPA without main binary $EXEC_NAME"; exit 1; }
           cd build/ios/iphoneos
+          rm -rf Payload MultiToolRemote-unsigned.ipa
           mkdir -p Payload
           cp -r Runner.app Payload/Runner.app
           zip -r MultiToolRemote-unsigned.ipa Payload
+          echo "IPA packaged — Payload/Runner.app/$EXEC_NAME present"
 
       - uses: actions/upload-artifact@v4
         with:

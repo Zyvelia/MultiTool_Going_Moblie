@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Finalize Runner.app after unsigned xcodebuild (embed frameworks + Info.plist).
+# Finalize Runner.app after unsigned xcodebuild — embed Flutter frameworks,
+# ensure Info.plist, and verify the main executable exists.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -9,13 +10,6 @@ if [ ! -d "$APP" ]; then
   echo "Runner.app not found at: $APP" >&2
   exit 1
 fi
-
-if [ -f "$APP/Info.plist" ]; then
-  echo "Info.plist already present in Runner.app"
-  exit 0
-fi
-
-echo "Info.plist missing — running Flutter embed_and_thin..."
 
 XC_CONFIG="$ROOT/ios/Flutter/Generated.xcconfig"
 if [ ! -f "$XC_CONFIG" ]; then
@@ -55,28 +49,32 @@ export UNLOCALIZED_RESOURCES_FOLDER_PATH="$APP"
 export INFOPLIST_PATH="Info.plist"
 export INFOPLIST_FILE="$ROOT/ios/Runner/Info.plist"
 
-/bin/sh "$FLUTTER_ROOT/packages/flutter_tools/bin/xcode_backend.sh" embed_and_thin \
-  || echo "embed_and_thin returned non-zero — trying fallbacks..."
-
-if [ -f "$APP/Info.plist" ]; then
-  echo "Info.plist created by embed_and_thin"
-  exit 0
+echo "Running Flutter embed_and_thin (required even when Info.plist already exists)..."
+set +e
+/bin/sh "$FLUTTER_ROOT/packages/flutter_tools/bin/xcode_backend.sh" embed_and_thin
+EMBED_EXIT=$?
+set -e
+if [ "$EMBED_EXIT" -ne 0 ]; then
+  echo "WARNING: embed_and_thin exited $EMBED_EXIT — continuing with fallbacks" >&2
 fi
 
-# Fallback: copy preprocessed plist from Xcode intermediates if present.
-INTERMEDIATE="$ROOT/build/ios-derived/Build/Intermediates.noindex/Runner.build/Release-iphoneos/Runner.build"
-for candidate in \
-  "$INTERMEDIATE/Preprocessed-Info.plist" \
-  "$INTERMEDIATE/assetcatalog_generated_info.plist"; do
-  if [ -f "$candidate" ]; then
-    cp "$candidate" "$APP/Info.plist"
-    echo "Copied Info.plist from $(basename "$candidate")"
-    exit 0
-  fi
-done
+if [ ! -f "$APP/Info.plist" ]; then
+  echo "Info.plist still missing — trying Xcode intermediates..."
 
-# Last resort: expand ios/Runner/Info.plist template variables from Generated.xcconfig.
-if [ -f "$ROOT/ios/Runner/Info.plist" ]; then
+  INTERMEDIATE="$ROOT/build/ios-derived/Build/Intermediates.noindex/Runner.build/Release-iphoneos/Runner.build"
+  for candidate in \
+    "$INTERMEDIATE/Preprocessed-Info.plist" \
+    "$INTERMEDIATE/assetcatalog_generated_info.plist"; do
+    if [ -f "$candidate" ]; then
+      cp "$candidate" "$APP/Info.plist"
+      echo "Copied Info.plist from $(basename "$candidate")"
+      break
+    fi
+  done
+fi
+
+if [ ! -f "$APP/Info.plist" ] && [ -f "$ROOT/ios/Runner/Info.plist" ]; then
+  echo "Generating Info.plist from ios/Runner/Info.plist template..."
   ROOT="$ROOT" APP="$APP" python3 - <<'PY'
 import os
 import pathlib
@@ -105,10 +103,41 @@ for key, value in subs.items():
 (app / "Info.plist").write_text(text, encoding="utf-8")
 print("Generated Info.plist from ios/Runner/Info.plist template")
 PY
-  if [ -f "$APP/Info.plist" ]; then
-    exit 0
-  fi
 fi
 
-echo "ERROR: Runner.app still has no Info.plist after finalize" >&2
-exit 1
+if [ ! -f "$APP/Info.plist" ]; then
+  echo "ERROR: Runner.app has no Info.plist after finalize" >&2
+  exit 1
+fi
+
+EXEC_NAME="$(python3 - <<PY
+import plistlib
+from pathlib import Path
+p = Path("$APP") / "Info.plist"
+with p.open("rb") as f:
+    data = plistlib.load(f)
+print(data.get("CFBundleExecutable", "Runner"))
+PY
+)"
+
+if [ ! -f "$APP/$EXEC_NAME" ]; then
+  echo "ERROR: main binary missing — expected $APP/$EXEC_NAME" >&2
+  echo "Bundle contents:" >&2
+  ls -la "$APP" >&2 || true
+  if [ -d "$APP/Frameworks" ]; then
+    echo "Frameworks:" >&2
+    ls -la "$APP/Frameworks" >&2 || true
+  fi
+  exit 1
+fi
+
+if [ ! -x "$APP/$EXEC_NAME" ]; then
+  chmod +x "$APP/$EXEC_NAME"
+fi
+
+if [ ! -d "$APP/Frameworks/App.framework" ]; then
+  echo "ERROR: App.framework not embedded in $APP/Frameworks" >&2
+  exit 1
+fi
+
+echo "Bundle OK — Info.plist present, executable $EXEC_NAME, App.framework embedded"
