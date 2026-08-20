@@ -1,6 +1,9 @@
 import 'dart:math' as math;
 import 'dart:ui';
 
+/// dart:math has no hypot(); sqrt of squares is the direct equivalent.
+double hypot(double x, double y) => math.sqrt(x * x + y * y);
+
 enum BrickShape { round, triTL, triTR, triBL, triBR }
 
 class BrickShapeUtil {
@@ -50,8 +53,8 @@ class BrickShapeUtil {
     final aby = by - ay;
     final acx = cx - ax;
     final acy = cy - ay;
-    final lab = math.max(math.hypot(abx, aby), 1e-8);
-    final lac = math.max(math.hypot(acx, acy), 1e-8);
+    final lab = math.max(hypot(abx, aby), 1e-8);
+    final lac = math.max(hypot(acx, acy), 1e-8);
     final uabx = abx / lab;
     final uaby = aby / lab;
     final uacx = acx / lac;
@@ -173,7 +176,7 @@ class BrickShapeUtil {
         final y2 = verts[(i + 1) % verts.length].dy;
         var enx = y2 - y1;
         var eny = -(x2 - x1);
-        final el = math.max(math.hypot(enx, eny), 1e-8);
+        final el = math.max(hypot(enx, eny), 1e-8);
         enx /= el;
         eny /= el;
         final mx = (x1 + x2) / 2;
@@ -191,7 +194,7 @@ class BrickShapeUtil {
       }
       return (lnx: lnx, lny: lny, depth: -minPen);
     }
-    final len = math.max(math.hypot(nx, ny), 1e-8);
+    final len = math.max(hypot(nx, ny), 1e-8);
     return (lnx: nx / len, lny: ny / len, depth: br - len);
   }
 

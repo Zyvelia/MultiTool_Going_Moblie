@@ -64,11 +64,11 @@ class _QuickSendScreenState extends State<QuickSendScreen> {
 
   Future<void> _pickAndSend({required bool photosOnly}) async {
     if (_api == null || _sending) return;
-    final result = await FilePicker.platform.pickFiles(
+    final pickedFiles = await FilePicker.pickFiles(
       type: photosOnly ? FileType.media : FileType.any,
       allowMultiple: photosOnly,
     );
-    if (result == null || result.files.isEmpty) return;
+    if (pickedFiles.isEmpty) return;
 
     setState(() {
       _sending = true;
@@ -77,7 +77,7 @@ class _QuickSendScreenState extends State<QuickSendScreen> {
 
     var sent = 0;
     try {
-      for (final picked in result.files) {
+      for (final picked in pickedFiles) {
         final path = picked.path;
         if (path == null) continue;
         await _api!.sendFile(path, filenameOverride: picked.name);

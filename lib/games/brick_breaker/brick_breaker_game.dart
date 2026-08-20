@@ -3,7 +3,6 @@ import 'dart:math' as math;
 
 import 'brick_breaker_gameplay_settings.dart';
 import 'brick_breaker_save.dart';
-import 'brick_breaker_gameplay_settings.dart';
 import 'brick_breaker_mode.dart';
 import 'brick_breaker_shapes.dart';
 import 'brick_breaker_side_powerups.dart';
@@ -1060,7 +1059,7 @@ class BrickBreakerGame {
   }
 
   void _moveBall(BreakerBall b, double dt) {
-    final travel = math.hypot(b.vx * dt, b.vy * dt);
+    final travel = hypot(b.vx * dt, b.vy * dt);
     final steps = math.max(1, (travel / ballSubstepDist).ceil());
     final subDt = dt / steps;
     for (var s = 0; s < steps; s++) {
@@ -1210,15 +1209,15 @@ class BrickBreakerGame {
     final exitC = _portalCenter(exit);
     var tx = exitC.dx - entryC.dx;
     var ty = exitC.dy - entryC.dy;
-    final tLen = math.hypot(tx, ty);
+    final tLen = hypot(tx, ty);
     if (tLen < 1e-4) {
       tx = b.vx;
       ty = b.vy;
     }
-    final tMag = math.max(math.hypot(tx, ty), 1.0);
+    final tMag = math.max(hypot(tx, ty), 1.0);
     tx /= tMag;
     ty /= tMag;
-    final spd = math.max(math.hypot(b.vx, b.vy), _ballSpeed() * 0.85);
+    final spd = math.max(hypot(b.vx, b.vy), _ballSpeed() * 0.85);
     var vx = b.vx;
     var vy = b.vy;
     final dot = vx * tx + vy * ty;
@@ -1226,7 +1225,7 @@ class BrickBreakerGame {
       vx -= 2 * dot * tx;
       vy -= 2 * dot * ty;
     }
-    final outLen = math.max(math.hypot(vx, vy), 1.0);
+    final outLen = math.max(hypot(vx, vy), 1.0);
     vx = (vx / outLen) * spd;
     vy = (vy / outLen) * spd;
     b.x = exitC.dx + tx * (ballRadius + 4);
@@ -1476,7 +1475,7 @@ class BrickBreakerGame {
           angle: shape.angle,
           shape: shape.brickShape,
         );
-        if (hit != null) return hit;
+        if (hit != null) return (nx: hit.nx, ny: hit.ny);
       }
     }
     return null;
