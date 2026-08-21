@@ -47,10 +47,75 @@ def patch_main_activity() -> None:
         "import io.flutter.embedding.android.FlutterActivity",
         "import com.ryanheise.audioservice.AudioServiceActivity",
     )
-    kt = kt.replace("class MainActivity: FlutterActivity()", "class MainActivity: AudioServiceActivity()")
+    kt = kt.replace("class MainActivity: FlutterActivity()", "class MainActivity : AudioServiceActivity()")
     kt = kt.replace("class MainActivity : FlutterActivity()", "class MainActivity : AudioServiceActivity()")
+
+    kt = _add_screen_security(kt, path)
     path.write_text(kt, encoding="utf-8")
     print(f"Patched {path}")
+
+
+# FLAG_SECURE is a window-level flag, so it is toggled per screen from Dart
+# rather than pinned on at launch -- otherwise the whole app, games included,
+# becomes unscreenshottable.
+_SECURITY_BODY = """ {
+    private val screenSecurityChannel = "zsmultitool/screen_security"
+
+    override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
+        super.configureFlutterEngine(flutterEngine)
+        MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            screenSecurityChannel,
+        ).setMethodCallHandler { call, result ->
+            when (call.method) {
+                "enable" -> {
+                    window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+                    result.success(true)
+                }
+                "disable" -> {
+                    window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
+                    result.success(true)
+                }
+                // Android blocks capture outright, so there is never anything
+                // in progress to report back.
+                "isCaptured" -> result.success(false)
+                else -> result.notImplemented()
+            }
+        }
+    }
+}
+"""
+
+
+def _add_screen_security(kt: str, path: Path) -> str:
+    if "screen_security" in kt:
+        return kt
+
+    imports = (
+        "import android.view.WindowManager\n"
+        "import io.flutter.embedding.engine.FlutterEngine\n"
+        "import io.flutter.plugin.common.MethodChannel\n"
+    )
+    kt, n = re.subn(
+        r"(import com\.ryanheise\.audioservice\.AudioServiceActivity\n)",
+        r"\1" + imports,
+        kt,
+        count=1,
+    )
+    if n == 0:
+        raise SystemExit(f"Could not add screen-security imports to {path}")
+
+    # `flutter create` emits a bodyless class; give it one.
+    kt, n = re.subn(
+        r"class MainActivity : AudioServiceActivity\(\)\s*(\{\s*\})?\s*$",
+        "class MainActivity : AudioServiceActivity()" + _SECURITY_BODY,
+        kt.rstrip() + "\n",
+        count=1,
+        flags=re.MULTILINE,
+    )
+    if n == 0:
+        raise SystemExit(f"Could not add screen-security channel to {path}")
+    return kt
 
 
 def patch_compile_sdk() -> None:

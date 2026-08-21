@@ -25,6 +25,7 @@ IPA="$ROOT/build/ios/iphoneos/MultiToolRemote-unsigned.ipa"
 echo "=== iOS unsigned build ==="
 
 python3 scripts/patch_ios_plist.py
+python3 scripts/patch_ios_appdelegate.py
 python3 scripts/patch_ios_unsigned.py
 
 echo "--- Flutter config (no codesign / no team check) ---"
