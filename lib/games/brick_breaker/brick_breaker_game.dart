@@ -462,7 +462,38 @@ class BrickBreakerGame {
     _nextTeleportPairId = maxPair + 1;
 
     _lastBallSpeedMul = _ballSpeedMul();
+    applyMapSettings();
     return true;
+  }
+
+  bool get _mapPortals => gameplaySettings?.mapPortals ?? true;
+  bool get _mapLasers => gameplaySettings?.mapLasers ?? true;
+  bool get _mapBoosters => gameplaySettings?.mapBoosters ?? true;
+  bool get _mapBarriers => gameplaySettings?.mapBarriers ?? true;
+  bool get _mapHeavyBricks => gameplaySettings?.mapHeavyBricks ?? true;
+
+  void applyMapSettings() {
+    if (!_mapPortals) teleports.clear();
+    if (!_mapLasers) lasers.clear();
+    if (!_mapBoosters) ballBoosters.clear();
+    if (!_mapBarriers || !_mapHeavyBricks) {
+      for (var r = 0; r < rows; r++) {
+        for (var c = 0; c < cols; c++) {
+          final brick = grid[r][c];
+          if (brick == null) continue;
+          if (!_mapBarriers && brick.kind == BrickKind.barrier) {
+            grid[r][c] = null;
+          } else if (!_mapHeavyBricks && brick.kind == BrickKind.heavy) {
+            grid[r][c] = BreakerBrick(
+              hp: math.max(1, brick.hp - 2),
+              kind: BrickKind.normal,
+              angle: brick.angle,
+              shape: brick.shape,
+            );
+          }
+        }
+      }
+    }
   }
 
   void _initEmptyGrid() {
@@ -525,17 +556,26 @@ class BrickBreakerGame {
 
   int get _maxBoostersOnBoard => level >= 30 ? 8 : maxBoostersOnBoard;
   int get _maxLasersOnBoard => level >= 30 ? 5 : maxLasersOnBoard;
-  int get _maxTeleportPairsOnBoard => level >= 30 ? 3 : maxTeleportPairs;
+  int get _maxTeleportPairsOnBoard {
+    if (!_mapPortals) return 0;
+    return level >= 30 ? 3 : maxTeleportPairs;
+  }
 
   bool _rowHasPickup(int rowOnly) {
-    for (final p in lasers) {
-      if (p.row == rowOnly) return true;
+    if (_mapLasers) {
+      for (final p in lasers) {
+        if (p.row == rowOnly) return true;
+      }
     }
-    for (final p in ballBoosters) {
-      if (p.row == rowOnly) return true;
+    if (_mapBoosters) {
+      for (final p in ballBoosters) {
+        if (p.row == rowOnly) return true;
+      }
     }
-    for (final p in teleports) {
-      if (p.row == rowOnly) return true;
+    if (_mapPortals) {
+      for (final p in teleports) {
+        if (p.row == rowOnly) return true;
+      }
     }
     return false;
   }
@@ -548,11 +588,11 @@ class BrickBreakerGame {
     if (_rng.nextDouble() > needBoost) return;
     final c = empty[_rng.nextInt(empty.length)];
     final roll = _rng.nextDouble();
-    if (step >= 3 && roll < 0.22 && lasers.length < _maxLasersOnBoard) {
+    if (_mapLasers && step >= 3 && roll < 0.22 && lasers.length < _maxLasersOnBoard) {
       _placeLaser(rowOnly, c);
-    } else if (roll < 0.82 && ballBoosters.length < _maxBoostersOnBoard) {
+    } else if (_mapBoosters && roll < 0.82 && ballBoosters.length < _maxBoostersOnBoard) {
       ballBoosters.add(BallBooster(row: rowOnly, col: c, bonus: _pickBoosterBonus()));
-    } else if (step >= 6 && _teleportPairCount() < _maxTeleportPairsOnBoard) {
+    } else if (_mapPortals && step >= 6 && _teleportPairCount() < _maxTeleportPairsOnBoard) {
       _tryPlaceTeleportPair(rowOnly);
     }
   }
@@ -631,13 +671,15 @@ class BrickBreakerGame {
   BreakerBrick _makeBrick({required int step, bool allowBarrier = true}) {
     final lv = level;
     final shape = BrickShapeUtil.pick(_rng);
-    if (allowBarrier &&
+    if (_mapBarriers &&
+        allowBarrier &&
         lv >= 8 &&
         _barrierCountOnBoard() < maxBarriersOnBoard &&
         _rng.nextDouble() < _barrierChance(lv)) {
       return BreakerBrick(hp: 0, kind: BrickKind.barrier, angle: 0);
     }
-    if (lv >= heavyUnlockLevel &&
+    if (_mapHeavyBricks &&
+        lv >= heavyUnlockLevel &&
         _rng.nextDouble() < _heavySpawnChanceForLevel(lv)) {
       return BreakerBrick(
         hp: _heavyHpForLevel(lv),
@@ -688,9 +730,9 @@ class BrickBreakerGame {
   }
 
   bool _cellHasPickup(int row, int col) =>
-      _laserAt(row, col) != null ||
-      _boosterAt(row, col) != null ||
-      _teleportAt(row, col) != null;
+      (_mapLasers && _laserAt(row, col) != null) ||
+      (_mapBoosters && _boosterAt(row, col) != null) ||
+      (_mapPortals && _teleportAt(row, col) != null);
 
   int _pickBoosterBonus() {
     final roll = _rng.nextDouble();
@@ -709,6 +751,7 @@ class BrickBreakerGame {
   }
 
   void _seedBallBoosters({required int rowOnly, double extraChance = 0}) {
+    if (!_mapBoosters) return;
     if (extraChance <= 0 && ballBoosters.length >= _maxBoostersOnBoard) return;
     final chance = extraChance > 0 ? extraChance : _boosterSpawnChance();
     final maxPerRow = extraChance > 0 ? 1 : 2;
@@ -780,6 +823,7 @@ class BrickBreakerGame {
   }
 
   bool _tryPlaceTeleportPair(int rowOnly, {bool force = false}) {
+    if (!_mapPortals) return false;
     if (step < 6) return false;
     if (_teleportPairCount() >= _maxTeleportPairsOnBoard) return false;
     if (!force && _rng.nextDouble() > _teleportSpawnChance()) return false;
@@ -815,6 +859,7 @@ class BrickBreakerGame {
   }
 
   void _placeLaser(int rowOnly, int col) {
+    if (!_mapLasers) return;
     lasers.add(MapLaser(
       row: rowOnly,
       col: col,
@@ -824,6 +869,7 @@ class BrickBreakerGame {
   }
 
   void _seedBuriedLasers({required int rowOnly}) {
+    if (!_mapLasers) return;
     if (step < 3) return;
     if (lasers.length >= _maxLasersOnBoard) return;
     final chance = _laserSpawnChance();
@@ -1263,6 +1309,7 @@ class BrickBreakerGame {
   double portalFacingAngle(TeleportPortal portal) => _portalFacingAngle(portal);
 
   void _hitTeleports(BreakerBall b) {
+    if (!_mapPortals) return;
     if (_volleyTime < b.nextTeleportAfter) return;
     for (final portal in teleports) {
       final rect = cellRect(portal.row, portal.col);

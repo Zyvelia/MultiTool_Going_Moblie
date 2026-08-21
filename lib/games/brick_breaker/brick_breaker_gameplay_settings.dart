@@ -112,6 +112,11 @@ class BrickBreakerGameplaySettings {
   BrickBreakerTimeUnit ballRampDelayUnit;
   BrickBreakerTimeUnit ballRampRiseUnit;
   double ballRampMax;
+  bool mapPortals;
+  bool mapLasers;
+  bool mapBoosters;
+  bool mapBarriers;
+  bool mapHeavyBricks;
 
   BrickBreakerGameplaySettings({
     this.ballRampEnabled = true,
@@ -120,6 +125,11 @@ class BrickBreakerGameplaySettings {
     this.ballRampDelayUnit = BrickBreakerTimeUnit.min,
     this.ballRampRiseUnit = BrickBreakerTimeUnit.min,
     this.ballRampMax = 2.25,
+    this.mapPortals = true,
+    this.mapLasers = true,
+    this.mapBoosters = true,
+    this.mapBarriers = true,
+    this.mapHeavyBricks = true,
   });
 
   double get ballRampDelaySec =>
@@ -216,6 +226,11 @@ class BrickBreakerGameplaySettings {
       ballRampRiseUnit: brickBreakerTimeUnitFromKey(json['ballRampRiseUnit'] as String?),
       ballRampMax: ((json['ballRampMax'] as num?)?.toDouble() ?? 2.25)
           .clamp(1.1, ballRampMaxCap),
+      mapPortals: json['mapPortals'] as bool? ?? true,
+      mapLasers: json['mapLasers'] as bool? ?? true,
+      mapBoosters: json['mapBoosters'] as bool? ?? true,
+      mapBarriers: json['mapBarriers'] as bool? ?? true,
+      mapHeavyBricks: json['mapHeavyBricks'] as bool? ?? true,
     );
   }
 
@@ -226,6 +241,11 @@ class BrickBreakerGameplaySettings {
         'ballRampDelayUnit': ballRampDelayUnit.storageKey,
         'ballRampRiseUnit': ballRampRiseUnit.storageKey,
         'ballRampMax': ballRampMax,
+        'mapPortals': mapPortals,
+        'mapLasers': mapLasers,
+        'mapBoosters': mapBoosters,
+        'mapBarriers': mapBarriers,
+        'mapHeavyBricks': mapHeavyBricks,
       };
 
   Future<void> load() async {
@@ -242,6 +262,11 @@ class BrickBreakerGameplaySettings {
       ballRampDelayUnit = parsed.ballRampDelayUnit;
       ballRampRiseUnit = parsed.ballRampRiseUnit;
       ballRampMax = parsed.ballRampMax;
+      mapPortals = parsed.mapPortals;
+      mapLasers = parsed.mapLasers;
+      mapBoosters = parsed.mapBoosters;
+      mapBarriers = parsed.mapBarriers;
+      mapHeavyBricks = parsed.mapHeavyBricks;
     } catch (_) {}
   }
 

@@ -446,6 +446,101 @@ class _BrickBreakerScreenState extends State<BrickBreakerScreen>
                           _settingsHint('Speed ramp resets when you restart the game.'),
                         ],
                       ),
+                      const SizedBox(height: 12),
+                      _settingsSectionCard(
+                        title: 'Map elements',
+                        children: [
+                          _settingsHint(
+                            'Turn off items you don\'t want on the board. Disabled items are removed immediately.',
+                          ),
+                          const SizedBox(height: 8),
+                          SwitchListTile(
+                            contentPadding: EdgeInsets.zero,
+                            title: const Text(
+                              'Portals (teleport pairs)',
+                              style: TextStyle(color: AppColors.onSurface, fontSize: 14),
+                            ),
+                            value: gp.mapPortals,
+                            activeTrackColor: AppColors.accent.withValues(alpha: 0.45),
+                            activeThumbColor: AppColors.accentGlow,
+                            onChanged: (v) async {
+                              gp.mapPortals = v;
+                              await gp.save();
+                              _game.applyMapSettings();
+                              setSheet(() {});
+                              setState(() {});
+                            },
+                          ),
+                          SwitchListTile(
+                            contentPadding: EdgeInsets.zero,
+                            title: const Text(
+                              'Lasers',
+                              style: TextStyle(color: AppColors.onSurface, fontSize: 14),
+                            ),
+                            value: gp.mapLasers,
+                            activeTrackColor: AppColors.accent.withValues(alpha: 0.45),
+                            activeThumbColor: AppColors.accentGlow,
+                            onChanged: (v) async {
+                              gp.mapLasers = v;
+                              await gp.save();
+                              _game.applyMapSettings();
+                              setSheet(() {});
+                              setState(() {});
+                            },
+                          ),
+                          SwitchListTile(
+                            contentPadding: EdgeInsets.zero,
+                            title: const Text(
+                              '+Ball boosters',
+                              style: TextStyle(color: AppColors.onSurface, fontSize: 14),
+                            ),
+                            value: gp.mapBoosters,
+                            activeTrackColor: AppColors.accent.withValues(alpha: 0.45),
+                            activeThumbColor: AppColors.accentGlow,
+                            onChanged: (v) async {
+                              gp.mapBoosters = v;
+                              await gp.save();
+                              _game.applyMapSettings();
+                              setSheet(() {});
+                              setState(() {});
+                            },
+                          ),
+                          SwitchListTile(
+                            contentPadding: EdgeInsets.zero,
+                            title: const Text(
+                              'Barrier bricks',
+                              style: TextStyle(color: AppColors.onSurface, fontSize: 14),
+                            ),
+                            value: gp.mapBarriers,
+                            activeTrackColor: AppColors.accent.withValues(alpha: 0.45),
+                            activeThumbColor: AppColors.accentGlow,
+                            onChanged: (v) async {
+                              gp.mapBarriers = v;
+                              await gp.save();
+                              _game.applyMapSettings();
+                              setSheet(() {});
+                              setState(() {});
+                            },
+                          ),
+                          SwitchListTile(
+                            contentPadding: EdgeInsets.zero,
+                            title: const Text(
+                              'Heavy bricks',
+                              style: TextStyle(color: AppColors.onSurface, fontSize: 14),
+                            ),
+                            value: gp.mapHeavyBricks,
+                            activeTrackColor: AppColors.accent.withValues(alpha: 0.45),
+                            activeThumbColor: AppColors.accentGlow,
+                            onChanged: (v) async {
+                              gp.mapHeavyBricks = v;
+                              await gp.save();
+                              _game.applyMapSettings();
+                              setSheet(() {});
+                              setState(() {});
+                            },
+                          ),
+                        ],
+                      ),
                     ],
                   ),
                 );
