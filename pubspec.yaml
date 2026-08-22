@@ -31,6 +31,7 @@ dev_dependencies:
     sdk: flutter
   flutter_lints: ^4.0.0
   flutter_launcher_icons: ^0.14.1
+  flutter_native_splash: ^2.4.8
 
 # path_provider_foundation 2.6.0 can break unsigned IPA layout (Flutter #187752).
 dependency_overrides:
@@ -46,6 +47,25 @@ flutter:
 flutter_launcher_icons:
   android: true
   ios: true
+  # Opaque square, artwork inset to 85% so the HUD corner brackets survive
+  # iOS's squircle mask. Alpha stripping is belt-and-braces: iOS rejects any
+  # icon carrying an alpha channel.
   image_path: "assets/icon/icon.png"
-  # Fully opaque square (badge on solid black), so no alpha-flattening
-  # needed for iOS and no clipping risk on Android's round icon mask.
+  remove_alpha_ios: true
+  background_color_ios: "#070309"
+  # Android masks to circle/squircle/rounded-square, so the foreground is
+  # inset to 76% to keep the whole Z inside the guaranteed-visible centre.
+  adaptive_icon_background: "#070309"
+  adaptive_icon_foreground: "assets/icon/icon_foreground.png"
+
+flutter_native_splash:
+  color: "#070309"
+  image: assets/splash/splash.png
+  android_gravity: center
+  ios_content_mode: scaleAspectFit
+  # Android 12+ ignores the old splash entirely and masks its own to a circle,
+  # so the poster is replaced by the Z mark there.
+  android_12:
+    color: "#070309"
+    image: assets/splash/splash_android12.png
+    icon_background_color: "#070309"

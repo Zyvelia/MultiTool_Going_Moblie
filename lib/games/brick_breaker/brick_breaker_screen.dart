@@ -94,6 +94,10 @@ class _BrickBreakerScreenState extends State<BrickBreakerScreen>
         _audio.laser();
       case 'booster':
         _audio.booster();
+      case 'blackhole':
+        _audio.blackhole();
+      case 'pong':
+        _audio.pong();
       case 'levelClear':
         _audio.levelClear();
       case 'dangerWarn':
@@ -177,10 +181,13 @@ class _BrickBreakerScreenState extends State<BrickBreakerScreen>
 
   void _onPanUpdate(DragUpdateDetails d, BoxConstraints box) {
     if (!_audioReady) return;
-    if (_game.phase != BreakerPhase.aiming) return;
     final nx = (d.localPosition.dx / box.maxWidth).clamp(0.0, 1.0);
     final ny = (d.localPosition.dy / box.maxHeight).clamp(0.0, 1.0);
-    _game.setAimFromTouch(nx, ny);
+    if (_game.isPongActive && _game.phase == BreakerPhase.flying) {
+      _game.setPaddle(nx);
+    } else if (_game.phase == BreakerPhase.aiming) {
+      _game.setAimFromTouch(nx, ny);
+    }
     setState(() {});
   }
 
@@ -220,6 +227,7 @@ class _BrickBreakerScreenState extends State<BrickBreakerScreen>
   }
 
   Future<void> _openSettings() async {
+    _game.paused = true;
     await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
@@ -539,6 +547,41 @@ class _BrickBreakerScreenState extends State<BrickBreakerScreen>
                               setState(() {});
                             },
                           ),
+                          SwitchListTile(
+                            contentPadding: EdgeInsets.zero,
+                            title: const Text(
+                              'Black holes (bad)',
+                              style: TextStyle(color: AppColors.onSurface, fontSize: 14),
+                            ),
+                            value: gp.mapBlackHoles,
+                            activeTrackColor: AppColors.accent.withValues(alpha: 0.45),
+                            activeThumbColor: AppColors.accentGlow,
+                            onChanged: (v) async {
+                              gp.mapBlackHoles = v;
+                              await gp.save();
+                              _game.applyMapSettings();
+                              setSheet(() {});
+                              setState(() {});
+                            },
+                          ),
+                          SwitchListTile(
+                            contentPadding: EdgeInsets.zero,
+                            title: const Text(
+                              'Pong paddle (60s mode)',
+                              style: TextStyle(color: AppColors.onSurface, fontSize: 14),
+                            ),
+                            value: gp.mapPongPickups,
+                            activeTrackColor: AppColors.accent.withValues(alpha: 0.45),
+                            activeThumbColor: AppColors.accentGlow,
+                            onChanged: (v) async {
+                              gp.mapPongPickups = v;
+                              await gp.save();
+                              _game.applyMapSettings();
+                              setSheet(() {});
+                              setState(() {});
+                            },
+                          ),
+                          _settingsHint('Settings pause the game while open.'),
                         ],
                       ),
                     ],
@@ -550,6 +593,10 @@ class _BrickBreakerScreenState extends State<BrickBreakerScreen>
         );
       },
     );
+    if (mounted) {
+      _game.paused = false;
+      setState(() {});
+    }
   }
 
   Widget _settingsSectionCard({required String title, required List<Widget> children}) {
@@ -807,6 +854,10 @@ class _BrickBreakerScreenState extends State<BrickBreakerScreen>
                             _chip('Level', '${_game.level}'),
                             const SizedBox(width: 8),
                             _chip('Mode', widget.mode.title),
+                            if (_game.pongModeLeft > 0) ...[
+                              const SizedBox(width: 8),
+                              _chip('Pong', '${_game.pongModeLeft.ceil()}s'),
+                            ],
                           ],
                         ),
                       ),

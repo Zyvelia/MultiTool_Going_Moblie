@@ -117,6 +117,8 @@ class BrickBreakerGameplaySettings {
   bool mapBoosters;
   bool mapBarriers;
   bool mapHeavyBricks;
+  bool mapBlackHoles;
+  bool mapPongPickups;
 
   BrickBreakerGameplaySettings({
     this.ballRampEnabled = true,
@@ -130,6 +132,8 @@ class BrickBreakerGameplaySettings {
     this.mapBoosters = true,
     this.mapBarriers = true,
     this.mapHeavyBricks = true,
+    this.mapBlackHoles = true,
+    this.mapPongPickups = true,
   });
 
   double get ballRampDelaySec =>
@@ -231,6 +235,8 @@ class BrickBreakerGameplaySettings {
       mapBoosters: json['mapBoosters'] as bool? ?? true,
       mapBarriers: json['mapBarriers'] as bool? ?? true,
       mapHeavyBricks: json['mapHeavyBricks'] as bool? ?? true,
+      mapBlackHoles: json['mapBlackHoles'] as bool? ?? true,
+      mapPongPickups: json['mapPongPickups'] as bool? ?? true,
     );
   }
 
@@ -246,6 +252,8 @@ class BrickBreakerGameplaySettings {
         'mapBoosters': mapBoosters,
         'mapBarriers': mapBarriers,
         'mapHeavyBricks': mapHeavyBricks,
+        'mapBlackHoles': mapBlackHoles,
+        'mapPongPickups': mapPongPickups,
       };
 
   Future<void> load() async {
@@ -267,6 +275,8 @@ class BrickBreakerGameplaySettings {
       mapBoosters = parsed.mapBoosters;
       mapBarriers = parsed.mapBarriers;
       mapHeavyBricks = parsed.mapHeavyBricks;
+      mapBlackHoles = parsed.mapBlackHoles;
+      mapPongPickups = parsed.mapPongPickups;
     } catch (_) {}
   }
 

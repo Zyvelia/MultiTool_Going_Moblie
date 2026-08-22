@@ -107,6 +107,21 @@ class BrickBreakerPainter extends CustomPainter {
       _drawBallBooster(canvas, Offset(cx, cy), pick.bonus);
     }
 
+    final spin = game.sessionTime * 2.4;
+    for (final pick in game.pongPickups) {
+      final rect = game.cellRect(pick.row, pick.col);
+      final cx = (rect.left + rect.right) / 2;
+      final cy = (rect.top + rect.bottom) / 2;
+      _drawPongPickup(canvas, Offset(cx, cy), rect.right - rect.left);
+    }
+
+    for (final hole in game.blackHoles) {
+      final rect = game.cellRect(hole.row, hole.col);
+      final cx = (rect.left + rect.right) / 2;
+      final cy = (rect.top + rect.bottom) / 2;
+      _drawBlackHole(canvas, Offset(cx, cy), rect.right - rect.left, spin);
+    }
+
     for (final portal in game.teleports) {
       final rect = game.cellRect(portal.row, portal.col);
       final cx = (rect.left + rect.right) / 2;
@@ -158,6 +173,34 @@ class BrickBreakerPainter extends CustomPainter {
         textDirection: TextDirection.ltr,
       )..layout();
       countTp.paint(canvas, Offset(lx + 10, ly - 8));
+    }
+
+    if (game.pongModeLeft > 0) {
+      final px = game.paddleX * size.width;
+      final py = game.launcherPy;
+      final halfW = (BrickBreakerGame.paddleWFrac * size.width) / 2;
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(
+          Rect.fromLTWH(px - halfW - 3, py - BrickBreakerGame.paddleH / 2 - 3, halfW * 2 + 6, BrickBreakerGame.paddleH + 6),
+          const Radius.circular(4),
+        ),
+        Paint()..color = const Color(0xFF18FFFF).withValues(alpha: 0.22),
+      );
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(
+          Rect.fromLTWH(px - halfW, py - BrickBreakerGame.paddleH / 2, halfW * 2, BrickBreakerGame.paddleH),
+          const Radius.circular(3),
+        ),
+        Paint()..color = const Color(0xFF18FFFF).withValues(alpha: 0.95),
+      );
+      final timerTp = TextPainter(
+        text: TextSpan(
+          text: '${game.pongModeLeft.ceil()}s',
+          style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
+        ),
+        textDirection: TextDirection.ltr,
+      )..layout();
+      timerTp.paint(canvas, Offset(px - timerTp.width / 2, py - BrickBreakerGame.paddleH - 14));
     }
 
     if (game.sideFlash > 0) {
@@ -442,6 +485,76 @@ class BrickBreakerPainter extends CustomPainter {
       textDirection: TextDirection.ltr,
     )..layout();
     plusTp.paint(canvas, Offset(c.dx + 8, c.dy - 10));
+  }
+
+  void _drawBlackHole(Canvas canvas, Offset c, double cellW, double spin) {
+    final r = cellW * 0.22;
+    final ringR = r * 1.35;
+    canvas.save();
+    canvas.translate(c.dx, c.dy);
+    canvas.rotate(spin);
+    canvas.drawCircle(
+      Offset.zero,
+      ringR,
+      Paint()
+        ..shader = RadialGradient(
+          colors: [
+            Colors.black,
+            const Color(0xFF1A0033),
+            const Color(0xFFB388FF).withValues(alpha: 0.55),
+            const Color(0xFF7C4DFF).withValues(alpha: 0),
+          ],
+          stops: const [0, 0.45, 0.72, 1],
+        ).createShader(Rect.fromCircle(center: Offset.zero, radius: ringR)),
+    );
+    canvas.drawCircle(Offset.zero, r * 0.82, Paint()..color = Colors.black);
+    canvas.drawArc(
+      Rect.fromCircle(center: Offset.zero, radius: r * 0.95),
+      0,
+      math.pi * 1.35,
+      false,
+      Paint()
+        ..color = const Color(0xFFEA80FC).withValues(alpha: 0.75)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2,
+    );
+    canvas.restore();
+    final minusTp = TextPainter(
+      text: const TextSpan(
+        text: '−1',
+        style: TextStyle(
+          color: Color(0xFFFF80AB),
+          fontSize: 9,
+          fontWeight: FontWeight.bold,
+        ),
+      ),
+      textDirection: TextDirection.ltr,
+    )..layout();
+    minusTp.paint(canvas, Offset(c.dx + r * 0.55, c.dy - r * 0.55));
+  }
+
+  void _drawPongPickup(Canvas canvas, Offset c, double cellW) {
+    final barW = math.min(cellW, 36) * 0.72;
+    const barH = 7.0;
+    canvas.drawOval(
+      Rect.fromCenter(center: c, width: barW + 8, height: barH + 8),
+      Paint()..color = const Color(0xFF18FFFF).withValues(alpha: 0.25),
+    );
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(
+        Rect.fromCenter(center: c, width: barW, height: barH),
+        const Radius.circular(2),
+      ),
+      Paint()..color = const Color(0xFF18FFFF).withValues(alpha: 0.92),
+    );
+    final labelTp = TextPainter(
+      text: const TextSpan(
+        text: 'PONG',
+        style: TextStyle(color: Colors.white, fontSize: 8, fontWeight: FontWeight.bold),
+      ),
+      textDirection: TextDirection.ltr,
+    )..layout();
+    labelTp.paint(canvas, Offset(c.dx - labelTp.width / 2, c.dy - 18));
   }
 
   void _drawTeleportPortal(

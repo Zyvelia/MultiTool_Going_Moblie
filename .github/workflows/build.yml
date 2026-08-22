@@ -27,6 +27,9 @@ jobs:
       - name: Generate launcher icons
         run: dart run flutter_launcher_icons
 
+      - name: Generate splash screen
+        run: dart run flutter_native_splash:create
+
       - run: flutter build apk --release
 
       - uses: actions/upload-artifact@v4
@@ -53,6 +56,7 @@ jobs:
           flutter create --platforms=android,ios --org com.zsmultitool .
           flutter pub get
           dart run flutter_launcher_icons
+          dart run flutter_native_splash:create
 
       - name: Build unsigned IPA
         run: bash scripts/build_ios_unsigned.sh

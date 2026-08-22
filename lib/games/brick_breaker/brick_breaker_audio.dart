@@ -426,6 +426,16 @@ class BrickBreakerAudio {
     HapticFeedback.heavyImpact();
   }
 
+  void blackhole() {
+    if (!settings.powerups) return;
+    HapticFeedback.vibrate();
+  }
+
+  void pong() {
+    if (!settings.powerups) return;
+    HapticFeedback.heavyImpact();
+  }
+
   Future<void> gameOver() async {
     if (!settings.ui) return;
     await stopBgm(reset: true);

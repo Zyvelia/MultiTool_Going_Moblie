@@ -93,6 +93,22 @@ class TeleportPortal {
   }
 }
 
+/// Swirling hazard — destroys a ball on contact and shaves one from your count.
+class MapBlackHole {
+  int row;
+  int col;
+
+  MapBlackHole({required this.row, required this.col});
+}
+
+/// Cyan paddle pickup — 60s pong mode with a bottom platform.
+class PongPickup {
+  int row;
+  int col;
+
+  PongPickup({required this.row, required this.col});
+}
+
 class BreakerBrick {
   int hp;
   BrickKind kind;
@@ -163,9 +179,11 @@ class BrickBreakerGame {
   static const ballSepSlop = 0.85;
   static const ballMaxCollideIters = 4;
   static const teleportCooldown = 0.42;
-  /// Ceiling on the persistent ball count. Every gain is clamped to this, so a
-  /// low value silently eats pickups once the player is near it.
-  static const maxBallsPerShot = 50;
+  static const maxBlackHolesOnBoard = 2;
+  static const pongModeDuration = 60.0;
+  static const paddleWFrac = 0.28;
+  static const paddleH = 12.0;
+  static const maxPongPickupsOnBoard = 1;
   /// Longest a volley may run before it is force-ended. Real volleys finish well
   /// inside this; anything longer means a ball has wedged and the round would
   /// otherwise sit there until the player hits DROP.
@@ -206,6 +224,11 @@ class BrickBreakerGame {
   final List<MapLaser> lasers = [];
   final List<BallBooster> ballBoosters = [];
   final List<TeleportPortal> teleports = [];
+  final List<MapBlackHole> blackHoles = [];
+  final List<PongPickup> pongPickups = [];
+  double pongModeLeft = 0;
+  double paddleX = 0.5;
+  double _pongRespawnCd = 0;
   int _nextTeleportPairId = 1;
   final List<LaserBeam> laserBeams = [];
 
@@ -217,6 +240,9 @@ class BrickBreakerGame {
   double _lastBallSpeedMul = 1;
   double sideFlash = 0;
   double nukePulse = 0;
+  bool paused = false;
+
+  double get sessionTime => _sessionTime;
 
   /// Set only when a ball is retired abnormally. Surfaced on screen so a
   /// screenshot identifies the cause; stays null during healthy play.
@@ -283,6 +309,11 @@ class BrickBreakerGame {
     lasers.clear();
     ballBoosters.clear();
     teleports.clear();
+    blackHoles.clear();
+    pongPickups.clear();
+    pongModeLeft = 0;
+    paddleX = 0.5;
+    _pongRespawnCd = 0;
     _nextTeleportPairId = 1;
     laserBeams.clear();
     _ballsLeftToFire = 0;
@@ -349,6 +380,10 @@ class BrickBreakerGame {
                 'pairId': t.pairId,
               })
           .toList(),
+      'blackHoles': blackHoles.map((h) => {'row': h.row, 'col': h.col}).toList(),
+      'pongPickups': pongPickups.map((p) => {'row': p.row, 'col': p.col}).toList(),
+      'pongModeLeft': pongModeLeft,
+      'paddleX': paddleX,
       'gridDriftY': gridDriftY,
       'gridDriftX': gridDriftX,
       'siegeTime': _siegeTime,
@@ -364,7 +399,7 @@ class BrickBreakerGame {
     level = data['level'] as int? ?? 1;
     step = data['step'] as int? ?? 0;
     score = data['score'] as int? ?? 0;
-    ballsPerShot = (data['ballsPerShot'] as int? ?? 1).clamp(1, maxBallsPerShot);
+    ballsPerShot = math.max(1, data['ballsPerShot'] as int? ?? 1);
     // Aim is not part of the save -- the player sets it fresh each turn, and
     // restoring it only risks carrying a bad angle into a new session.
     launcherX = 0.5;
@@ -442,6 +477,11 @@ class BrickBreakerGame {
     }
 
     teleports.clear();
+    blackHoles.clear();
+    pongPickups.clear();
+    pongModeLeft = 0;
+    paddleX = 0.5;
+    _pongRespawnCd = 0;
     _nextTeleportPairId = 1;
     for (final raw in data['teleports'] as List<dynamic>? ?? []) {
       if (raw is! Map<String, dynamic>) continue;
@@ -461,6 +501,24 @@ class BrickBreakerGame {
     }
     _nextTeleportPairId = maxPair + 1;
 
+    for (final raw in data['blackHoles'] as List<dynamic>? ?? []) {
+      if (raw is! Map<String, dynamic>) continue;
+      blackHoles.add(MapBlackHole(
+        row: raw['row'] as int? ?? 0,
+        col: raw['col'] as int? ?? 0,
+      ));
+    }
+    pongPickups.clear();
+    for (final raw in data['pongPickups'] as List<dynamic>? ?? []) {
+      if (raw is! Map<String, dynamic>) continue;
+      pongPickups.add(PongPickup(
+        row: raw['row'] as int? ?? 0,
+        col: raw['col'] as int? ?? 0,
+      ));
+    }
+    pongModeLeft = math.max(0, (data['pongModeLeft'] as num?)?.toDouble() ?? 0);
+    paddleX = (data['paddleX'] as num?)?.toDouble() ?? launcherX;
+
     _lastBallSpeedMul = _ballSpeedMul();
     applyMapSettings();
     return true;
@@ -471,11 +529,66 @@ class BrickBreakerGame {
   bool get _mapBoosters => gameplaySettings?.mapBoosters ?? true;
   bool get _mapBarriers => gameplaySettings?.mapBarriers ?? true;
   bool get _mapHeavyBricks => gameplaySettings?.mapHeavyBricks ?? true;
+  bool get _mapBlackHoles => gameplaySettings?.mapBlackHoles ?? true;
+  bool get _mapPongPickups => gameplaySettings?.mapPongPickups ?? true;
+
+  bool get isPongActive => pongModeLeft > 0;
+
+  void setPaddle(double nx) {
+    final half = _paddleHalfW / width;
+    paddleX = nx.clamp(half + 0.02, 1 - half - 0.02);
+  }
+
+  double get _paddleHalfW => (paddleWFrac * width) / 2;
+
+  void _activatePongMode() {
+    pongModeLeft += pongModeDuration;
+    paddleX = launcherX;
+    score += 40;
+    _sfx('pong');
+  }
+
+  void _spawnPongBall() {
+    final spd = _ballSpeed();
+    final px = paddleX * width;
+    final py = launcherPy - paddleH;
+    balls.add(BreakerBall(
+      x: px,
+      y: py,
+      vx: (_rng.nextDouble() - 0.5) * spd * 0.45,
+      vy: -spd * 0.92,
+      isFirst: false,
+    ));
+  }
+
+  bool _tryPongPaddleBounce(BreakerBall b) {
+    if (pongModeLeft <= 0 || !b.active || b.vy <= 0) return false;
+    final floor = launcherPy;
+    if (b.y + ballRadius < floor - paddleH) return false;
+    final halfW = _paddleHalfW;
+    final cx = paddleX * width;
+    final left = cx - halfW;
+    final right = cx + halfW;
+    final paddleTop = floor - paddleH / 2;
+    if (b.x + ballRadius < left || b.x - ballRadius > right) return false;
+    b.y = paddleTop - ballRadius - 0.5;
+    final hitPos = ((b.x - cx) / halfW).clamp(-1.0, 1.0);
+    b.vy = -b.vy.abs();
+    b.vx += hitPos * _ballSpeed() * 0.38;
+    final mag = math.max(hypot(b.vx, b.vy), 1.0);
+    final target = _ballSpeed();
+    b.vx = (b.vx / mag) * target;
+    b.vy = (b.vy / mag) * target;
+    _sfx('bounce');
+    return true;
+  }
 
   void applyMapSettings() {
     if (!_mapPortals) teleports.clear();
     if (!_mapLasers) lasers.clear();
     if (!_mapBoosters) ballBoosters.clear();
+    if (!_mapBlackHoles) blackHoles.clear();
+    if (!_mapPongPickups) pongPickups.clear();
     if (!_mapBarriers || !_mapHeavyBricks) {
       for (var r = 0; r < rows; r++) {
         for (var c = 0; c < cols; c++) {
@@ -517,6 +630,11 @@ class BrickBreakerGame {
     lasers.clear();
     ballBoosters.clear();
     teleports.clear();
+    blackHoles.clear();
+    pongPickups.clear();
+    pongModeLeft = 0;
+    paddleX = 0.5;
+    _pongRespawnCd = 0;
     _nextTeleportPairId = 1;
     laserBeams.clear();
     final count = (2 + level).clamp(1, cols);
@@ -534,6 +652,8 @@ class BrickBreakerGame {
     _seedBuriedLasers(rowOnly: 0);
     _seedBallBoosters(rowOnly: 0);
     _seedTeleportPair(rowOnly: 0);
+    _seedBlackHoles(rowOnly: 0);
+    _seedPongPickups(rowOnly: 0);
     _guaranteeRowPickup(0);
     phase = BreakerPhase.aiming;
   }
@@ -561,6 +681,9 @@ class BrickBreakerGame {
     return level >= 30 ? 3 : maxTeleportPairs;
   }
 
+  int get _maxBlackHolesOnBoard => level >= 30 ? 3 : maxBlackHolesOnBoard;
+  int get _maxPongPickupsOnBoard => level >= 25 ? 2 : maxPongPickupsOnBoard;
+
   bool _rowHasPickup(int rowOnly) {
     if (_mapLasers) {
       for (final p in lasers) {
@@ -574,6 +697,16 @@ class BrickBreakerGame {
     }
     if (_mapPortals) {
       for (final p in teleports) {
+        if (p.row == rowOnly) return true;
+      }
+    }
+    if (_mapBlackHoles) {
+      for (final p in blackHoles) {
+        if (p.row == rowOnly) return true;
+      }
+    }
+    if (_mapPongPickups) {
+      for (final p in pongPickups) {
         if (p.row == rowOnly) return true;
       }
     }
@@ -709,6 +842,8 @@ class BrickBreakerGame {
     _seedBuriedLasers(rowOnly: 0);
     _seedBallBoosters(rowOnly: 0);
     _seedTeleportPair(rowOnly: 0);
+    _seedBlackHoles(rowOnly: 0);
+    _seedPongPickups(rowOnly: 0);
     _guaranteeRowPickup(0);
   }
 
@@ -732,7 +867,9 @@ class BrickBreakerGame {
   bool _cellHasPickup(int row, int col) =>
       (_mapLasers && _laserAt(row, col) != null) ||
       (_mapBoosters && _boosterAt(row, col) != null) ||
-      (_mapPortals && _teleportAt(row, col) != null);
+      (_mapPortals && _teleportAt(row, col) != null) ||
+      (_mapBlackHoles && _blackHoleAt(row, col) != null) ||
+      (_mapPongPickups && _pongPickupAt(row, col) != null);
 
   int _pickBoosterBonus() {
     final roll = _rng.nextDouble();
@@ -784,6 +921,20 @@ class BrickBreakerGame {
 
   TeleportPortal? _teleportAt(int row, int col) {
     for (final p in teleports) {
+      if (p.row == row && p.col == col) return p;
+    }
+    return null;
+  }
+
+  MapBlackHole? _blackHoleAt(int row, int col) {
+    for (final p in blackHoles) {
+      if (p.row == row && p.col == col) return p;
+    }
+    return null;
+  }
+
+  PongPickup? _pongPickupAt(int row, int col) {
+    for (final p in pongPickups) {
       if (p.row == row && p.col == col) return p;
     }
     return null;
@@ -849,6 +1000,47 @@ class BrickBreakerGame {
 
   void _seedTeleportPair({required int rowOnly}) {
     _tryPlaceTeleportPair(rowOnly);
+  }
+
+  double _blackHoleSpawnChance() {
+    final lv = level;
+    if (lv < 10) return 0;
+    if (lv <= 20) return (0.06 + (lv - 10) * 0.004).clamp(0.06, 0.10);
+    if (lv <= 45) return (0.10 - (lv - 20) * 0.0012).clamp(0.07, 0.10);
+    return 0.07;
+  }
+
+  void _seedBlackHoles({required int rowOnly}) {
+    if (!_mapBlackHoles) return;
+    if (step < 8 || level < 10) return;
+    if (blackHoles.length >= _maxBlackHolesOnBoard) return;
+    final chance = _blackHoleSpawnChance();
+    for (var c = 0; c < cols; c++) {
+      if (blackHoles.length >= _maxBlackHolesOnBoard) break;
+      if (grid[rowOnly][c] != null || _cellHasPickup(rowOnly, c)) continue;
+      if (_rng.nextDouble() > chance) continue;
+      blackHoles.add(MapBlackHole(row: rowOnly, col: c));
+    }
+  }
+
+  double _pongPickupSpawnChance() {
+    final lv = level;
+    if (lv < 12) return 0;
+    if (lv <= 25) return (0.05 + (lv - 12) * 0.0025).clamp(0.05, 0.09);
+    return 0.08;
+  }
+
+  void _seedPongPickups({required int rowOnly}) {
+    if (!_mapPongPickups) return;
+    if (step < 10 || level < 12) return;
+    if (pongPickups.length >= _maxPongPickupsOnBoard) return;
+    final chance = _pongPickupSpawnChance();
+    for (var c = 0; c < cols; c++) {
+      if (pongPickups.length >= _maxPongPickupsOnBoard) break;
+      if (grid[rowOnly][c] != null || _cellHasPickup(rowOnly, c)) continue;
+      if (_rng.nextDouble() > chance) continue;
+      pongPickups.add(PongPickup(row: rowOnly, col: c));
+    }
   }
 
   double _laserSpawnChance() {
@@ -931,7 +1123,7 @@ class BrickBreakerGame {
     balls.clear();
     _pendingBalls.clear();
     _firstBallLandX = null;
-    _ballsLeftToFire = ballsPerShot.clamp(1, maxBallsPerShot);
+    _ballsLeftToFire = math.max(1, ballsPerShot);
     _fireCooldown = 0;
     for (final p in lasers) {
       if (p.armed) {
@@ -1011,9 +1203,9 @@ class BrickBreakerGame {
 
   bool _sideMegaBalls() {
     const add = 10;
-    ballsPerShot = (ballsPerShot + add).clamp(1, maxBallsPerShot);
+    ballsPerShot = math.max(1, ballsPerShot + add);
     if (phase == BreakerPhase.flying) {
-      _ballsLeftToFire = (_ballsLeftToFire + add).clamp(0, maxBallsPerShot);
+      _ballsLeftToFire = math.max(0, _ballsLeftToFire + add);
     }
     score += 25;
     _sfx('booster');
@@ -1103,6 +1295,7 @@ class BrickBreakerGame {
   }
 
   void update(double dt) {
+    if (paused) return;
     // resize() runs during paint, which is after the ticker; stepping physics
     // against the placeholder size puts the floor line on top of the launcher.
     if (width <= 1 || height <= 1) return;
@@ -1127,6 +1320,11 @@ class BrickBreakerGame {
     }
 
     if (phase == BreakerPhase.gameOver || phase == BreakerPhase.aiming) return;
+
+    if (pongModeLeft > 0) {
+      pongModeLeft = math.max(0, pongModeLeft - dt);
+      if (_pongRespawnCd > 0) _pongRespawnCd = math.max(0, _pongRespawnCd - dt);
+    }
 
     _volleyTime += dt;
 
@@ -1156,6 +1354,7 @@ class BrickBreakerGame {
         _moveBall(b, dt);
         _hitLasers(b);
         _hitBallBoosters(b);
+        _hitPongPickups(b);
       } catch (e, st) {
         debugPrint('BrickBreaker ball step failed, retiring ball: $e\n$st');
         _noteAnomaly('threw', b, extra: '$e');
@@ -1180,6 +1379,10 @@ class BrickBreakerGame {
       if (!finite ||
           offBoard ||
           (b.y >= floor && (b.vy >= 0 || b.y > floor + ballRadius))) {
+        if (_tryPongPaddleBounce(b)) {
+          anyActive = true;
+          continue;
+        }
         if (b.isFirst && _firstBallLandX == null) {
           final landX = b.x.isFinite ? b.x : launcherPx;
           _firstBallLandX =
@@ -1199,6 +1402,13 @@ class BrickBreakerGame {
     }
 
     if (_ballsLeftToFire <= 0 && !anyActive) {
+      if (pongModeLeft > 0) {
+        if (_pongRespawnCd <= 0) {
+          _spawnPongBall();
+          _pongRespawnCd = 0.35;
+        }
+        return;
+      }
       _endVolley();
     }
   }
@@ -1221,6 +1431,7 @@ class BrickBreakerGame {
       _bounceOffWalls(b);
       _resolveBrickCollisions(b);
       _hitTeleports(b);
+      _hitBlackHoles(b);
     }
   }
 
@@ -1426,10 +1637,46 @@ class BrickBreakerGame {
 
       ballBoosters.removeAt(i);
       final bonus = pick.bonus;
-      ballsPerShot = (ballsPerShot + bonus).clamp(1, maxBallsPerShot);
+      ballsPerShot = math.max(1, ballsPerShot + bonus);
       if (phase == BreakerPhase.flying) _spawnBonusBalls(bonus);
       score += 20 + bonus * 15;
       _sfx('booster');
+    }
+  }
+
+  void _hitPongPickups(BreakerBall b) {
+    if (!_mapPongPickups || !b.active) return;
+    for (var i = pongPickups.length - 1; i >= 0; i--) {
+      final pick = pongPickups[i];
+      final rect = cellRect(pick.row, pick.col);
+      if (b.x + ballRadius < rect.left ||
+          b.x - ballRadius > rect.right ||
+          b.y + ballRadius < rect.top ||
+          b.y - ballRadius > rect.bottom) {
+        continue;
+      }
+      pongPickups.removeAt(i);
+      _activatePongMode();
+    }
+  }
+
+  void _hitBlackHoles(BreakerBall b) {
+    if (!_mapBlackHoles || !b.active) return;
+    for (final hole in blackHoles) {
+      final rect = cellRect(hole.row, hole.col);
+      if (b.x + ballRadius < rect.left ||
+          b.x - ballRadius > rect.right ||
+          b.y + ballRadius < rect.top ||
+          b.y - ballRadius > rect.bottom) {
+        continue;
+      }
+      b.active = false;
+      b.vx = 0;
+      b.vy = 0;
+      ballsPerShot = math.max(1, ballsPerShot - 1);
+      score = math.max(0, score - 5);
+      _sfx('blackhole');
+      return;
     }
   }
 
@@ -1578,6 +1825,14 @@ class BrickBreakerGame {
       portal.row++;
     }
     teleports.removeWhere((p) => p.row >= rows);
+    for (final hole in blackHoles) {
+      hole.row++;
+    }
+    blackHoles.removeWhere((p) => p.row >= rows);
+    for (final pick in pongPickups) {
+      pick.row++;
+    }
+    pongPickups.removeWhere((p) => p.row >= rows);
     final rowPx = brickH * height;
     gridDriftY = math.max(0, gridDriftY - rowPx);
     return false;
@@ -1698,6 +1953,8 @@ class BrickBreakerGame {
     }
 
     balls.clear();
+    pongModeLeft = 0;
+    _pongRespawnCd = 0;
     phase = BreakerPhase.aiming;
   }
 
