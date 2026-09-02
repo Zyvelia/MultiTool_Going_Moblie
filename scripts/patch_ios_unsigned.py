@@ -122,11 +122,43 @@ def _scrub_cocoapods_from_pbxproj() -> None:
         print(f"Scrubbed CocoaPods references from {path}")
 
 
+_BARE_WORKSPACE_CONTENTS = """<?xml version="1.0" encoding="UTF-8"?>
+<Workspace
+   version = "1.0">
+   <FileRef
+      location = "group:Runner.xcodeproj">
+   </FileRef>
+</Workspace>
+"""
+
+
+def _ensure_bare_workspace() -> None:
+    """Make sure Runner.xcworkspace exists and references only Runner.xcodeproj.
+
+    `flutter build ios` (even with --config-only) reads this workspace to
+    add Swift Package Manager integration and fails with "Xcode workspace
+    not found" if it's missing entirely. We used to just delete it after
+    `pod deintegrate` to guarantee no stale Pods.xcodeproj reference
+    survived — that's what actually broke the SPM step, not the
+    deintegration itself. Regenerate a clean one instead.
+    """
+    workspace = IOS / "Runner.xcworkspace"
+    data_file = workspace / "contents.xcworkspacedata"
+    if data_file.is_file() and "Pods.xcodeproj" not in data_file.read_text(encoding="utf-8"):
+        return  # already clean, nothing to do
+    if workspace.is_dir():
+        shutil.rmtree(workspace)
+    workspace.mkdir(parents=True)
+    data_file.write_text(_BARE_WORKSPACE_CONTENTS, encoding="utf-8")
+    print(f"Regenerated bare {workspace} (Runner.xcodeproj only, no Pods)")
+
+
 def deintegrate_cocoapods() -> None:
     """Drop CocoaPods — Flutter 3.47+ plugins here are Swift Packages."""
     podfile = IOS / "Podfile"
     if not podfile.is_file():
         _scrub_cocoapods_from_pbxproj()
+        _ensure_bare_workspace()
         return
 
     try:
@@ -157,10 +189,7 @@ def deintegrate_cocoapods() -> None:
         shutil.rmtree(pods_dir)
         print(f"Removed {pods_dir}")
 
-    workspace = IOS / "Runner.xcworkspace"
-    if workspace.is_dir():
-        shutil.rmtree(workspace)
-        print(f"Removed {workspace}")
+    _ensure_bare_workspace()
 
 
 def main() -> None:

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
 import '../models/server_profile.dart';
@@ -15,7 +16,7 @@ class ModulePorts {
   static const notes = 8448;
   static const send = 8449;
   static const clipboard = 8451;
-  static const brickBreaker = 8450;
+  static const messages = 8452;
 }
 
 class SettingsService {
@@ -68,6 +69,25 @@ class SettingsService {
     await _storage.write(key: _hostKey, value: h);
   }
 
+  static const _deviceIdKey = 'device_id';
+
+  /// Stable per-install identity used as Message.senderId — generated
+  /// once and kept in the same Keychain/EncryptedSharedPreferences store
+  /// as the hostname, so it survives reinstalls the same way.
+  Future<String> getOrCreateDeviceId() async {
+    final existing = await _storage.read(key: _deviceIdKey);
+    if (existing != null && existing.isNotEmpty) return existing;
+    final id = _randomHex(16);
+    await _storage.write(key: _deviceIdKey, value: id);
+    return id;
+  }
+
+  String _randomHex(int length) {
+    final rand = Random.secure();
+    return List.generate(length, (_) => rand.nextInt(16).toRadixString(16))
+        .join();
+  }
+
   Future<String?> getAccessCode(String moduleKey) async {
     return _storage.read(key: _keyFor(moduleKey));
   }
@@ -105,7 +125,7 @@ class SettingsService {
       'notes' => ModulePorts.notes,
       'send' => ModulePorts.send,
       'clipboard' => ModulePorts.clipboard,
-      'brick_breaker' => ModulePorts.brickBreaker,
+      'messages' => ModulePorts.messages,
       _ => throw ArgumentError('unknown module $moduleKey'),
     };
     return 'https://$host:$port';
