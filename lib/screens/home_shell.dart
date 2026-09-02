@@ -6,17 +6,30 @@ import 'games_screen.dart';
 import 'yt_screen.dart';
 import 'quick_send_screen.dart';
 import 'clipboard_screen.dart';
+import 'messages_screen.dart';
 import 'settings_screen.dart';
 import '../services/settings_service.dart';
+import '../services/app_navigation.dart';
+
+/// Lets code outside the widget tree (notably LocalNotificationService,
+/// which fires from a plugin callback with no BuildContext of its own)
+/// reach the live HomeShell instance to switch tabs. Attached via
+/// `HomeShell(key: homeShellKey)` in main.dart.
+final homeShellKey = GlobalKey<HomeShellState>();
 
 class HomeShell extends StatefulWidget {
   const HomeShell({super.key});
 
   @override
-  State<HomeShell> createState() => _HomeShellState();
+  State<HomeShell> createState() => HomeShellState();
 }
 
-class _HomeShellState extends State<HomeShell> {
+class HomeShellState extends State<HomeShell> {
+  /// Index of the Messages tab in [_index] / [screens] below — kept in
+  /// sync manually since the list is a plain literal, not something we
+  /// derive an index from. Update this if a tab is added/reordered.
+  static const int messagesTabIndex = 7;
+
   int _index = 0;
   late final PageController _pageController;
   final _settings = SettingsService();
@@ -42,7 +55,23 @@ class _HomeShellState extends State<HomeShell> {
       _hostname = host;
       _checked = true;
     });
+
+    // A notification tap that launched the app from cold gets handled by
+    // LocalNotificationService before this widget exists, so it stashes
+    // the target tab in AppNavigation instead of calling us directly.
+    // Claim it now that we're up, once the first frame after this build
+    // has actually gone out (jumping pages mid-build throws).
+    final pendingTab = AppNavigation.consumePendingTabIndex();
+    if (pendingTab != null && mounted) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) selectTab(pendingTab);
+      });
+    }
   }
+
+  /// Public entry point for switching tabs from outside this State —
+  /// used by AppNavigation to deep-link in from a tapped notification.
+  void selectTab(int i) => _onDestinationSelected(i);
 
   Future<void> _promptForHostname() async {
     await Navigator.of(context).push(
@@ -55,11 +84,18 @@ class _HomeShellState extends State<HomeShell> {
   // gesture and the bottom nav stay in sync either way you navigate.
   void _onDestinationSelected(int i) {
     setState(() => _index = i);
-    _pageController.animateToPage(
-      i,
-      duration: const Duration(milliseconds: 260),
-      curve: Curves.easeOutCubic,
-    );
+    // Guards a narrow edge case unique to the notification deep-link
+    // path: if a tap resolves before the PC hostname is set up, build()
+    // is still showing the setup prompt instead of the PageView, so
+    // there's no client to animate yet. _index is already updated above,
+    // so the right tab shows as soon as the PageView does exist.
+    if (_pageController.hasClients) {
+      _pageController.animateToPage(
+        i,
+        duration: const Duration(milliseconds: 260),
+        curve: Curves.easeOutCubic,
+      );
+    }
   }
 
   // Fires continuously while dragging (page value moves fractionally
@@ -103,6 +139,7 @@ class _HomeShellState extends State<HomeShell> {
       _KeepAlive(child: YtScreen()),
       _KeepAlive(child: QuickSendScreen()),
       _KeepAlive(child: ClipboardScreen()),
+      _KeepAlive(child: MessagesScreen()),
       _KeepAlive(child: SettingsScreen()),
     ];
 
@@ -123,6 +160,7 @@ class _HomeShellState extends State<HomeShell> {
           NavigationDestination(icon: Icon(Icons.download), label: 'YT'),
           NavigationDestination(icon: Icon(Icons.send), label: 'Send'),
           NavigationDestination(icon: Icon(Icons.content_paste), label: 'Clip'),
+          NavigationDestination(icon: Icon(Icons.chat_bubble_outline), label: 'Messages'),
           NavigationDestination(icon: Icon(Icons.settings), label: 'Settings'),
         ],
       ),

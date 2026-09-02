@@ -1,80 +1,87 @@
-<#
-push_to_github.ps1
+import 'dart:convert';
+import 'dart:io';
+import 'package:http/http.dart' as http;
+import '../models/download_job.dart';
 
-One-command push for this project. Handles both the very first push
-(repo doesn't exist as a git repo yet, or has no remote configured) and
-every push after that (just commits + pushes whatever changed).
+/// Talks to modules/yt_downloader/web_server.py.
+class YtApiService {
+  final String baseUrl;
+  final String? accessCode;
+  YtApiService(this.baseUrl, {this.accessCode});
 
-USAGE
-    First time:
-        .\push_to_github.ps1 -RepoUrl "https://github.com/<you>/multi-tool-remote.git"
+  Uri _uri(String path) => Uri.parse('$baseUrl$path');
 
-    Every time after that, from inside the folder:
-        .\push_to_github.ps1
+  Map<String, String> get _headers => {
+        'Content-Type': 'application/json',
+        if (accessCode != null && accessCode!.isNotEmpty)
+          'X-Access-Code': accessCode!,
+      };
 
-    (It remembers the remote after the first run, so -RepoUrl is only
-    needed once. Pass it again anytime to change/fix the remote.)
-
-REQUIREMENTS
-    - Git for Windows installed (winget install --id Git.Git or
-      https://git-scm.com/download/win)
-    - You've signed in to GitHub at least once via Git Credential
-      Manager (which ships with Git for Windows) — the first push will
-      pop a browser window to authenticate if you haven't.
-#>
-
-param(
-    [string]$RepoUrl,
-    [string]$Message = "Update"
-)
-
-$ErrorActionPreference = "Stop"
-
-function Fail($msg) {
-    Write-Host $msg -ForegroundColor Red
-    exit 1
-}
-
-if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
-    Fail "Git isn't installed or isn't on PATH. Install it first: winget install --id Git.Git -e"
-}
-
-# Run from the script's own folder regardless of where it's invoked from.
-Set-Location -Path $PSScriptRoot
-
-$isRepo = Test-Path ".git"
-
-if (-not $isRepo) {
-    Write-Host "No git repo here yet — initializing…" -ForegroundColor Cyan
-    git init | Out-Null
-    git branch -M main
-}
-
-if ($RepoUrl) {
-    $existing = git remote get-url origin 2>$null
-    if ($existing) {
-        Write-Host "Updating remote 'origin' to $RepoUrl" -ForegroundColor Cyan
-        git remote set-url origin $RepoUrl
-    } else {
-        Write-Host "Adding remote 'origin' -> $RepoUrl" -ForegroundColor Cyan
-        git remote add origin $RepoUrl
+  Future<bool> checkStatus() async {
+    try {
+      final res =
+          await http.get(_uri('/api/status')).timeout(const Duration(seconds: 6));
+      return res.statusCode == 200;
+    } catch (_) {
+      return false;
     }
-} elseif (-not (git remote get-url origin 2>$null)) {
-    Fail "No remote configured yet. Run this once with -RepoUrl, e.g.:`n  .\push_to_github.ps1 -RepoUrl `"https://github.com/<you>/multi-tool-remote.git`""
+  }
+
+  Future<List<DownloadJob>> fetchJobs() async {
+    final res = await http.get(_uri('/api/jobs'));
+    if (res.statusCode != 200) {
+      throw Exception('Failed to load jobs (${res.statusCode})');
+    }
+    final data = jsonDecode(res.body) as Map<String, dynamic>;
+    return (data['jobs'] as List)
+        .map((j) => DownloadJob.fromJson(j as Map<String, dynamic>))
+        .toList();
+  }
+
+  Future<void> queueDownload({
+    required String url,
+    required String format, // 'mp3' | 'mp4'
+    required String type, // 'video' | 'playlist'
+  }) async {
+    final res = await http.post(_uri('/api/download'),
+        headers: _headers,
+        body: jsonEncode({'url': url, 'format': format, 'type': type}));
+    final data = jsonDecode(res.body) as Map<String, dynamic>;
+    if (res.statusCode != 200 || data['ok'] != true) {
+      throw Exception(data['error'] ?? 'Queue failed (${res.statusCode})');
+    }
+  }
+
+  /// Streams a completed job's file (by index into DownloadJob.files) to
+  /// [savePath], reporting 0.0–1.0 progress via [onProgress]. Throws if
+  /// the file is missing/moved or the request fails.
+  Future<void> downloadJobFile({
+    required String jobId,
+    required int index,
+    required String savePath,
+    void Function(double progress)? onProgress,
+  }) async {
+    final req = http.Request(
+      'GET',
+      _uri('/api/jobs/$jobId/download/$index'),
+    );
+    req.headers.addAll(_headers);
+    final streamed = await http.Client().send(req);
+    if (streamed.statusCode != 200 && streamed.statusCode != 206) {
+      throw Exception('Download failed (${streamed.statusCode})');
+    }
+
+    final total = streamed.contentLength ?? 0;
+    var received = 0;
+    final file = await File(savePath).open(mode: FileMode.write);
+    try {
+      await for (final chunk in streamed.stream) {
+        await file.writeFrom(chunk);
+        received += chunk.length;
+        if (total > 0) onProgress?.call(received / total);
+      }
+    } finally {
+      await file.close();
+    }
+  }
 }
-
-git add -A
-
-# Nothing to commit is not an error — just means no changes since last push.
-git diff --cached --quiet
-if ($LASTEXITCODE -eq 0) {
-    Write-Host "No changes to commit." -ForegroundColor Yellow
-} else {
-    git commit -m $Message | Out-Null
-    Write-Host "Committed: $Message" -ForegroundColor Green
-}
-
-Write-Host "Pushing to origin/main…" -ForegroundColor Cyan
-git push -u origin main
-
-Write-Host "`nDone. GitHub Actions will start the build automatically — check the Actions tab." -ForegroundColor Green

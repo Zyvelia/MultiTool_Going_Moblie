@@ -1,7 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:just_audio_background/just_audio_background.dart';
 import 'screens/home_shell.dart';
+import 'services/local_notification_service.dart';
 import 'theme/app_theme.dart';
+
+/// App-wide navigator handle. Not used directly for the notification
+/// deep-link (switching tabs happens through [homeShellKey] instead,
+/// since HomeShell's tabs are a PageView, not routes) but kept available
+/// for any future case — pushing a screen from a background callback,
+/// deep links from outside the app, etc. — that needs a BuildContext
+/// with no widget nearby to source one from.
+final navigatorKey = GlobalKey<NavigatorState>();
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -15,6 +24,11 @@ Future<void> main() async {
     androidNotificationChannelName: 'Music playback',
     androidNotificationOngoing: true,
   );
+  // Initialized here (rather than left to lazily init on first use, as
+  // before) so a cold start launched by tapping a notification is caught
+  // reliably — that check happens inside init() and needs to run before
+  // HomeShell claims it, regardless of which tab the user lands on first.
+  await LocalNotificationService.instance.init();
   runApp(const MultiToolRemoteApp());
 }
 
@@ -24,10 +38,11 @@ class MultiToolRemoteApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
+      navigatorKey: navigatorKey,
       title: "Zs Multi Tool Remote",
       debugShowCheckedModeBanner: false,
       theme: AppTheme.dark(),
-      home: const HomeShell(),
+      home: HomeShell(key: homeShellKey),
     );
   }
 }
