@@ -28,8 +28,21 @@ Future<void> main() async {
   // before) so a cold start launched by tapping a notification is caught
   // reliably — that check happens inside init() and needs to run before
   // HomeShell claims it, regardless of which tab the user lands on first.
+  // NOTE: this only does plugin registration + the cold-start launch
+  // check now, not the runtime permission dialog — see
+  // LocalNotificationService.requestPermission() for why that's
+  // deliberately deferred to after the first frame.
   await LocalNotificationService.instance.init();
   runApp(const MultiToolRemoteApp());
+  // The Android 13+ notification permission prompt needs a resumed
+  // Activity to actually display and return a result. Requesting it here
+  // (pre-runApp) used to hang the app on real devices before it ever got
+  // past the launch screen — see requestPermission()'s doc comment.
+  // addPostFrameCallback guarantees the first frame is already on screen
+  // before this fires.
+  WidgetsBinding.instance.addPostFrameCallback((_) {
+    LocalNotificationService.instance.requestPermission();
+  });
 }
 
 class MultiToolRemoteApp extends StatelessWidget {

@@ -44,14 +44,6 @@ class LocalNotificationService {
       onDidReceiveNotificationResponse: _onTap,
     );
 
-    // Android 13+ treats notifications as a runtime permission — the
-    // plugin declares it in its own manifest merge, but still needs this
-    // explicit prompt at runtime, same as camera/location would.
-    await _plugin
-        .resolvePlatformSpecificImplementation<
-            AndroidFlutterLocalNotificationsPlugin>()
-        ?.requestNotificationsPermission();
-
     _initialized = true;
 
     // Cold start: the app was fully killed and the tap that's launching
@@ -62,6 +54,25 @@ class LocalNotificationService {
     if (launchDetails?.didNotificationLaunchApp == true) {
       _handlePayload(launchDetails!.notificationResponse?.payload);
     }
+  }
+
+  /// Android 13+ treats notifications as a runtime permission — the
+  /// plugin declares it in its own manifest merge, but still needs this
+  /// explicit prompt at runtime, same as camera/location would.
+  ///
+  /// Deliberately NOT part of init(): this shows a system dialog, which
+  /// needs a resumed Activity/attached window to display and return a
+  /// result. init() is awaited in main() *before* runApp() — calling
+  /// this there raced the native launch screen on real devices (OEM
+  /// launch animations especially) and could hang forever waiting on an
+  /// Activity state that hadn't arrived yet, which meant runApp() never
+  /// ran and the app never got past its splash/logo. Call this instead
+  /// from a post-frame callback once the widget tree is actually up.
+  Future<void> requestPermission() async {
+    await _plugin
+        .resolvePlatformSpecificImplementation<
+            AndroidFlutterLocalNotificationsPlugin>()
+        ?.requestNotificationsPermission();
   }
 
   void _onTap(NotificationResponse response) {
