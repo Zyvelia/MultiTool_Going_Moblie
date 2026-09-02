@@ -132,6 +132,42 @@ def patch_compile_sdk() -> None:
     print(f"Patched compileSdk in {path}")
 
 
+def patch_core_library_desugaring() -> None:
+    """flutter_local_notifications requires Java 8+ core library desugaring
+    to be enabled on :app, or the release build fails at
+    :app:checkReleaseAarMetadata with "requires core library desugaring to
+    be enabled". Two parts: flip the compileOptions flag, and add the
+    desugar_jdk_libs dependency that flag needs at compile time."""
+    path = ROOT / "android/app/build.gradle.kts"
+    gradle = path.read_text(encoding="utf-8")
+    original = gradle
+
+    if "isCoreLibraryDesugaringEnabled" not in gradle:
+        gradle, n = re.subn(
+            r"(compileOptions\s*\{)",
+            r"\1\n        isCoreLibraryDesugaringEnabled = true",
+            gradle,
+            count=1,
+        )
+        if n == 0:
+            raise SystemExit(f"Could not enable core library desugaring in {path}")
+
+    if "desugar_jdk_libs" not in gradle:
+        dep_line = '    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")\n'
+        gradle, n = re.subn(
+            r"(dependencies\s*\{)",
+            r"\1\n" + dep_line,
+            gradle,
+            count=1,
+        )
+        if n == 0:
+            raise SystemExit(f"Could not add coreLibraryDesugaring dependency in {path}")
+
+    if gradle != original:
+        path.write_text(gradle, encoding="utf-8")
+        print(f"Enabled core library desugaring in {path}")
+
+
 def patch_built_in_kotlin() -> None:
     """Migrate the app module off the legacy kotlin-android plugin (AGP 9+)."""
     app_gradle = ROOT / "android/app/build.gradle.kts"
@@ -175,6 +211,7 @@ def main() -> None:
     patch_manifest()
     patch_main_activity()
     patch_compile_sdk()
+    patch_core_library_desugaring()
     patch_built_in_kotlin()
     print("Android patches applied.")
 
