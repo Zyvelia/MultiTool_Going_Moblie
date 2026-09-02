@@ -161,7 +161,12 @@ def patch_core_library_desugaring() -> None:
             count=1,
         )
         if n == 0:
-            raise SystemExit(f"Could not add coreLibraryDesugaring dependency in {path}")
+            # Current `flutter create` templates don't always emit an
+            # empty `dependencies {}` stub — nothing to inject into, so
+            # append a fresh block at the end of the file instead of
+            # hard-failing.
+            gradle = gradle.rstrip() + "\n\ndependencies {\n" + dep_line + "}\n"
+            print(f"No dependencies {{}} block found in {path} — appended a new one")
 
     if gradle != original:
         path.write_text(gradle, encoding="utf-8")
