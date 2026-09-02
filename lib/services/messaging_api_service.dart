@@ -63,28 +63,39 @@ class MessagingApiService {
   void connect() {
     if (_disposed) return;
     _reconnectTimer?.cancel();
-    try {
-      _channel = WebSocketChannel.connect(_wsUri);
-    } catch (_) {
-      _scheduleReconnect();
-      return;
-    }
-    _connectionController.add(true);
-    _backoff = _minBackoff;
 
-    _sub = _channel!.stream.listen(
-      (raw) {
-        try {
-          final data = jsonDecode(raw as String) as Map<String, dynamic>;
-          _messagesController.add(Message.fromJson(data));
-        } catch (_) {
-          // Malformed frame — drop it, keep the socket alive.
-        }
-      },
-      onError: (_) => _handleDrop(),
-      onDone: _handleDrop,
-      cancelOnError: true,
-    );
+    final channel = WebSocketChannel.connect(_wsUri);
+    _channel = channel;
+
+    // WebSocketChannel.connect() returns immediately and connects lazily
+    // in the background — it does NOT mean the handshake succeeded. Wait
+    // on `.ready` (throws if the connection actually fails, e.g. nothing
+    // listening on the other end) before telling the UI we're connected.
+    // Without this, `connectionState` reports true the instant connect()
+    // is called even when the desktop server is completely unreachable.
+    channel.ready.then((_) {
+      if (_disposed || _channel != channel) return; // superseded by a later connect()
+      _connectionController.add(true);
+      _backoff = _minBackoff;
+
+      _sub = channel.stream.listen(
+        (raw) {
+          try {
+            final data = jsonDecode(raw as String) as Map<String, dynamic>;
+            _messagesController.add(Message.fromJson(data));
+          } catch (_) {
+            // Malformed frame — drop it, keep the socket alive.
+          }
+        },
+        onError: (_) => _handleDrop(),
+        onDone: _handleDrop,
+        cancelOnError: true,
+      );
+    }).catchError((_) {
+      if (_disposed || _channel != channel) return;
+      _channel = null;
+      _scheduleReconnect();
+    });
   }
 
   void _handleDrop() {

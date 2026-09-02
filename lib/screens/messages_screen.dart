@@ -245,20 +245,28 @@ class _MessagesScreenState extends State<MessagesScreen> with WidgetsBindingObse
       body: Column(
         children: [
           Expanded(
-            child: _messages.isEmpty
-                ? const Center(
-                    child: Text('No messages yet.',
-                        style: TextStyle(color: Colors.white54)),
-                  )
-                : ListView.builder(
-                    controller: _scrollController,
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                    itemCount: _messages.length,
-                    itemBuilder: (context, i) => _Bubble(
-                      message: _messages[i],
-                      isMine: _messages[i].senderId == _myDeviceId,
+            child: GestureDetector(
+              // Tapping anywhere in the message list — including empty
+              // space below the last bubble, thanks to opaque hit
+              // testing — dismisses the keyboard. There was previously
+              // no way to close it short of leaving the screen.
+              behavior: HitTestBehavior.opaque,
+              onTap: () => FocusScope.of(context).unfocus(),
+              child: _messages.isEmpty
+                  ? const Center(
+                      child: Text('No messages yet.',
+                          style: TextStyle(color: Colors.white54)),
+                    )
+                  : ListView.builder(
+                      controller: _scrollController,
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      itemCount: _messages.length,
+                      itemBuilder: (context, i) => _Bubble(
+                        message: _messages[i],
+                        isMine: _messages[i].senderId == _myDeviceId,
+                      ),
                     ),
-                  ),
+            ),
           ),
           SafeArea(
             top: false,
