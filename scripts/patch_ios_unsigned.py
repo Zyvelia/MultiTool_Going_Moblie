@@ -1,15 +1,19 @@
 #!/usr/bin/env python3
 """Patches for unsigned iOS CI builds (no Apple Developer team).
 
-Flutter 3.47+ ships iOS plugins as Swift Packages. Legacy CocoaPods
-integration from `flutter create` triggers Manifest.lock drift on CI.
-This script deintegrates CocoaPods and disables code signing on Runner.
+Flutter's iOS plugin resolution is hybrid: plugins that ship a
+`Package.swift` are pulled in via Swift Package Manager, and plugins that
+don't (e.g. `printing`, which still only publishes a Podspec/Podfile hook)
+fall back to CocoaPods automatically. `flutter build ios --config-only`
+drives that whole hybrid flow itself (including `pod install` when a
+Podfile is present), so this script must NOT deintegrate CocoaPods or
+delete the Podfile/Pods/workspace — doing so removes the only build path
+for the CocoaPods-only plugins and breaks `GeneratedPluginRegistrant`
+imports like `PrintingPlugin.h`. This script only disables code signing.
 """
 from __future__ import annotations
 
 import re
-import shutil
-import subprocess
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -87,87 +91,16 @@ def strip_pbxproj_signing() -> None:
         print(f"Stripped signing from {path}")
 
 
-def _scrub_cocoapods_from_pbxproj() -> None:
-    """Remove CocoaPods build phases + xcconfig refs left after deintegrate."""
-    path = IOS / "Runner.xcodeproj/project.pbxproj"
-    if not path.is_file():
-        return
-    text = path.read_text(encoding="utf-8")
-    original = text
-
-    text = re.sub(
-        r"\t\t[A-F0-9]{24} /\* \[CP\] [^\n]+ \*/ = \{.*?\n\t\t\};\n",
-        "",
-        text,
-        flags=re.DOTALL,
-    )
-    text = re.sub(
-        r"\t\t\t\t[A-F0-9]{24} /\* \[CP\] [^\n]+ \*/,\n",
-        "",
-        text,
-    )
-    text = re.sub(
-        r'\t\t\tbaseConfigurationReference = [A-F0-9]{24} /\* Pods-Runner\.[^"]+\.xcconfig \*/;\n',
-        "",
-        text,
-    )
-    text = re.sub(
-        r'\t\t\tbaseConfigurationReference = [A-F0-9]{24} /\* Pods-RunnerTests\.[^"]+\.xcconfig \*/;\n',
-        "",
-        text,
-    )
-
-    if text != original:
-        path.write_text(text, encoding="utf-8")
-        print(f"Scrubbed CocoaPods references from {path}")
-
-
-def deintegrate_cocoapods() -> None:
-    """Drop CocoaPods — Flutter 3.47+ plugins here are Swift Packages."""
-    podfile = IOS / "Podfile"
-    if not podfile.is_file():
-        _scrub_cocoapods_from_pbxproj()
-        return
-
-    try:
-        result = subprocess.run(
-            ["pod", "deintegrate"],
-            cwd=IOS,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if result.returncode == 0:
-            print("pod deintegrate OK")
-        else:
-            print(f"pod deintegrate exit {result.returncode}: {result.stderr or result.stdout}")
-    except FileNotFoundError:
-        print("pod CLI not found — scrubbing project manually")
-
-    _scrub_cocoapods_from_pbxproj()
-
-    for rel in ("Podfile", "Podfile.lock"):
-        p = IOS / rel
-        if p.is_file():
-            p.unlink()
-            print(f"Removed {p}")
-
-    pods_dir = IOS / "Pods"
-    if pods_dir.is_dir():
-        shutil.rmtree(pods_dir)
-        print(f"Removed {pods_dir}")
-
-    workspace = IOS / "Runner.xcworkspace"
-    if workspace.is_dir():
-        shutil.rmtree(workspace)
-        print(f"Removed {workspace}")
-
-
 def main() -> None:
     bump_pbxproj_deployment_target()
     strip_pbxproj_signing()
     patch_pbxproj_code_signing()
-    deintegrate_cocoapods()
+    # Deliberately no CocoaPods deintegration here — see module docstring.
+    # `flutter build ios --config-only` (run right after this script, in
+    # build_ios_unsigned.sh) handles the hybrid SPM+CocoaPods resolution,
+    # including `pod install` for plugins like `printing` that still only
+    # ship a Podspec. Ripping out the Podfile/Pods/workspace here breaks
+    # that plugin's build.
     print("iOS unsigned-build patches applied.")
 
 

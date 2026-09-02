@@ -7,9 +7,12 @@
 #     1. flutter build ios --config-only  (Generated.xcconfig, no team check)
 #     2. xcodebuild with CODE_SIGNING_ALLOWED=NO (Flutter Run Script phases run)
 #
-# Why pod deintegrate?
-#   Flutter 3.47+ plugins here are Swift Packages. Legacy CocoaPods from
-#   `flutter create` causes Manifest.lock drift on fresh CI runners.
+# CocoaPods:
+#   Plugin resolution is hybrid. Plugins with a Package.swift use SPM;
+#   plugins without one (e.g. `printing`) still fall back to CocoaPods.
+#   `flutter build ios --config-only` below drives that whole flow itself
+#   (including `pod install` when needed) — do not deintegrate CocoaPods
+#   or touch the Podfile/Pods/workspace before this runs.
 #
 # Prerequisites (CI or local): flutter create, flutter pub get, launcher icons.
 set -euo pipefail
@@ -35,8 +38,18 @@ echo "--- xcodebuild (unsigned) ---"
 xattr -cr . 2>/dev/null || true
 rm -rf "$DERIVED"
 
+# Build the workspace, not the bare .xcodeproj, whenever CocoaPods is in
+# play (e.g. the `printing` plugin) — the workspace is what pulls in the
+# Pods static library. `flutter build ios --config-only` above creates/
+# updates ios/Runner.xcworkspace via `pod install` when a Podfile exists.
+if [ -d "ios/Runner.xcworkspace" ]; then
+  XC_TARGET=(-workspace ios/Runner.xcworkspace)
+else
+  XC_TARGET=(-project ios/Runner.xcodeproj)
+fi
+
 xcodebuild \
-  -project ios/Runner.xcodeproj \
+  "${XC_TARGET[@]}" \
   -scheme Runner \
   -configuration Release \
   -sdk iphoneos \
