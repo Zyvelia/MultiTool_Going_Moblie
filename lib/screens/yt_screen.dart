@@ -4,6 +4,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 import '../models/download_job.dart';
 import '../services/settings_service.dart';
+import '../services/user_facing_error.dart';
 import '../services/yt_api_service.dart';
 
 class YtScreen extends StatefulWidget {
@@ -73,7 +74,7 @@ class _YtScreenState extends State<YtScreen> {
       _urlController.clear();
       await _refreshJobs();
     } catch (e) {
-      setState(() => _error = e.toString().replaceFirst('Exception: ', ''));
+      setState(() => _error = explainError(e, doing: 'queue that download'));
     } finally {
       if (mounted) setState(() => _queuing = false);
     }
@@ -106,7 +107,7 @@ class _YtScreenState extends State<YtScreen> {
       if (!mounted) return;
       setState(() => _saveProgress.remove(key));
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Save failed: ${e.toString().replaceFirst('Exception: ', '')}')),
+        SnackBar(content: Text(explainError(e, doing: 'save that file to the phone'))),
       );
     }
   }

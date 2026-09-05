@@ -7,6 +7,7 @@ import '../services/settings_service.dart';
 import '../services/notes_api_service.dart';
 import '../services/notes_sync_service.dart';
 import '../services/connectivity_service.dart';
+import '../services/user_facing_error.dart';
 import '../theme/app_colors.dart';
 
 class NotesScreen extends StatefulWidget {
@@ -152,7 +153,7 @@ class _NotesScreenState extends State<NotesScreen> {
       await _sync.upsertFromServer(updated);
       _refreshLocal();
     } catch (e) {
-      _showToast(e.toString().replaceFirst('Exception: ', ''));
+      _showToast(explainError(e));
     }
   }
 
@@ -340,7 +341,7 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
       setState(() => _saving = false);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(e.toString().replaceFirst('Exception: ', ''))),
+          SnackBar(content: Text(explainError(e))),
         );
       }
     }
@@ -404,7 +405,7 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
       setState(() => _deleting = false);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(e.toString().replaceFirst('Exception: ', ''))),
+          SnackBar(content: Text(explainError(e))),
         );
       }
     }

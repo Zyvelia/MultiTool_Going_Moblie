@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import '../models/server_profile.dart';
+import '../services/device_trust_service.dart';
 import '../services/settings_service.dart';
+import '../services/user_facing_error.dart';
 import 'connection_test_screen.dart';
 import 'speed_test_screen.dart';
 
@@ -16,7 +18,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
   final _hostController = TextEditingController();
   final _gamesCodeController = TextEditingController();
   final _ytCodeController = TextEditingController();
+  final _gsmCodeController = TextEditingController();
+  final _inviteController = TextEditingController();
+  final _chatCodeController = TextEditingController();
   final _musicPublicUrlController = TextEditingController();
+  final _pairCodeController = TextEditingController();
+  final _pairLabelController = TextEditingController(text: 'phone');
+
+  bool _paired = false;
+  bool _pairing = false;
+  String? _pairMessage;
 
   PreferredServer _musicPreferred = PreferredServer.auto;
   bool _musicWifiOnly = true;
@@ -34,17 +45,63 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final host = await _settings.getHostname();
     final gamesCode = await _settings.getAccessCode('games');
     final ytCode = await _settings.getAccessCode('yt');
+    final gsmCode = await _settings.getAccessCode('gsm');
+    final invite = await _settings.getSocialInviteKey();
+    final chatCode = await _settings.getAccessCode('chat');
     final musicPublicUrl = await _settings.getMusicPublicUrl();
     final musicPreferred = await _settings.getMusicPreferredServer();
     final musicWifiOnly = await _settings.getMusicWifiOnlyDownloads();
     _hostController.text = host ?? '';
     _gamesCodeController.text = gamesCode ?? '';
     _ytCodeController.text = ytCode ?? '';
+    _gsmCodeController.text = gsmCode ?? '';
+    _inviteController.text = invite ?? '';
+    _chatCodeController.text = chatCode ?? '';
     _musicPublicUrlController.text = musicPublicUrl ?? '';
+    final paired = await deviceTrust.isPaired();
     setState(() {
       _musicPreferred = musicPreferred;
       _musicWifiOnly = musicWifiOnly;
+      _paired = paired;
       _loaded = true;
+    });
+  }
+
+  Future<void> _pairPhone() async {
+    final host = _hostController.text.trim();
+    final code = _pairCodeController.text.trim();
+    if (host.isEmpty || code.isEmpty) {
+      setState(() => _pairMessage = 'Save a Tailscale hostname and the 6-digit code from Remote Hub.');
+      return;
+    }
+    setState(() {
+      _pairing = true;
+      _pairMessage = null;
+    });
+    try {
+      await _settings.setHostname(host);
+      await deviceTrust.pair(host, code, label: _pairLabelController.text);
+      if (!mounted) return;
+      setState(() {
+        _paired = true;
+        _pairing = false;
+        _pairMessage = 'Paired. If this phone is stolen, revoke it on Remote Hub.';
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _pairing = false;
+        _pairMessage = explainError(e, doing: 'pair this phone');
+      });
+    }
+  }
+
+  Future<void> _forgetPairing() async {
+    await deviceTrust.clearSecret();
+    if (!mounted) return;
+    setState(() {
+      _paired = false;
+      _pairMessage = 'Forgot the secret on this phone. The PC still lists it until you revoke.';
     });
   }
 
@@ -54,6 +111,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
     await _settings.setHostname(host);
     await _settings.setAccessCode('games', _gamesCodeController.text);
     await _settings.setAccessCode('yt', _ytCodeController.text);
+    await _settings.setAccessCode('gsm', _gsmCodeController.text);
+    await _settings.setSocialInviteKey(_inviteController.text);
+    await _settings.setAccessCode('chat', _chatCodeController.text);
     await _settings.setMusicPublicUrl(_musicPublicUrlController.text);
     await _settings.setMusicPreferredServer(_musicPreferred);
     await _settings.setMusicWifiOnlyDownloads(_musicWifiOnly);
@@ -92,6 +152,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _hostController.clear();
     _gamesCodeController.clear();
     _ytCodeController.clear();
+    _gsmCodeController.clear();
+    _inviteController.clear();
+    _chatCodeController.clear();
     _musicPublicUrlController.clear();
     setState(() {
       _musicPreferred = PreferredServer.auto;
@@ -110,7 +173,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _hostController.dispose();
     _gamesCodeController.dispose();
     _ytCodeController.dispose();
+    _gsmCodeController.dispose();
+    _inviteController.dispose();
+    _chatCodeController.dispose();
     _musicPublicUrlController.dispose();
+    _pairCodeController.dispose();
+    _pairLabelController.dispose();
     super.dispose();
   }
 
@@ -142,6 +210,63 @@ class _SettingsScreenState extends State<SettingsScreen> {
               border: OutlineInputBorder(),
             ),
           ),
+          const SizedBox(height: 28),
+          const Text(
+            'This phone',
+            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+          ),
+          const SizedBox(height: 4),
+          const Text(
+            'Pair with a code from Remote Hub on the PC. If the phone is '
+            'lost, revoke it there — that copy of the app stops. This does '
+            'not detect malware on the handset.',
+            style: TextStyle(color: Colors.white54, fontSize: 12),
+          ),
+          const SizedBox(height: 12),
+          Text(
+            _paired ? 'Paired to this PC' : 'Not paired yet',
+            style: TextStyle(
+              color: _paired ? Colors.greenAccent : Colors.white70,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: 10),
+          TextField(
+            controller: _pairCodeController,
+            keyboardType: TextInputType.number,
+            maxLength: 6,
+            decoration: const InputDecoration(
+              labelText: 'Pairing code',
+              hintText: '6 digits from Remote Hub',
+              border: OutlineInputBorder(),
+              counterText: '',
+            ),
+          ),
+          const SizedBox(height: 10),
+          TextField(
+            controller: _pairLabelController,
+            decoration: const InputDecoration(
+              labelText: 'Name on the PC',
+              hintText: 'phone',
+              border: OutlineInputBorder(),
+            ),
+          ),
+          const SizedBox(height: 10),
+          FilledButton(
+            onPressed: _pairing ? null : _pairPhone,
+            child: Text(_pairing ? 'Pairing…' : 'Pair this phone'),
+          ),
+          if (_paired) ...[
+            const SizedBox(height: 8),
+            TextButton(
+              onPressed: _forgetPairing,
+              child: const Text('Forget pairing on this phone'),
+            ),
+          ],
+          if (_pairMessage != null) ...[
+            const SizedBox(height: 8),
+            Text(_pairMessage!, style: const TextStyle(color: Colors.white70, fontSize: 12)),
+          ],
           const SizedBox(height: 28),
           const Text(
             'Music server',
@@ -231,6 +356,34 @@ class _SettingsScreenState extends State<SettingsScreen> {
             obscureText: true,
             decoration: const InputDecoration(
               labelText: 'YouTube Downloader code',
+              border: OutlineInputBorder(),
+            ),
+          ),
+          const SizedBox(height: 10),
+          TextField(
+            controller: _gsmCodeController,
+            obscureText: true,
+            decoration: const InputDecoration(
+              labelText: 'Game servers code (optional)',
+              border: OutlineInputBorder(),
+            ),
+          ),
+          const SizedBox(height: 10),
+          TextField(
+            controller: _inviteController,
+            obscureText: true,
+            decoration: const InputDecoration(
+              labelText: 'Night invite key',
+              hintText: 'From Tailnet Social on the PC',
+              border: OutlineInputBorder(),
+            ),
+          ),
+          const SizedBox(height: 10),
+          TextField(
+            controller: _chatCodeController,
+            obscureText: true,
+            decoration: const InputDecoration(
+              labelText: 'AI Chat code (optional)',
               border: OutlineInputBorder(),
             ),
           ),

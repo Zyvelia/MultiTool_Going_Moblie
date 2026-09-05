@@ -2,6 +2,8 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:http/http.dart' as http;
 import '../models/download_job.dart';
+import 'trusted_http.dart';
+import 'user_facing_error.dart';
 
 /// Talks to modules/yt_downloader/web_server.py.
 class YtApiService {
@@ -20,7 +22,7 @@ class YtApiService {
   Future<bool> checkStatus() async {
     try {
       final res =
-          await http.get(_uri('/api/status')).timeout(const Duration(seconds: 6));
+          await trustedHttp.get(_uri('/api/status')).timeout(const Duration(seconds: 6));
       return res.statusCode == 200;
     } catch (_) {
       return false;
@@ -28,9 +30,9 @@ class YtApiService {
   }
 
   Future<List<DownloadJob>> fetchJobs() async {
-    final res = await http.get(_uri('/api/jobs'));
+    final res = await trustedHttp.get(_uri('/api/jobs'));
     if (res.statusCode != 200) {
-      throw Exception('Failed to load jobs (${res.statusCode})');
+      throw AppIssue.fromHttp(res.statusCode, res.body, doing: 'load downloads');
     }
     final data = jsonDecode(res.body) as Map<String, dynamic>;
     return (data['jobs'] as List)
@@ -43,13 +45,10 @@ class YtApiService {
     required String format, // 'mp3' | 'mp4'
     required String type, // 'video' | 'playlist'
   }) async {
-    final res = await http.post(_uri('/api/download'),
+    final res = await trustedHttp.post(_uri('/api/download'),
         headers: _headers,
         body: jsonEncode({'url': url, 'format': format, 'type': type}));
-    final data = jsonDecode(res.body) as Map<String, dynamic>;
-    if (res.statusCode != 200 || data['ok'] != true) {
-      throw Exception(data['error'] ?? 'Queue failed (${res.statusCode})');
-    }
+    ensureOk(res, doing: 'queue that download', requireOk: true);
   }
 
   /// Streams a completed job's file (by index into DownloadJob.files) to
@@ -66,9 +65,9 @@ class YtApiService {
       _uri('/api/jobs/$jobId/download/$index'),
     );
     req.headers.addAll(_headers);
-    final streamed = await http.Client().send(req);
+    final streamed = await trustedHttp.send(req);
     if (streamed.statusCode != 200 && streamed.statusCode != 206) {
-      throw Exception('Download failed (${streamed.statusCode})');
+      throw AppIssue.fromHttp(streamed.statusCode, '', doing: 'save that file to the phone');
     }
 
     final total = streamed.contentLength ?? 0;

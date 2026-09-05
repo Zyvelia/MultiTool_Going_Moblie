@@ -5,6 +5,7 @@ import '../theme/app_colors.dart';
 import '../models/vault_entry.dart';
 import '../services/screen_security_service.dart';
 import '../services/settings_service.dart';
+import '../services/user_facing_error.dart';
 import '../services/vault_api_service.dart';
 
 class VaultScreen extends StatefulWidget {
@@ -177,7 +178,7 @@ class _VaultScreenState extends State<VaultScreen>
       _resetIdleTimer();
     } catch (e) {
       setState(() {
-        _error = e.toString().replaceFirst('Exception: ', '');
+        _error = explainError(e, doing: 'unlock the vault');
         _loading = false;
       });
     }

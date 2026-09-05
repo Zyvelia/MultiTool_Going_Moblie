@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import '../models/mirrored_notification.dart';
+import 'user_facing_error.dart';
 
 /// Wraps modules/notification_mirror/web_server.py. Same request/response
 /// pattern as every other *ApiService in this app, plus one addition:
@@ -22,13 +23,17 @@ class NotificationsApiService {
 
   Future<Map<String, dynamic>> getStatus() async {
     final res = await http.get(_uri('/api/status')).timeout(const Duration(seconds: 6));
-    if (res.statusCode != 200) throw Exception('Status check failed (${res.statusCode})');
+    if (res.statusCode != 200) {
+      throw AppIssue.fromHttp(res.statusCode, res.body, doing: 'check notification mirroring');
+    }
     return jsonDecode(res.body) as Map<String, dynamic>;
   }
 
   Future<Map<String, dynamic>> getSettings() async {
     final res = await http.get(_uri('/api/settings')).timeout(const Duration(seconds: 8));
-    if (res.statusCode != 200) throw Exception('Failed to load settings (${res.statusCode})');
+    if (res.statusCode != 200) {
+      throw AppIssue.fromHttp(res.statusCode, res.body, doing: 'load notification settings');
+    }
     return jsonDecode(res.body) as Map<String, dynamic>;
   }
 
@@ -37,7 +42,9 @@ class NotificationsApiService {
         .post(_uri('/api/settings'),
             headers: {'Content-Type': 'application/json'}, body: jsonEncode(partial))
         .timeout(const Duration(seconds: 8));
-    if (res.statusCode != 200) throw Exception('Failed to save settings (${res.statusCode})');
+    if (res.statusCode != 200) {
+      throw AppIssue.fromHttp(res.statusCode, res.body, doing: 'save notification settings');
+    }
   }
 
   Future<void> setEnabled(bool enabled) async {
@@ -46,7 +53,9 @@ class NotificationsApiService {
             headers: {'Content-Type': 'application/json'},
             body: jsonEncode({'enabled': enabled}))
         .timeout(const Duration(seconds: 8));
-    if (res.statusCode != 200) throw Exception('Failed to toggle mirroring (${res.statusCode})');
+    if (res.statusCode != 200) {
+      throw AppIssue.fromHttp(res.statusCode, res.body, doing: 'turn notification mirroring on or off');
+    }
   }
 
   Future<void> setAppEnabled(String appName, bool enabled) async {
@@ -57,7 +66,9 @@ class NotificationsApiService {
 
   Future<List<MirroredNotification>> getHistory() async {
     final res = await http.get(_uri('/api/history')).timeout(const Duration(seconds: 8));
-    if (res.statusCode != 200) throw Exception('Failed to load history (${res.statusCode})');
+    if (res.statusCode != 200) {
+      throw AppIssue.fromHttp(res.statusCode, res.body, doing: 'load notification history');
+    }
     final data = jsonDecode(res.body) as Map<String, dynamic>;
     return (data['items'] as List)
         .map((e) => MirroredNotification.fromJson(e as Map<String, dynamic>))
@@ -66,7 +77,9 @@ class NotificationsApiService {
 
   Future<void> clearHistory() async {
     final res = await http.delete(_uri('/api/history')).timeout(const Duration(seconds: 8));
-    if (res.statusCode != 200) throw Exception('Failed to clear history (${res.statusCode})');
+    if (res.statusCode != 200) {
+      throw AppIssue.fromHttp(res.statusCode, res.body, doing: 'clear notification history');
+    }
   }
 
   /// Best-effort only — see the PC-side /api/dismiss handler's own

@@ -1,6 +1,7 @@
 import 'dart:convert';
-import 'package:http/http.dart' as http;
 import '../models/clipboard_entry.dart';
+import 'trusted_http.dart';
+import 'user_facing_error.dart';
 
 /// Talks to modules/clipboard_manager/web_server.py. No access-code
 /// support — that server doesn't gate anything, matching Notes/Music
@@ -15,10 +16,10 @@ class ClipboardApiService {
       Uri.parse('$baseUrl$path').replace(queryParameters: query);
 
   Future<List<ClipboardEntry>> fetchEntries({String query = ''}) async {
-    final res = await http
+    final res = await trustedHttp
         .get(_uri('/api/clipboard', query.isEmpty ? null : {'q': query}));
     if (res.statusCode != 200) {
-      throw Exception('Failed to load clipboard history (${res.statusCode})');
+      throw AppIssue.fromHttp(res.statusCode, res.body, doing: 'load clipboard history');
     }
     final data = jsonDecode(res.body) as Map<String, dynamic>;
     return (data['entries'] as List)
@@ -27,23 +28,23 @@ class ClipboardApiService {
   }
 
   Future<void> togglePin(String id) async {
-    final res = await http.post(_uri('/api/clipboard/$id/pin'));
+    final res = await trustedHttp.post(_uri('/api/clipboard/$id/pin'));
     if (res.statusCode != 200) {
-      throw Exception('Failed to toggle pin (${res.statusCode})');
+      throw AppIssue.fromHttp(res.statusCode, res.body, doing: 'pin that clip');
     }
   }
 
   Future<void> deleteEntry(String id) async {
-    final res = await http.delete(_uri('/api/clipboard/$id'));
+    final res = await trustedHttp.delete(_uri('/api/clipboard/$id'));
     if (res.statusCode != 200) {
-      throw Exception('Failed to delete (${res.statusCode})');
+      throw AppIssue.fromHttp(res.statusCode, res.body, doing: 'delete that clip');
     }
   }
 
   Future<void> clearUnpinned() async {
-    final res = await http.post(_uri('/api/clipboard/clear-unpinned'));
+    final res = await trustedHttp.post(_uri('/api/clipboard/clear-unpinned'));
     if (res.statusCode != 200) {
-      throw Exception('Failed to clear (${res.statusCode})');
+      throw AppIssue.fromHttp(res.statusCode, res.body, doing: 'clear unpinned clips');
     }
   }
 }

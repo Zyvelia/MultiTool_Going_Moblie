@@ -7,6 +7,7 @@ import '../services/settings_service.dart';
 import '../services/clipboard_api_service.dart';
 import '../services/clipboard_cache_service.dart';
 import '../services/connectivity_service.dart';
+import '../services/user_facing_error.dart';
 
 class ClipboardScreen extends StatefulWidget {
   const ClipboardScreen({super.key});
@@ -114,7 +115,7 @@ class _ClipboardScreenState extends State<ClipboardScreen> {
       await _api!.togglePin(entry.id);
       await _load();
     } catch (e) {
-      _showToast(e.toString().replaceFirst('Exception: ', ''));
+      _showToast(explainError(e));
     }
   }
 
@@ -127,7 +128,7 @@ class _ClipboardScreenState extends State<ClipboardScreen> {
       await _api!.deleteEntry(entry.id);
       await _load();
     } catch (e) {
-      _showToast(e.toString().replaceFirst('Exception: ', ''));
+      _showToast(explainError(e));
     }
   }
 

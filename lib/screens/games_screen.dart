@@ -2,9 +2,13 @@ import 'package:flutter/material.dart';
 import '../games/brick_breaker/brick_breaker_menu_screen.dart';
 import '../games/neon_drift/neon_drift_screen.dart';
 import '../models/game.dart';
+import '../models/game_server.dart';
 import '../theme/app_colors.dart';
 import '../services/settings_service.dart';
 import '../services/games_api_service.dart';
+import '../services/gsm_api_service.dart';
+import '../services/user_facing_error.dart';
+import 'night_screen.dart';
 
 class GamesScreen extends StatefulWidget {
   const GamesScreen({super.key});
@@ -16,11 +20,15 @@ class GamesScreen extends StatefulWidget {
 class _GamesScreenState extends State<GamesScreen> {
   final _settings = SettingsService();
   GamesApiService? _api;
+  GsmApiService? _gsm;
   List<Game> _games = [];
+  List<GameServer> _servers = [];
   bool _loading = true;
+  bool _serversLoading = false;
   String? _error;
+  String? _serversError;
   String? _launchingId;
-  String? _toast;
+  String? _busyServerId;
 
   @override
   void initState() {
@@ -31,12 +39,20 @@ class _GamesScreenState extends State<GamesScreen> {
   Future<void> _init() async {
     final base = await _settings.baseUrl('games');
     final code = await _settings.getAccessCode('games');
+    final gsmBase = await _settings.baseUrl('gsm');
+    final gsmCode = await _settings.getAccessCode('gsm');
     if (base != null) {
       setState(() => _api = GamesApiService(base, accessCode: code));
+    }
+    if (gsmBase != null) {
+      setState(() => _gsm = GsmApiService(gsmBase, accessCode: gsmCode));
+    }
+    if (_api != null) {
       await _load();
     } else {
       setState(() => _loading = false);
     }
+    await _loadServers();
   }
 
   Future<void> _load() async {
@@ -53,7 +69,7 @@ class _GamesScreenState extends State<GamesScreen> {
       });
     } catch (e) {
       setState(() {
-        _error = 'Could not reach Gaming Hub: ${e.toString().replaceFirst('Exception: ', '')}';
+        _error = explainError(e, doing: 'reach Gaming Hub');
         _loading = false;
       });
     }
@@ -67,7 +83,7 @@ class _GamesScreenState extends State<GamesScreen> {
       await Future.delayed(const Duration(seconds: 3));
       await _load();
     } catch (e) {
-      _showToast(e.toString().replaceFirst('Exception: ', ''));
+      _showToast(explainError(e));
     }
   }
 
@@ -78,7 +94,7 @@ class _GamesScreenState extends State<GamesScreen> {
       await _api!.launch(game.id);
       _showToast('Launching ${game.name}…');
     } catch (e) {
-      _showToast(e.toString().replaceFirst('Exception: ', ''));
+      _showToast(explainError(e));
     } finally {
       if (mounted) setState(() => _launchingId = null);
     }
@@ -87,6 +103,52 @@ class _GamesScreenState extends State<GamesScreen> {
   void _openNeonDrift() {
     Navigator.of(context).push(
       MaterialPageRoute(builder: (_) => const NeonDriftScreen()),
+    );
+  }
+
+  Future<void> _loadServers() async {
+    if (_gsm == null) return;
+    setState(() {
+      _serversLoading = true;
+      _serversError = null;
+    });
+    try {
+      final servers = await _gsm!.fetchServers();
+      setState(() {
+        _servers = servers;
+        _serversLoading = false;
+      });
+    } catch (e) {
+      setState(() {
+        _serversError = explainError(e, doing: 'reach Game Server Manager');
+        _serversLoading = false;
+      });
+    }
+  }
+
+  Future<void> _toggleServer(GameServer server) async {
+    if (_gsm == null) return;
+    setState(() => _busyServerId = server.id);
+    try {
+      if (server.running) {
+        await _gsm!.stop(server.id);
+        _showToast('Stopping ${server.name}…');
+      } else {
+        await _gsm!.start(server.id);
+        _showToast('Starting ${server.name}…');
+      }
+      await Future.delayed(const Duration(seconds: 1));
+      await _loadServers();
+    } catch (e) {
+      _showToast(explainError(e));
+    } finally {
+      if (mounted) setState(() => _busyServerId = null);
+    }
+  }
+
+  void _openNight() {
+    Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => const NightScreen()),
     );
   }
 
@@ -163,6 +225,121 @@ class _GamesScreenState extends State<GamesScreen> {
             onTap: _openNeonDrift,
           ),
         ),
+        Card(
+          margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+          child: ListTile(
+            leading: Container(
+              width: 40,
+              height: 40,
+              decoration: BoxDecoration(
+                color: AppColors.accentMuted,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: AppColors.accent.withValues(alpha: 0.5)),
+              ),
+              child: const Icon(Icons.nights_stay, color: AppColors.accent),
+            ),
+            title: const Text('Night page'),
+            subtitle: const Text(
+              'Jukebox, soundboard, limited console',
+              style: TextStyle(fontSize: 12),
+            ),
+            trailing: const Icon(Icons.chevron_right, color: AppColors.accent),
+            onTap: _openNight,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _serversSection() {
+    if (_gsm == null) {
+      return const Padding(
+        padding: EdgeInsets.fromLTRB(16, 16, 16, 8),
+        child: Text(
+          'Set your PC hostname, then Hub Go Live, to start/stop dedicated servers from here.',
+          style: TextStyle(color: Colors.white54, fontSize: 13),
+        ),
+      );
+    }
+    if (_serversLoading && _servers.isEmpty) {
+      return const Padding(
+        padding: EdgeInsets.all(24),
+        child: Center(child: CircularProgressIndicator()),
+      );
+    }
+    if (_serversError != null && _servers.isEmpty) {
+      return Padding(
+        padding: const EdgeInsets.all(24),
+        child: Text(
+          _serversError!,
+          style: const TextStyle(color: Colors.redAccent),
+          textAlign: TextAlign.center,
+        ),
+      );
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
+          child: Text(
+            'DEDICATED SERVERS · ${_servers.length}',
+            style: const TextStyle(
+              color: AppColors.muted,
+              fontSize: 11,
+              fontWeight: FontWeight.bold,
+              letterSpacing: 0.6,
+            ),
+          ),
+        ),
+        if (_servers.isEmpty)
+          const Padding(
+            padding: EdgeInsets.fromLTRB(16, 8, 16, 8),
+            child: Text(
+              'No servers saved in Game Server Manager yet.',
+              style: TextStyle(color: Colors.white54, fontSize: 13),
+            ),
+          )
+        else
+          ..._servers.map((s) {
+            final busy = _busyServerId == s.id;
+            return Card(
+              margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+              child: ListTile(
+                leading: Icon(
+                  s.ready
+                      ? Icons.dns
+                      : s.running
+                          ? Icons.hourglass_top
+                          : Icons.dns_outlined,
+                  color: s.ready
+                      ? Colors.lightGreenAccent
+                      : s.running
+                          ? Colors.amber
+                          : AppColors.muted,
+                ),
+                title: Text(s.name),
+                subtitle: Text(
+                  [
+                    s.gameType,
+                    s.statusLabel,
+                    if (s.players.isNotEmpty) '${s.players.length} on',
+                  ].where((p) => p.isNotEmpty).join(' · '),
+                  style: const TextStyle(fontSize: 12),
+                ),
+                trailing: busy
+                    ? const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : TextButton(
+                        onPressed: () => _toggleServer(s),
+                        child: Text(s.running ? 'Stop' : 'Start'),
+                      ),
+              ),
+            );
+          }),
       ],
     );
   }
@@ -249,15 +426,25 @@ class _GamesScreenState extends State<GamesScreen> {
       appBar: AppBar(
         title: const Text('Games'),
         actions: [
-          if (_api != null)
-            IconButton(icon: const Icon(Icons.refresh), onPressed: _rescan),
+          if (_api != null || _gsm != null)
+            IconButton(
+              icon: const Icon(Icons.refresh),
+              onPressed: () async {
+                await _rescan();
+                await _loadServers();
+              },
+            ),
         ],
       ),
       body: RefreshIndicator(
-        onRefresh: _load,
+        onRefresh: () async {
+          await _load();
+          await _loadServers();
+        },
         child: ListView(
           children: [
             _localGamesSection(),
+            _serversSection(),
             _pcHubSection(),
             const SizedBox(height: 24),
           ],

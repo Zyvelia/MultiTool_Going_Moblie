@@ -11,6 +11,7 @@ import '../services/api_service.dart';
 import '../services/connectivity_service.dart';
 import '../services/offline_cache_service.dart';
 import '../services/settings_service.dart';
+import '../services/user_facing_error.dart';
 import '../theme/app_colors.dart';
 import '../widgets/mini_player.dart';
 import '../widgets/pc_mini_player.dart';
@@ -117,7 +118,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
         if (_cache.isCached(_songs[index].id)) {
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text('Playback failed: $e')),
+              SnackBar(content: Text(explainError(e, doing: 'play this song'))),
             );
           }
           return;
@@ -126,7 +127,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
           _midStreamRetries = 0;
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text('Playback dropped: $e')),
+              SnackBar(content: Text(explainError(e, doing: 'keep playing'))),
             );
           }
           return;
@@ -159,7 +160,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
       } catch (e) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Playback failed: $e')),
+            SnackBar(content: Text(explainError(e, doing: 'play this song'))),
           );
         }
       }
@@ -176,7 +177,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Playback failed: $e')),
+          SnackBar(content: Text(explainError(e, doing: 'play this song'))),
         );
       }
     }
@@ -391,7 +392,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
         case CacheEventType.error:
           if (evt.songId != null) _downloadProgress.remove(evt.songId);
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Download failed: ${evt.error}')),
+            SnackBar(content: Text(explainError(evt.error ?? 'download failed', doing: 'download that song'))),
           );
           break;
         case CacheEventType.cleared:
@@ -453,7 +454,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Could not load full song list: $e')),
+          SnackBar(content: Text(explainError(e, doing: 'load the full song list'))),
         );
       }
       setState(() => _fetchingBatchList = false);
@@ -594,14 +595,14 @@ class _LibraryScreenState extends State<LibraryScreen> {
         await _showCachedLibrary();
         if (mounted && _songs.isEmpty) {
           setState(() {
-            _error = 'Could not load library: $e';
+            _error = explainError(e, doing: 'load the music library');
             _loading = false;
             _reconnecting = false;
           });
         }
       } else if (mounted) {
         setState(() {
-          _error = 'Could not load library: $e';
+          _error = explainError(e, doing: 'load the music library');
           _loading = false;
         });
       }
@@ -713,14 +714,14 @@ class _LibraryScreenState extends State<LibraryScreen> {
       await _pollNowPlaying();
       if (mounted && !e.transient) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('PC control failed: ${e.message}')),
+          SnackBar(content: Text(explainError(e, doing: 'control the PC player'))),
         );
       }
     } catch (e) {
       await _pollNowPlaying();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('PC control failed: $e')),
+          SnackBar(content: Text(explainError(e, doing: 'control the PC player'))),
         );
       }
     } finally {
@@ -770,7 +771,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
         } catch (e2) {
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text('Playback failed: $e2')),
+              SnackBar(content: Text(explainError(e2, doing: 'play this song'))),
             );
           }
         }
@@ -786,7 +787,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
           if (attempt == 3) {
             if (mounted) {
               ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(content: Text('Playback failed: $err')),
+                SnackBar(content: Text(explainError(err, doing: 'play this song'))),
               );
             }
             return;

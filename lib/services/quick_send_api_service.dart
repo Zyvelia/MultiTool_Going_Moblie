@@ -2,6 +2,8 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:http/http.dart' as http;
 import '../models/shared_file.dart';
+import 'trusted_http.dart';
+import 'user_facing_error.dart';
 
 /// Wraps modules/quick_send/web_server.py — phone-to-PC upload and
 /// PC-to-phone browse/download, LocalSend-style but scoped to your own
@@ -15,7 +17,7 @@ class QuickSendApiService {
 
   Future<bool> checkStatus() async {
     try {
-      final res = await http
+      final res = await trustedHttp
           .get(_uri('/api/status'))
           .timeout(const Duration(seconds: 6));
       return res.statusCode == 200;
@@ -25,9 +27,9 @@ class QuickSendApiService {
   }
 
   Future<List<SharedFile>> fetchOutbox() async {
-    final res = await http.get(_uri('/api/outbox'));
+    final res = await trustedHttp.get(_uri('/api/outbox'));
     if (res.statusCode != 200) {
-      throw Exception('Failed to load shared files (${res.statusCode})');
+      throw AppIssue.fromHttp(res.statusCode, res.body, doing: 'load files from the PC');
     }
     final data = jsonDecode(res.body) as Map<String, dynamic>;
     return (data['files'] as List)
@@ -47,11 +49,11 @@ class QuickSendApiService {
         filename: filenameOverride ?? file.uri.pathSegments.last,
       ),
     );
-    final streamed = await request.send();
+    final streamed = await trustedHttp.send(request);
     final res = await http.Response.fromStream(streamed);
     if (res.statusCode != 200) {
       final body = jsonDecode(res.body) as Map<String, dynamic>;
-      throw Exception(body['error'] ?? 'Send failed (${res.statusCode})');
+      throw AppIssue.fromHttp(res.statusCode, res.body, doing: 'send that file to the PC');
     }
   }
 
@@ -65,9 +67,9 @@ class QuickSendApiService {
     void Function(double progress)? onProgress,
   }) async {
     final req = http.Request('GET', _uri('/api/outbox/${Uri.encodeComponent(name)}'));
-    final streamed = await http.Client().send(req);
+    final streamed = await trustedHttp.send(req);
     if (streamed.statusCode != 200) {
-      throw Exception('Download failed (${streamed.statusCode})');
+      throw AppIssue.fromHttp(streamed.statusCode, '', doing: 'download that file');
     }
 
     final total = streamed.contentLength ?? 0;

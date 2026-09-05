@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:io';
 import 'package:http/http.dart' as http;
+import 'trusted_http.dart';
+import 'user_facing_error.dart';
 
 enum StepStatus { pass, fail, skipped }
 
@@ -82,17 +84,17 @@ class ConnectionTestService {
       );
     } on SocketException catch (e) {
       return ConnectionTestStep(
-        'DNS / reachability', StepStatus.fail, 'DNS failure: ${e.osError?.message ?? e.message}',
+        'DNS / reachability', StepStatus.fail, explainError(e),
       );
     } catch (e) {
-      return ConnectionTestStep('DNS / reachability', StepStatus.fail, '$e');
+      return ConnectionTestStep('DNS / reachability', StepStatus.fail, explainError(e));
     }
   }
 
   Future<ConnectionTestStep> _checkApiStatus(String baseUrl) async {
     final sw = Stopwatch()..start();
     try {
-      final res = await http
+      final res = await trustedHttp
           .get(Uri.parse('$baseUrl/api/status'))
           .timeout(const Duration(seconds: 8));
       sw.stop();
@@ -103,7 +105,7 @@ class ConnectionTestService {
         );
       }
       return ConnectionTestStep(
-        'API availability', StepStatus.fail, 'Server responded with ${res.statusCode}',
+        'API availability', StepStatus.fail, explainError(AppIssue.fromHttp(res.statusCode, res.body, doing: 'reach that API')),
         latencyMs: sw.elapsedMilliseconds,
       );
     } on TimeoutException {
@@ -112,18 +114,18 @@ class ConnectionTestService {
       );
     } on HandshakeException {
       return const ConnectionTestStep(
-        'API availability', StepStatus.fail, 'TLS/certificate failure',
+        'API availability', StepStatus.fail, explainError(HandshakeException('TLS handshake failed')),
       );
     } on SocketException catch (e) {
-      return ConnectionTestStep('API availability', StepStatus.fail, '${e.message}');
+      return ConnectionTestStep('API availability', StepStatus.fail, explainError(e));
     } catch (e) {
-      return ConnectionTestStep('API availability', StepStatus.fail, '$e');
+      return ConnectionTestStep('API availability', StepStatus.fail, explainError(e));
     }
   }
 
   Future<ConnectionTestStep> _checkAuth(String baseUrl, String accessCode) async {
     try {
-      final res = await http.get(
+      final res = await trustedHttp.get(
         Uri.parse('$baseUrl/api/status'),
         headers: {'X-Access-Code': accessCode},
       ).timeout(const Duration(seconds: 8));
@@ -134,21 +136,21 @@ class ConnectionTestService {
       }
       if (res.statusCode == 401 || res.statusCode == 403) {
         return const ConnectionTestStep(
-          'Authentication', StepStatus.fail, 'Access code rejected',
+          'Authentication', StepStatus.fail, explainError(AppIssue.fromHttp(res.statusCode, res.body, doing: 'check the access code')),
         );
       }
       return ConnectionTestStep(
-        'Authentication', StepStatus.fail, 'Unexpected status ${res.statusCode}',
+        'Authentication', StepStatus.fail, explainError(AppIssue.fromHttp(res.statusCode, res.body, doing: 'check the access code')),
       );
     } catch (e) {
-      return ConnectionTestStep('Authentication', StepStatus.fail, '$e');
+      return ConnectionTestStep('Authentication', StepStatus.fail, explainError(e));
     }
   }
 
   Future<ConnectionTestStep> _checkMusicEndpoint(String baseUrl) async {
     final sw = Stopwatch()..start();
     try {
-      final res = await http
+      final res = await trustedHttp
           .get(Uri.parse('$baseUrl/api/songs?offset=0&limit=1'))
           .timeout(const Duration(seconds: 8));
       sw.stop();
@@ -159,10 +161,10 @@ class ConnectionTestService {
         );
       }
       return ConnectionTestStep(
-        'Music API available', StepStatus.fail, 'Responded with ${res.statusCode}',
+        'Music API available', StepStatus.fail, explainError(AppIssue.fromHttp(res.statusCode, res.body, doing: 'load a song from the library')),
       );
     } catch (e) {
-      return ConnectionTestStep('Music API available', StepStatus.fail, '$e');
+      return ConnectionTestStep('Music API available', StepStatus.fail, explainError(e));
     }
   }
 }

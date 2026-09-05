@@ -6,7 +6,8 @@ talk to the matching servers already built into Zs Multi Tool:
 | Tab | Talks to | Port |
 |---|---|---|
 | Vault | `core/services/vault_web_server.py` | 8443 |
-| Games | `modules/gaming_hub/web_server.py` (new) | 8446 |
+| Games | Gaming Hub launches + **dedicated GSM start/stop** + Night page | 8446 / **8453** / **8450** |
+| Chat | `modules/AI/web_server.py` — same model/agent as desktop AI Chat | **8454** |
 | YT | `modules/yt_downloader/web_server.py` | 8445 |
 
 You only enter your PC's Tailscale hostname once in Settings — each
@@ -72,9 +73,10 @@ Developer account, no 7-day expiry, no Xcode dance.
   session token lives only in memory for that app run (nothing is
   written to disk), matching the desktop server's own session model
   (idle-expires after 20 min).
-- **Games**: shows the same cached list your desktop Gaming Hub page
-  shows on open — tap the refresh icon to trigger a fresh scan on the
-  PC if you just installed something new.
+- **Games**: Gaming Hub launch list, plus **dedicated servers** (start/stop/ready
+  from Game Server Manager on `:8453`). **Night page** is a card on this tab
+  — jukebox / soundboard / limited console using an invite key (`:8450`).
+  Hub **Go Live** on the PC must be on.
 - **YT**: same job queue the desktop page and browser extension use —
   queue from your phone, it downloads on the PC.
 - Access codes (if you set any per-module in the desktop Settings

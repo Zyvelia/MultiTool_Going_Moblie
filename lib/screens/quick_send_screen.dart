@@ -6,6 +6,7 @@ import 'package:share_plus/share_plus.dart';
 
 import '../models/shared_file.dart';
 import '../services/quick_send_api_service.dart';
+import '../services/user_facing_error.dart';
 import '../services/settings_service.dart';
 import '../theme/app_colors.dart';
 
@@ -56,7 +57,7 @@ class _QuickSendScreenState extends State<QuickSendScreen> {
       });
     } catch (e) {
       setState(() {
-        _error = 'Could not reach PC: $e';
+        _error = explainError(e, doing: 'reach Quick Send on the PC');
         _loading = false;
       });
     }
@@ -85,8 +86,7 @@ class _QuickSendScreenState extends State<QuickSendScreen> {
       }
       setState(() => _sendStatus = sent == 1 ? 'Sent to PC ✓' : 'Sent $sent files to PC ✓');
     } catch (e) {
-      setState(() => _sendStatus =
-          'Failed: ${e.toString().replaceFirst('Exception: ', '')}');
+      setState(() => _sendStatus = explainError(e, doing: 'send that file to the PC'));
     } finally {
       setState(() => _sending = false);
       Future.delayed(const Duration(seconds: 2), () {
@@ -134,7 +134,7 @@ class _QuickSendScreenState extends State<QuickSendScreen> {
       if (!mounted) return;
       setState(() => _downloadProgress.remove(file.name));
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Could not save to Photos: $e')),
+        SnackBar(content: Text(explainError(e, doing: 'save to Photos'))),
       );
     } catch (e) {
       if (!mounted) return;
@@ -142,7 +142,7 @@ class _QuickSendScreenState extends State<QuickSendScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            'Download failed: ${e.toString().replaceFirst('Exception: ', '')}',
+            explainError(e, doing: 'download that file'),
           ),
         ),
       );

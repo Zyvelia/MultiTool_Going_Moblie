@@ -7,6 +7,7 @@ import 'yt_screen.dart';
 import 'quick_send_screen.dart';
 import 'clipboard_screen.dart';
 import 'messages_screen.dart';
+import 'chat_screen.dart';
 import 'settings_screen.dart';
 import '../services/settings_service.dart';
 import '../services/app_navigation.dart';
@@ -140,6 +141,7 @@ class HomeShellState extends State<HomeShell> {
       _KeepAlive(child: QuickSendScreen()),
       _KeepAlive(child: ClipboardScreen()),
       _KeepAlive(child: MessagesScreen()),
+      _KeepAlive(child: ChatScreen()),
       _KeepAlive(child: SettingsScreen()),
     ];
 
@@ -151,6 +153,7 @@ class HomeShellState extends State<HomeShell> {
       ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _index,
+        labelBehavior: NavigationDestinationLabelBehavior.onlyShowSelected,
         onDestinationSelected: _onDestinationSelected,
         destinations: const [
           NavigationDestination(icon: Icon(Icons.lock), label: 'Vault'),
@@ -161,6 +164,7 @@ class HomeShellState extends State<HomeShell> {
           NavigationDestination(icon: Icon(Icons.send), label: 'Send'),
           NavigationDestination(icon: Icon(Icons.content_paste), label: 'Clip'),
           NavigationDestination(icon: Icon(Icons.chat_bubble_outline), label: 'Messages'),
+          NavigationDestination(icon: Icon(Icons.smart_toy_outlined), label: 'Chat'),
           NavigationDestination(icon: Icon(Icons.settings), label: 'Settings'),
         ],
       ),

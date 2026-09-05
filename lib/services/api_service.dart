@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import '../models/song.dart';
+import 'trusted_http.dart';
+import 'user_facing_error.dart';
 import '../models/now_playing.dart';
 
 /// Thrown by [ApiService.control] on failure. [transient] marks failures
@@ -36,7 +38,7 @@ class ApiService {
 
   Future<bool> checkStatus() async {
     try {
-      final res = await http
+      final res = await trustedHttp
           .get(_uri('/api/status'))
           .timeout(const Duration(seconds: 6));
       return res.statusCode == 200;
@@ -51,13 +53,13 @@ class ApiService {
     int limit = 100,
     Duration timeout = const Duration(seconds: 10),
   }) async {
-    final res = await http.get(_uri('/api/songs', {
+    final res = await trustedHttp.get(_uri('/api/songs', {
       'q': query,
       'offset': '$offset',
       'limit': '$limit',
     })).timeout(timeout);
     if (res.statusCode != 200) {
-      throw Exception('Failed to load songs (${res.statusCode})');
+      throw AppIssue.fromHttp(res.statusCode, res.body, doing: 'load the music library');
     }
     final data = jsonDecode(res.body) as Map<String, dynamic>;
     final songs = (data['songs'] as List)
@@ -78,11 +80,11 @@ class ApiService {
   /// where the phone controls that separate playback session instead of
   /// streaming audio locally. Polled on an interval by LibraryScreen.
   Future<NowPlaying> nowPlaying() async {
-    final res = await http
+    final res = await trustedHttp
         .get(_uri('/api/now-playing'))
         .timeout(const Duration(seconds: 6));
     if (res.statusCode != 200) {
-      throw Exception('Failed to fetch now-playing (${res.statusCode})');
+      throw AppIssue.fromHttp(res.statusCode, res.body, doing: 'check what the PC is playing');
     }
     return NowPlaying.fromJson(jsonDecode(res.body) as Map<String, dynamic>);
   }
@@ -98,7 +100,7 @@ class ApiService {
 
     http.Response res;
     try {
-      res = await http
+      res = await trustedHttp
           .post(
             _uri('/api/control'),
             headers: {'Content-Type': 'application/json'},
@@ -108,7 +110,10 @@ class ApiService {
     } catch (e) {
       // Connection reset, timeout, etc. — transport-level, not the
       // desktop actively rejecting the command.
-      throw ControlException('network error: $e', transient: true);
+      throw ControlException(
+        explainError(e, doing: 'control the PC player'),
+        transient: true,
+      );
     }
 
     if (res.statusCode != 200) {
@@ -117,16 +122,14 @@ class ApiService {
       // the command failed — genuine rejections (bad action, no engine
       // attached) come back as 4xx with a real error message.
       if (res.statusCode == 502 || res.statusCode == 503 || res.statusCode == 504) {
-        throw ControlException('gateway status ${res.statusCode}', transient: true);
+        throw ControlException(
+          explainError(AppIssue.fromHttp(res.statusCode, res.body, doing: 'control the PC player')),
+          transient: true,
+        );
       }
-      String message = 'status ${res.statusCode}';
-      try {
-        final parsed = jsonDecode(res.body) as Map<String, dynamic>;
-        if (parsed['error'] is String) message = parsed['error'] as String;
-      } catch (_) {
-        // Body wasn't JSON — fall back to the status code above.
-      }
-      throw ControlException(message);
+      throw ControlException(
+        AppIssue.fromHttp(res.statusCode, res.body, doing: 'control the PC player').message,
+      );
     }
   }
 }

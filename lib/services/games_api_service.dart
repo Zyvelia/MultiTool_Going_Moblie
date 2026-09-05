@@ -1,6 +1,7 @@
 import 'dart:convert';
-import 'package:http/http.dart' as http;
 import '../models/game.dart';
+import 'trusted_http.dart';
+import 'user_facing_error.dart';
 
 /// Talks to modules/gaming_hub/web_server.py.
 class GamesApiService {
@@ -19,7 +20,7 @@ class GamesApiService {
   Future<bool> checkStatus() async {
     try {
       final res =
-          await http.get(_uri('/api/status')).timeout(const Duration(seconds: 6));
+          await trustedHttp.get(_uri('/api/status')).timeout(const Duration(seconds: 6));
       return res.statusCode == 200;
     } catch (_) {
       return false;
@@ -27,9 +28,9 @@ class GamesApiService {
   }
 
   Future<List<Game>> fetchGames() async {
-    final res = await http.get(_uri('/api/games'));
+    final res = await trustedHttp.get(_uri('/api/games'));
     if (res.statusCode != 200) {
-      throw Exception('Failed to load games (${res.statusCode})');
+      throw AppIssue.fromHttp(res.statusCode, res.body, doing: 'load your game list');
     }
     final data = jsonDecode(res.body) as Map<String, dynamic>;
     return (data['games'] as List)
@@ -40,19 +41,13 @@ class GamesApiService {
   /// Throws with a readable message on failure (wrong access code,
   /// missing exe, etc).
   Future<void> launch(String gameId) async {
-    final res = await http.post(_uri('/api/launch'),
+    final res = await trustedHttp.post(_uri('/api/launch'),
         headers: _headers, body: jsonEncode({'id': gameId}));
-    final data = jsonDecode(res.body) as Map<String, dynamic>;
-    if (res.statusCode != 200 || data['ok'] != true) {
-      throw Exception(data['error'] ?? 'Launch failed (${res.statusCode})');
-    }
+    ensureOk(res, doing: 'launch that game', requireOk: true);
   }
 
   Future<void> rescan() async {
-    final res = await http.post(_uri('/api/rescan'), headers: _headers);
-    if (res.statusCode != 200) {
-      final data = jsonDecode(res.body) as Map<String, dynamic>;
-      throw Exception(data['error'] ?? 'Rescan failed (${res.statusCode})');
-    }
+    final res = await trustedHttp.post(_uri('/api/rescan'), headers: _headers);
+    ensureOk(res, doing: 'rescan games on the PC');
   }
 }

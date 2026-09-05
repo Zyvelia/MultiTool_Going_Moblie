@@ -17,12 +17,21 @@ class ModulePorts {
   static const send = 8449;
   static const clipboard = 8451;
   static const messages = 8452;
+  static const social = 8450;
+  static const gsm = 8453;
+  static const chat = 8454;
+  static const trust = 8455;
 }
 
 class SettingsService {
   static const _hostKey = 'tailscale_hostname';
   static const _gamesCodeKey = 'games_access_code';
   static const _ytCodeKey = 'yt_access_code';
+  static const _socialInviteKey = 'social_invite_key';
+  static const _chatSourceKey = 'chat_source';
+  static const _chatUrlKey = 'chat_base_url';
+  static const _chatModelKey = 'chat_model';
+  static const _chatApiKey = 'chat_api_key';
 
   // Music is the one module that can also be reached over a public
   // HTTPS API (see server_profile.dart) rather than only Tailscale —
@@ -70,6 +79,7 @@ class SettingsService {
   }
 
   static const _deviceIdKey = 'device_id';
+  static const _deviceSecretKey = 'device_secret';
 
   /// Stable per-install identity used as Message.senderId — generated
   /// once and kept in the same Keychain/EncryptedSharedPreferences store
@@ -81,6 +91,13 @@ class SettingsService {
     await _storage.write(key: _deviceIdKey, value: id);
     return id;
   }
+
+  Future<String?> getDeviceSecret() => _storage.read(key: _deviceSecretKey);
+
+  Future<void> setDeviceSecret(String secret) =>
+      _storage.write(key: _deviceSecretKey, value: secret);
+
+  Future<void> clearDeviceSecret() => _storage.delete(key: _deviceSecretKey);
 
   String _randomHex(int length) {
     final rand = Random.secure();
@@ -94,6 +111,56 @@ class SettingsService {
 
   Future<void> setAccessCode(String moduleKey, String code) async {
     await _storage.write(key: _keyFor(moduleKey), value: code.trim());
+  }
+
+  Future<String?> getSocialInviteKey() => _storage.read(key: _socialInviteKey);
+
+  Future<String> getChatSource() async {
+    final v = await _storage.read(key: _chatSourceKey);
+    return v == 'local' ? 'local' : 'hosted';
+  }
+
+  Future<void> setChatSource(String source) async {
+    await _storage.write(key: _chatSourceKey, value: source == 'local' ? 'local' : 'hosted');
+  }
+
+  Future<String?> getChatBaseUrl() => _storage.read(key: _chatUrlKey);
+  Future<void> setChatBaseUrl(String url) async {
+    final v = url.trim();
+    if (v.isEmpty) {
+      await _storage.delete(key: _chatUrlKey);
+      return;
+    }
+    await _storage.write(key: _chatUrlKey, value: v);
+  }
+
+  Future<String?> getChatModel() => _storage.read(key: _chatModelKey);
+  Future<void> setChatModel(String model) async {
+    final v = model.trim();
+    if (v.isEmpty) {
+      await _storage.delete(key: _chatModelKey);
+      return;
+    }
+    await _storage.write(key: _chatModelKey, value: v);
+  }
+
+  Future<String?> getChatApiKey() => _storage.read(key: _chatApiKey);
+  Future<void> setChatApiKey(String key) async {
+    final v = key.trim();
+    if (v.isEmpty) {
+      await _storage.delete(key: _chatApiKey);
+      return;
+    }
+    await _storage.write(key: _chatApiKey, value: v);
+  }
+
+  Future<void> setSocialInviteKey(String key) async {
+    final v = key.trim();
+    if (v.isEmpty) {
+      await _storage.delete(key: _socialInviteKey);
+      return;
+    }
+    await _storage.write(key: _socialInviteKey, value: v);
   }
 
   /// Clears all saved settings (hostname + access codes). Wire this up to
@@ -126,6 +193,10 @@ class SettingsService {
       'send' => ModulePorts.send,
       'clipboard' => ModulePorts.clipboard,
       'messages' => ModulePorts.messages,
+      'social' => ModulePorts.social,
+      'gsm' => ModulePorts.gsm,
+      'chat' => ModulePorts.chat,
+      'trust' => ModulePorts.trust,
       _ => throw ArgumentError('unknown module $moduleKey'),
     };
     return 'https://$host:$port';

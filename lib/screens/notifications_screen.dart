@@ -4,6 +4,7 @@ import '../models/mirrored_notification.dart';
 import '../services/settings_service.dart';
 import '../services/notifications_api_service.dart';
 import '../services/local_notification_service.dart';
+import '../services/user_facing_error.dart';
 
 class NotificationsScreen extends StatefulWidget {
   const NotificationsScreen({super.key});
@@ -72,7 +73,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
       });
     } catch (e) {
       setState(() {
-        _error = e.toString();
+        _error = explainError(e, doing: 'open notification mirroring');
         _loading = false;
       });
     }
@@ -85,7 +86,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
       await _api!.setEnabled(value);
     } catch (e) {
       setState(() => _settings!['enabled'] = !value);
-      _showError('Failed to toggle mirroring: $e');
+      _showError(explainError(e, doing: 'turn notification mirroring on or off'));
     }
   }
 
@@ -96,7 +97,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
       await _api!.setAppEnabled(appName, value);
     } catch (e) {
       setState(() => _settings!['apps'][appName] = !value);
-      _showError('Failed to update $appName: $e');
+      _showError(explainError(e, doing: 'update $appName'));
     }
   }
 
@@ -108,7 +109,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
       await _api!.updateSettings({'privacy_mode': mode});
     } catch (e) {
       setState(() => _settings!['privacy_mode'] = previous);
-      _showError('Failed to update privacy mode: $e');
+      _showError(explainError(e, doing: 'change privacy mode'));
     }
   }
 
@@ -118,7 +119,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
       await _api!.clearHistory();
       setState(() => _history = []);
     } catch (e) {
-      _showError('Failed to clear history: $e');
+      _showError(explainError(e, doing: 'clear notification history'));
     }
   }
 

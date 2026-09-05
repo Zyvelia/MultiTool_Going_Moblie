@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:math';
 import 'dart:typed_data';
 import 'package:http/http.dart' as http;
+import 'user_facing_error.dart';
 
 /// Which stage of the test is currently running (or just finished).
 enum SpeedTestPhase { idle, ping, download, upload, done, error }
@@ -133,7 +134,7 @@ class SpeedTestService {
       controller.add(SpeedTestProgress(SpeedTestPhase.done, result));
     } catch (e) {
       controller.add(
-        SpeedTestProgress(SpeedTestPhase.error, result.copyWith(error: '$e')),
+        SpeedTestProgress(SpeedTestPhase.error, result.copyWith(error: explainError(e, doing: 'run the speed test'))),
       );
     } finally {
       await controller.close();

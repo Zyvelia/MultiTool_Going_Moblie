@@ -1,7 +1,9 @@
 import 'dart:async';
 import 'dart:convert';
-import 'package:http/http.dart' as http;
 import 'package:web_socket_channel/web_socket_channel.dart';
+import 'device_trust_service.dart';
+import 'trusted_http.dart';
+import 'user_facing_error.dart';
 import 'package:web_socket_channel/status.dart' as ws_status;
 import '../models/message.dart';
 
@@ -43,11 +45,11 @@ class MessagingApiService {
   /// it's actually open. [since] is epoch seconds; pass the last known
   /// message's sentAt to fetch only what was missed.
   Future<List<Message>> fetchHistory({double since = 0}) async {
-    final res = await http
+    final res = await trustedHttp
         .get(Uri.parse('$baseUrl/api/messages?since=$since'))
         .timeout(const Duration(seconds: 10));
     if (res.statusCode != 200) {
-      throw Exception('Failed to load messages (${res.statusCode})');
+      throw AppIssue.fromHttp(res.statusCode, res.body, doing: 'load messages');
     }
     final data = jsonDecode(res.body) as Map<String, dynamic>;
     return (data['messages'] as List)
@@ -55,16 +57,27 @@ class MessagingApiService {
         .toList();
   }
 
-  Uri get _wsUri {
+  Future<Uri> _wsUri() async {
     final uri = Uri.parse(baseUrl);
-    return uri.replace(scheme: uri.scheme == 'https' ? 'wss' : 'ws', path: '/ws');
+    final extra = await deviceTrust.signQuery('GET', '/ws');
+    return uri.replace(
+      scheme: uri.scheme == 'https' ? 'wss' : 'ws',
+      path: '/ws',
+      queryParameters: extra.isEmpty ? null : extra,
+    );
   }
 
   void connect() {
     if (_disposed) return;
     _reconnectTimer?.cancel();
+    _openSocket();
+  }
 
-    final channel = WebSocketChannel.connect(_wsUri);
+  Future<void> _openSocket() async {
+    if (_disposed) return;
+    final uri = await _wsUri();
+    if (_disposed) return;
+    final channel = WebSocketChannel.connect(uri);
     _channel = channel;
 
     // WebSocketChannel.connect() returns immediately and connects lazily
