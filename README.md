@@ -1,83 +1,64 @@
 # Zs Multi Tool Remote
 
-A native Flutter app for iOS (sideload) and Android with four tabs that
-talk to the matching servers already built into Zs Multi Tool:
+Flutter app for **Android** and **unsigned iOS** (sideload). It is the phone side of **Z's Multi Tool v4** (`Zyvelia/Z-s-Multi-Tool-2.0`). You type the PC's Tailscale hostname once; each screen uses a fixed HTTPS port from `APP_HTTPS_PORTS` on the desktop.
 
-| Tab | Talks to | Port |
-|---|---|---|
-| Vault | `core/services/vault_web_server.py` | 8443 |
-| Games | Gaming Hub launches + **dedicated GSM start/stop** + Night page | 8446 / **8453** / **8450** |
-| Chat | `modules/AI/web_server.py` — same model/agent as desktop AI Chat | **8454** |
-| YT | `modules/yt_downloader/web_server.py` | 8445 |
+There is no separate “python patch.” Start **Remote Hub → Go Live** on the PC (and the module you want, if it is not included in that). Device pairing uses **8455**.
 
-You only enter your PC's Tailscale hostname once in Settings — each
-tab's URL is derived from it using the fixed port above (matches
-`APP_HTTPS_PORTS` in `core/services/tailscale_service.py`).
+## Tabs
 
-**Before this app can reach anything**, you need to apply the backend
-patch (`Z-s-Multi-Tool-python patch` from the same delivery) to your
-desktop app, then start remote access from each module's page. See
-that patch's own README for setup steps and the new port numbers.
+| Tab | Desktop module | HTTPS |
+| --- | -------------- | ----- |
+| Vault | Secure Vault | **8443** |
+| Music | Media Player | **8444** |
+| Notes | Notes | **8448** |
+| Games | Gaming Hub + GSM + Night (social) | **8446** / **8453** / **8450** |
+| YT | YouTube Downloader | **8445** |
+| Send | Quick Send | **8449** |
+| Clip | Clipboard (hub) | **8451** |
+| Messages | Messages (this PC only) | **8452** |
+| Chat | AI Chat (same model / agent as the desktop) | **8454** |
+| Settings | Hostname, access codes, invite key, chat source | — |
 
-## 1. Get this building on GitHub (no Mac needed)
+Extra screens opened from those tabs:
 
-1. Create a new **private** GitHub repo (e.g. `multi-tool-remote`).
-2. Push with the included script — from PowerShell, inside this folder:
-   ```powershell
-   .\push_to_github.ps1 -RepoUrl "https://github.com/<you>/multi-tool-remote.git"
-   ```
-   Every run after that, just:
-   ```powershell
-   .\push_to_github.ps1
-   ```
-   If you don't have Git installed: `winget install --id Git.Git -e`.
-3. Go to the repo's **Actions** tab. The `Build Multi Tool Remote`
-   workflow runs automatically on push, or click **Run workflow** to
-   trigger it manually.
-4. When it finishes (~5-10 min), open the run and download the two
-   artifacts under **Artifacts**:
+| Screen | Port | Notes |
+| ------ | ---- | ----- |
+| Night | **8450** | Jukebox / soundboard / limited GSM console (invite key) |
+| Notifications | hub | Push-style inbox from the PC |
+
+## 1. Build (GitHub Actions, no Mac needed)
+
+1. Create a **private** GitHub repo and push this folder.
+2. Open **Actions** → `Build Multi Tool Remote` (runs on push, or **Run workflow**).
+3. Download artifacts:
    - `multi-tool-remote-apk` → `app-release.apk` (Android)
    - `multi-tool-remote-ipa-unsigned` → `MultiToolRemote-unsigned.ipa` (iOS)
 
-The workflow runs `flutter create` itself to generate the `android/`
-and `ios/` platform folders on the runner — you don't need Flutter
-installed locally at all.
+The workflow generates `android/` and `ios/` on the runner. You do not need Flutter installed locally.
 
-## 2. Install on your phone
+## 2. Install on the phone
 
-**Android:** copy the `.apk` to your phone and open it (allow "install
-unknown apps").
+**Android:** copy the `.apk` and allow “install unknown apps.”
 
-**iOS (jailbroken):** the IPA is unsigned on purpose — no Apple
-Developer account, no 7-day expiry, no Xcode dance.
-- **Filza** — tap the `.ipa`, it offers to install directly (needs
-  AppSync Unified for unsigned app support).
-- **TrollStore** (if installed) — drop the `.ipa` in, installs
-  permanently with no expiry.
+**iOS (jailbroken / sideload):** the IPA is unsigned on purpose.
 
-## 3. Point it at your PC
+- **Filza** — tap the `.ipa` (needs AppSync Unified)
+- **TrollStore** — drop the `.ipa` in; no 7-day expiry
 
-1. On each module's page in the desktop app, tap **Start Remote
-   Access** (Vault/Music/YT already have this in their Settings tab;
-   Gaming Hub now has a compact version of the same panel right under
-   the header).
-2. Open this app → **Settings** tab (bottom nav) → enter your
-   Tailscale hostname, e.g. `my-pc.tailnet-name.ts.net` — no
-   `https://`, no port. Save.
-3. Switch to any of the other four tabs — each one connects
-   automatically using that hostname plus its own fixed port.
+## 3. Point it at the PC
+
+1. On the PC: Tailscale up, **Remote Hub → Go Live**. Turn on remote in a module's ⚙ only if Hub does not already start it. Media Player's phone server stays off until its remote settings are used (or Hub starts it).
+2. Phone → **Settings** → Tailscale hostname, e.g. `my-pc.tailnet-name.ts.net` — no `https://`, no port.
+3. Optional: per-module access codes and the Tailnet Social invite key, same values as on the PC.
+4. Switch tabs. Each URL is `https://<hostname>:<port>/`.
 
 ## Notes
 
-- **Vault**: uses your master password to sign in on your phone; the
-  session token lives only in memory for that app run (nothing is
-  written to disk), matching the desktop server's own session model
-  (idle-expires after 20 min).
-- **Games**: Gaming Hub launch list, plus **dedicated servers** (start/stop/ready
-  from Game Server Manager on `:8453`). **Night page** is a card on this tab
-  — jukebox / soundboard / limited console using an invite key (`:8450`).
-  Hub **Go Live** on the PC must be on.
-- **YT**: same job queue the desktop page and browser extension use —
-  queue from your phone, it downloads on the PC.
-- Access codes (if you set any per-module in the desktop Settings
-  tabs) go in this app's Settings screen too.
+- **Vault** — master password signs in; session token is memory-only for that run (idle expiry ~20 min), matching the desktop server.
+- **Music** — streams the SQLite library the desktop Media Player indexes. The desktop UI is a browser table; this tab is the remote browse/stream client.
+- **Games** — Hub launch list (`:8446`), dedicated servers start/stop/ready (`:8453`). Night is a card on this tab (`:8450`).
+- **Chat** — same hosted or local model as desktop AI Chat, including agent actions when the PC allows them. Hosted API key stays on the PC.
+- **Messages** — this PC only, not a friend-to-friend mesh.
+- **Trust** — first pair goes through **8455** (code shown on Remote Hub).
+
+Confirm Tailscale is signed in on both devices if a tab cannot connect.
