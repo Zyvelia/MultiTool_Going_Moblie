@@ -112,9 +112,9 @@ class ConnectionTestService {
       return const ConnectionTestStep(
         'API availability', StepStatus.fail, 'Connection timed out',
       );
-    } on HandshakeException {
-      return const ConnectionTestStep(
-        'API availability', StepStatus.fail, explainError(HandshakeException('TLS handshake failed')),
+    } on HandshakeException catch (e) {
+      return ConnectionTestStep(
+        'API availability', StepStatus.fail, explainError(e),
       );
     } on SocketException catch (e) {
       return ConnectionTestStep('API availability', StepStatus.fail, explainError(e));
@@ -135,7 +135,7 @@ class ConnectionTestService {
         );
       }
       if (res.statusCode == 401 || res.statusCode == 403) {
-        return const ConnectionTestStep(
+        return ConnectionTestStep(
           'Authentication', StepStatus.fail, explainError(AppIssue.fromHttp(res.statusCode, res.body, doing: 'check the access code')),
         );
       }
