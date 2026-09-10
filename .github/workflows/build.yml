@@ -9,12 +9,16 @@ jobs:
   build-android:
     name: Build APK
     runs-on: ubuntu-latest
+    env:
+      PUB_HOSTED_URL: https://pub.dev
     steps:
       - uses: actions/checkout@v4
 
       - uses: subosito/flutter-action@v2
         with:
+          flutter-version: '3.44.6'
           channel: 'stable'
+          cache: true
 
       - name: Scaffold platform folders
         run: flutter create --platforms=android,ios --org com.zsmultitool --no-pub .
@@ -43,6 +47,8 @@ jobs:
   build-ios:
     name: Build unsigned IPA
     runs-on: macos-15
+    env:
+      PUB_HOSTED_URL: https://pub.dev
     steps:
       - uses: actions/checkout@v4
 
@@ -52,11 +58,13 @@ jobs:
 
       - uses: subosito/flutter-action@v2
         with:
+          flutter-version: '3.44.6'
           channel: 'stable'
+          cache: true
 
       - name: Scaffold + deps
         run: |
-          flutter create --platforms=android,ios --org com.zsmultitool .
+          flutter create --platforms=android,ios --org com.zsmultitool --no-pub .
           python3 scripts/verify_firebase.py
           flutter pub get
           dart run flutter_launcher_icons
