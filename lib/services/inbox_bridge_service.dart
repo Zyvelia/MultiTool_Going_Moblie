@@ -62,14 +62,22 @@ class InboxBridgeService {
     }
 
     final raw = await controller.runJavaScriptReturningResult(script);
-    var text = raw.toString();
+    var text = raw.toString().trim();
 
-    // Some WebView implementations return a JSON-encoded JS string.
-    if (text.length >= 2 && text.startsWith('"') && text.endsWith('"')) {
-      try {
-        final decoded = jsonDecode(text);
-        if (decoded is String) text = decoded;
-      } catch (_) {}
+    // Android/iOS WebViews may return a JSON string wrapped in another
+    // JSON string. Peel those layers before decoding the API response.
+    for (var i = 0; i < 2; i++) {
+      if (text.length >= 2 && text.startsWith('"') && text.endsWith('"')) {
+        try {
+          final decoded = jsonDecode(text);
+          if (decoded is String) {
+            text = decoded.trim();
+            continue;
+          }
+          return decoded;
+        } catch (_) {}
+      }
+      break;
     }
 
     if (text == 'null' || text.isEmpty) return null;
@@ -88,6 +96,11 @@ class InboxBridgeService {
 })()
 ''');
     return Map<String, dynamic>.from(result as Map);
+  }
+
+  Future<Map<String, dynamic>> sessionInfo() async {
+    final data = await me();
+    return data;
   }
 
   Future<void> ensureOwner() async {

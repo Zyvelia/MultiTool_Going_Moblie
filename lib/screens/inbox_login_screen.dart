@@ -18,6 +18,8 @@ class _InboxLoginScreenState extends State<InboxLoginScreen> {
   WebViewController? _controller;
   Timer? _poller;
   bool _checking = false;
+  bool _authenticated = false;
+  String? _signedInEmail;
   String? _error;
 
   @override
@@ -30,37 +32,69 @@ class _InboxLoginScreenState extends State<InboxLoginScreen> {
     try {
       final controller = await InboxBridgeService.instance.createController(
         onError: (error) {
-          if (mounted) setState(() => _error = error);
+          if (mounted && !_authenticated) {
+            setState(() => _error = error);
+          }
         },
       );
+
       if (!mounted) return;
       setState(() => _controller = controller);
 
-      _poller = Timer.periodic(const Duration(seconds: 2), (_) => _check());
+      // Check after every navigation as OAuth redirects back to the Worker.
+      _poller = Timer.periodic(
+        const Duration(seconds: 1),
+        (_) => _checkSession(),
+      );
+
       await InboxBridgeService.instance.waitForPage();
-      await _check();
+      await _checkSession();
     } catch (e) {
       if (mounted) setState(() => _error = '$e');
     }
   }
 
-  Future<void> _check() async {
+  Future<void> _checkSession() async {
     if (_checking || !mounted) return;
     _checking = true;
+
     try {
-      final me = await InboxBridgeService.instance.me();
+      final me = await InboxBridgeService.instance.sessionInfo();
       final user = me['user'];
-      if (user != null && me['isOwner'] == true) {
-        await InboxPushService.instance.start();
-        _poller?.cancel();
-        if (mounted) Navigator.of(context).pop(true);
-      } else if (user != null && me['isOwner'] != true) {
-        if (mounted) {
-          setState(() => _error = 'Signed in, but this account is not the Inbox owner.');
+
+      if (user is Map) {
+        final email = user['email']?.toString() ?? '';
+        final owner = me['isOwner'] == true;
+
+        if (owner) {
+          _poller?.cancel();
+          setState(() {
+            _authenticated = true;
+            _signedInEmail = email;
+            _error = null;
+          });
+
+          await InboxPushService.instance.start();
+
+          if (!mounted) return;
+          // Return to the native Messages screen. The Worker website is
+          // only used as the authentication surface, never as the inbox UI.
+          Navigator.of(context).pop(true);
+          return;
+        }
+
+        if (email.isNotEmpty) {
+          setState(() {
+            _authenticated = true;
+            _signedInEmail = email;
+            _error =
+                'Signed in as $email, but this account is not the Inbox owner.';
+          });
         }
       }
     } catch (_) {
-      // OAuth may still be redirecting through Google/GitHub.
+      // OAuth redirects can temporarily make /api/me unavailable.
+      // Keep polling until the Worker session is established.
     } finally {
       _checking = false;
     }
@@ -85,23 +119,49 @@ class _InboxLoginScreenState extends State<InboxLoginScreen> {
           ),
         ],
       ),
-      body: Column(
+      body: Stack(
         children: [
-          if (_error != null)
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(12),
-              color: AppColors.card,
-              child: Text(
-                _error!,
-                style: const TextStyle(color: Colors.orangeAccent, fontSize: 12),
+          if (_controller != null)
+            WebViewWidget(controller: _controller!)
+          else
+            const Center(child: CircularProgressIndicator()),
+
+          if (_error != null || _authenticated)
+            Positioned(
+              left: 12,
+              right: 12,
+              bottom: 12,
+              child: Material(
+                color: AppColors.card,
+                borderRadius: BorderRadius.circular(14),
+                elevation: 6,
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Row(
+                    children: [
+                      Icon(
+                        _authenticated
+                            ? Icons.account_circle_outlined
+                            : Icons.error_outline,
+                        color: _authenticated
+                            ? AppColors.accent
+                            : Colors.orangeAccent,
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          _error ??
+                              (_signedInEmail == null
+                                  ? 'Checking Inbox sign-in…'
+                                  : 'Signed in as $_signedInEmail'),
+                          style: const TextStyle(fontSize: 12),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
               ),
             ),
-          Expanded(
-            child: _controller == null
-                ? const Center(child: CircularProgressIndicator())
-                : WebViewWidget(controller: _controller!),
-          ),
         ],
       ),
     );
