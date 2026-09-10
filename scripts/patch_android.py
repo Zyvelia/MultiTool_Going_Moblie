@@ -9,6 +9,7 @@ from __future__ import annotations
 import glob
 import re
 from pathlib import Path
+import shutil
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -212,7 +213,43 @@ kotlin {
     print(f"Set android.builtInKotlin=true in {props_path}")
 
 
+def patch_firebase() -> None:
+    source = ROOT / "firebase/google-services.json"
+    destination = ROOT / "android/app/google-services.json"
+    if not source.is_file():
+        print(f"Firebase config missing: {source}. FCM will remain disabled until it is added.")
+        return
+
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(source, destination)
+
+    settings = ROOT / "android/settings.gradle.kts"
+    if settings.is_file():
+        text = settings.read_text(encoding="utf-8")
+        if 'id("com.google.gms.google-services")' not in text and "plugins {" in text:
+            text = text.replace(
+                "plugins {\n",
+                'plugins {\n    id("com.google.gms.google-services") version "4.4.4" apply false\n',
+                1,
+            )
+            settings.write_text(text, encoding="utf-8")
+
+    app = ROOT / "android/app/build.gradle.kts"
+    if app.is_file():
+        text = app.read_text(encoding="utf-8")
+        if 'id("com.google.gms.google-services")' not in text and "plugins {" in text:
+            text = text.replace(
+                "plugins {\n",
+                'plugins {\n    id("com.google.gms.google-services")\n',
+                1,
+            )
+            app.write_text(text, encoding="utf-8")
+
+    print(f"Installed Firebase Android config at {destination}")
+
+
 def main() -> None:
+    patch_firebase()
     patch_manifest()
     patch_main_activity()
     patch_compile_sdk()

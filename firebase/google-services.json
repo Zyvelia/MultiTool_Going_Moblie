@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "166395440428",
+    "project_id": "inbox-worker",
+    "storage_bucket": "inbox-worker.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:166395440428:android:ca4115c2e0644eaf141089",
+        "android_client_info": {
+          "package_name": "com.zsmultitool.multi_tool_remote"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCAZTcoIKcjTaNIKxXg37Y9Xf74QRDIJc4"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

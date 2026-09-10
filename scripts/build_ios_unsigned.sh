@@ -27,12 +27,18 @@ IPA="$ROOT/build/ios/iphoneos/MultiToolRemote-unsigned.ipa"
 
 echo "=== iOS unsigned build ==="
 
+python3 scripts/patch_ios_firebase.py
 python3 scripts/patch_ios_plist.py
 python3 scripts/patch_ios_appdelegate.py
 python3 scripts/patch_ios_unsigned.py
 
 echo "--- Flutter config (no codesign / no team check) ---"
 flutter build ios --release --config-only --no-codesign
+
+echo "--- Prepare Xcode dependency state ---"
+# A stale/corrupt SwiftPM Package.resolved can produce misleading JSON/
+# project parse errors after Flutter regenerates ios/. Let Xcode regenerate it.
+find ios -path "*/swiftpm/Package.resolved" -type f -delete 2>/dev/null || true
 
 echo "--- xcodebuild (unsigned) ---"
 xattr -cr . 2>/dev/null || true
@@ -47,6 +53,9 @@ if [ -d "ios/Runner.xcworkspace" ]; then
 else
   XC_TARGET=(-project ios/Runner.xcodeproj)
 fi
+
+echo "--- Validate Xcode project ---"
+xcodebuild "${XC_TARGET[@]}" -scheme Runner -configuration Release -sdk iphoneos -showBuildSettings >/dev/null
 
 xcodebuild \
   "${XC_TARGET[@]}" \

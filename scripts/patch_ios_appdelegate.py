@@ -24,8 +24,7 @@ RETURN_LINE = (
 # Set up after super so the storyboard's FlutterViewController definitely exists.
 RETURN_REPLACEMENT = """    let didFinishLaunching = super.application(
       application, didFinishLaunchingWithOptions: launchOptions)
-    setUpScreenSecurity()
-    return didFinishLaunching"""
+    FirebaseApp.configure()\n    setUpScreenSecurity()\n    return didFinishLaunching"""
 
 METHOD = '''
   private var screenSecurityChannel: FlutterMethodChannel?
@@ -82,6 +81,8 @@ def main() -> None:
     if RETURN_LINE not in text:
         raise SystemExit(f"Could not find the launch return in {APP_DELEGATE}")
     text = text.replace(RETURN_LINE, RETURN_REPLACEMENT, 1)
+    if "import FirebaseCore" not in text:
+        text = text.replace("import Flutter\n", "import Flutter\nimport FirebaseCore\n", 1)
 
     closing = text.rstrip()
     if not closing.endswith("}"):

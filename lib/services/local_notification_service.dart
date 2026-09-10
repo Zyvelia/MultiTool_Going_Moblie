@@ -1,8 +1,7 @@
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'app_navigation.dart';
 
-/// Native OS notifications for this app. Currently only used for incoming
-/// chat messages (see messages_screen.dart), but kept generic (a plain
+/// Native OS notifications for this app. Used for foreground FCM message notifications and other local alerts, but kept generic (a plain
 /// title/body `show()`) rather than message-specific so anything else
 /// that wants a local notification later can reuse it instead of writing
 /// its own plugin wiring.

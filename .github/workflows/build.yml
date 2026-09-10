@@ -19,6 +19,9 @@ jobs:
       - name: Scaffold platform folders
         run: flutter create --platforms=android,ios --org com.zsmultitool --no-pub .
 
+      - name: Validate Firebase configuration
+        run: python3 scripts/verify_firebase.py
+
       - name: Patch Android project
         run: python3 scripts/patch_android.py
 
@@ -54,9 +57,21 @@ jobs:
       - name: Scaffold + deps
         run: |
           flutter create --platforms=android,ios --org com.zsmultitool .
+          python3 scripts/verify_firebase.py
           flutter pub get
           dart run flutter_launcher_icons
           dart run flutter_native_splash:create
+
+      - name: Install Xcode project tooling
+        run: gem install xcodeproj --no-document
+
+      - name: Install Firebase iOS config
+        run: python3 scripts/patch_ios_firebase.py
+
+      - name: Patch iOS project
+        run: |
+          python3 scripts/patch_ios_appdelegate.py
+          python3 scripts/patch_ios_plist.py
 
       - name: Build unsigned IPA
         run: bash scripts/build_ios_unsigned.sh
