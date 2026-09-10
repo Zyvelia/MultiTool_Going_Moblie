@@ -62,3 +62,26 @@ The workflow generates `android/` and `ios/` on the runner. You do not need Flut
 - **Trust** — first pair goes through **8455** (code shown on Remote Hub).
 
 Confirm Tailscale is signed in on both devices if a tab cannot connect.
+
+## Inbox Worker / Messages
+
+The **Messages** tab now uses the Cloudflare Inbox Worker instead of the old
+Tailscale messaging transport. The existing Tailscale services/files remain
+in the project for the other features that still use them.
+
+The mobile Inbox signs in through the worker's own page, keeps the Better Auth
+httpOnly session inside the worker-origin WebView, registers the phone's FCM
+token, and polls message history every 10 seconds for catch-up.
+
+### Firebase setup
+
+Before building a release with push notifications, add:
+
+- `firebase/google-services.json` for Android
+- `firebase/GoogleService-Info.plist` for iOS
+
+See `firebase/README.md` for the exact Firebase app IDs and setup steps.
+
+Google OAuth is the recommended sign-in option on the worker's login page.
+GitHub and passkey remain available there too.
+

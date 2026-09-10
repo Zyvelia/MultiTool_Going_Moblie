@@ -112,22 +112,6 @@ class HomeShellState extends State<HomeShell> {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
 
-    if (_hostname == null || _hostname!.isEmpty) {
-      WidgetsBinding.instance.addPostFrameCallback((_) => _promptForHostname());
-      return const Scaffold(
-        body: Center(
-          child: Padding(
-            padding: EdgeInsets.all(24),
-            child: Text(
-              'Set up your PC\'s Tailscale hostname to get started…',
-              style: TextStyle(color: Colors.white54),
-              textAlign: TextAlign.center,
-            ),
-          ),
-        ),
-      );
-    }
-
     // Each screen is wrapped in _KeepAlive so swiping away and back
     // (or tapping between tabs) doesn't reset scroll position, text
     // fields, or in-flight loads — same persistence IndexedStack gave
