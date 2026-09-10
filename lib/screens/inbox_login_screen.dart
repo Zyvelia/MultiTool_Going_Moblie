@@ -103,6 +103,14 @@ class _InboxLoginScreenState extends State<InboxLoginScreen> {
   @override
   void dispose() {
     _poller?.cancel();
+
+    // The WebView is owned by this route and is disposed when the route closes.
+    // Do not leave a dead WebViewController in the singleton bridge. The
+    // Better Auth session cookie itself is persisted by the platform WebView
+    // cookie store, so the bridge can safely create a fresh controller on the
+    // Messages screen.
+    InboxBridgeService.instance.invalidateController();
+
     super.dispose();
   }
 

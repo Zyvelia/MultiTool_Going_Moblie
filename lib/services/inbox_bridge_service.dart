@@ -20,6 +20,25 @@ class InboxBridgeService {
   WebViewController? _controller;
   Completer<void>? _pageReady;
 
+  /// The WebView controller belongs to the widget that currently displays it.
+  /// When the sign-in screen is popped, that native WebView is disposed even
+  /// though the Better Auth cookie remains in the app's WebView cookie store.
+  /// Clear our reference so the next native screen creates a fresh WebView
+  /// against the same persistent cookie store.
+  void invalidateController() {
+    _controller = null;
+    _pageReady = null;
+  }
+
+  Future<WebViewController> ensureController() async {
+    final existing = _controller;
+    if (existing != null) {
+      return existing;
+    }
+
+    return createController();
+  }
+
   Future<WebViewController> createController({
     void Function(String url)? onNavigation,
     void Function(String error)? onError,
@@ -56,10 +75,7 @@ class InboxBridgeService {
   }
 
   Future<dynamic> _runJson(String script) async {
-    final controller = _controller;
-    if (controller == null) {
-      throw StateError('Inbox WebView has not been initialized.');
-    }
+    final controller = await ensureController();
 
     final raw = await controller.runJavaScriptReturningResult(script);
     var text = raw.toString().trim();
@@ -85,6 +101,9 @@ class InboxBridgeService {
   }
 
   Future<Map<String, dynamic>> me() async {
+    await ensureController();
+    await waitForPage();
+
     final result = await _runJson('''
 (async () => {
   const r = await fetch(${jsonEncode('$workerUrl/api/me')}, {

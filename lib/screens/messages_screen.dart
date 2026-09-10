@@ -54,6 +54,9 @@ class _MessagesScreenState extends State<MessagesScreen>
     if (!silent && mounted) setState(() => _loading = true);
 
     try {
+      // The login WebView is intentionally temporary. Its Better Auth cookie
+      // survives route disposal, but its native WebViewController does not.
+      // InboxBridgeService creates a fresh controller here when necessary.
       final me = await InboxBridgeService.instance.me();
       final user = me['user'];
       final owner = me['isOwner'] == true;
