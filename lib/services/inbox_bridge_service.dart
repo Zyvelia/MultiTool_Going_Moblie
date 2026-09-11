@@ -19,24 +19,34 @@ class InboxBridgeService {
 
   WebViewController? _controller;
   Completer<void>? _pageReady;
+  Future<WebViewController>? _creatingController;
 
-  /// The WebView controller belongs to the widget that currently displays it.
-  /// When the sign-in screen is popped, that native WebView is disposed even
-  /// though the Better Auth cookie remains in the app's WebView cookie store.
-  /// Clear our reference so the next native screen creates a fresh WebView
-  /// against the same persistent cookie store.
+  /// Kept for compatibility with older callers. The Inbox WebView is owned
+  /// by the Messages screen and remains mounted so the authenticated WebView
+  /// session can be used for API requests after login.
   void invalidateController() {
-    _controller = null;
-    _pageReady = null;
+    // Intentionally do nothing.
+    // Better Auth's httpOnly session cookie is only directly available to the
+    // WebView. Keeping the same controller/session is what lets native Flutter
+    /// fetch the inbox without displaying the Worker inbox website.
   }
 
   Future<WebViewController> ensureController() async {
     final existing = _controller;
-    if (existing != null) {
-      return existing;
-    }
+    if (existing != null) return existing;
 
-    return createController();
+    final pending = _creatingController;
+    if (pending != null) return pending;
+
+    final future = createController();
+    _creatingController = future;
+    try {
+      return await future;
+    } finally {
+      if (identical(_creatingController, future)) {
+        _creatingController = null;
+      }
+    }
   }
 
   Future<WebViewController> createController({

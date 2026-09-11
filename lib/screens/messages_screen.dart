@@ -1,13 +1,18 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:webview_flutter/webview_flutter.dart';
 
 import '../models/inbox_message.dart';
 import '../services/inbox_bridge_service.dart';
 import '../services/inbox_push_service.dart';
 import '../theme/app_colors.dart';
-import 'inbox_login_screen.dart';
 
+/// Native Inbox screen.
+///
+/// The WebView is used only for Better Auth login. It stays mounted in an
+/// offstage layer after authentication so its httpOnly session cookie remains
+/// available to the bridge. Messages themselves are always rendered natively.
 class MessagesScreen extends StatefulWidget {
   const MessagesScreen({super.key});
 
@@ -24,13 +29,15 @@ class _MessagesScreenState extends State<MessagesScreen>
   bool _loading = true;
   bool _signedIn = false;
   bool _refreshing = false;
+  bool _authReady = false;
   String? _error;
+  WebViewController? _authController;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _load();
+    _initializeInbox();
   }
 
   @override
@@ -38,13 +45,38 @@ class _MessagesScreenState extends State<MessagesScreen>
     WidgetsBinding.instance.removeObserver(this);
     _poller?.cancel();
     _scrollController.dispose();
+    // Do not invalidate the bridge controller here. The WebView controller is
+    // intentionally owned by the Inbox bridge for the lifetime of the app.
     super.dispose();
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed && _signedIn) {
+    if (state == AppLifecycleState.resumed) {
       _load(silent: true);
+    }
+  }
+
+  Future<void> _initializeInbox() async {
+    await _prepareAuthWebView();
+    if (mounted) await _load();
+  }
+
+  Future<void> _prepareAuthWebView() async {
+    try {
+      final controller = await InboxBridgeService.instance.ensureController();
+      if (!mounted) return;
+      setState(() {
+        _authController = controller;
+        _authReady = true;
+      });
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _authReady = true;
+          _error = 'Could not open Inbox sign-in.';
+        });
+      }
     }
   }
 
@@ -54,9 +86,6 @@ class _MessagesScreenState extends State<MessagesScreen>
     if (!silent && mounted) setState(() => _loading = true);
 
     try {
-      // The login WebView is intentionally temporary. Its Better Auth cookie
-      // survives route disposal, but its native WebViewController does not.
-      // InboxBridgeService creates a fresh controller here when necessary.
       final me = await InboxBridgeService.instance.me();
       final user = me['user'];
       final owner = me['isOwner'] == true;
@@ -65,11 +94,18 @@ class _MessagesScreenState extends State<MessagesScreen>
         if (mounted) {
           setState(() {
             _signedIn = false;
-            _error = null;
             _loading = false;
+            if (user is Map && !owner) {
+              final email = user['email']?.toString() ?? '';
+              _error = email.isEmpty
+                  ? 'This account is not the Inbox owner.'
+                  : 'Signed in as $email, but this account is not the Inbox owner.';
+            } else {
+              _error = null;
+            }
           });
         }
-        _poller?.cancel();
+        _startPolling();
         return;
       }
 
@@ -83,7 +119,9 @@ class _MessagesScreenState extends State<MessagesScreen>
           _signedIn = true;
           _error = null;
           for (final message in incoming) {
-            if (!_messages.any((m) => m.id == message.id)) _messages.add(message);
+            if (!_messages.any((m) => m.id == message.id)) {
+              _messages.add(message);
+            }
           }
           _messages.sort((a, b) => a.createdAt.compareTo(b.createdAt));
           _loading = false;
@@ -96,7 +134,11 @@ class _MessagesScreenState extends State<MessagesScreen>
       if (mounted) {
         setState(() {
           _loading = false;
-          if (_signedIn) _error = 'Could not refresh Inbox.';
+          if (_signedIn) {
+            _error = 'Could not refresh Inbox.';
+          } else {
+            _startPolling();
+          }
         });
       }
     } finally {
@@ -105,14 +147,10 @@ class _MessagesScreenState extends State<MessagesScreen>
   }
 
   void _startPolling() {
-    _poller ??= Timer.periodic(const Duration(seconds: 10), (_) => _load(silent: true));
-  }
-
-  Future<void> _signIn() async {
-    final ok = await Navigator.of(context).push<bool>(
-      MaterialPageRoute(builder: (_) => const InboxLoginScreen()),
+    _poller ??= Timer.periodic(
+      const Duration(seconds: 5),
+      (_) => _load(silent: true),
     );
-    if (ok == true) await _load();
   }
 
   void _scrollToBottom() {
@@ -132,50 +170,16 @@ class _MessagesScreenState extends State<MessagesScreen>
     return '$h:$m ${time.hour >= 12 ? 'PM' : 'AM'}';
   }
 
-  @override
-  Widget build(BuildContext context) {
-    if (_loading && !_signedIn) {
-      return const Scaffold(body: Center(child: CircularProgressIndicator()));
-    }
+  Widget _authLayer() {
+    return Offstage(
+      offstage: _signedIn,
+      child: _authController == null
+          ? const Center(child: CircularProgressIndicator())
+          : WebViewWidget(controller: _authController!),
+    );
+  }
 
-    if (!_signedIn) {
-      return Scaffold(
-        appBar: AppBar(title: const Text('Messages')),
-        body: Center(
-          child: Padding(
-            padding: const EdgeInsets.all(28),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Icon(Icons.lock_outline, size: 46, color: AppColors.muted),
-                const SizedBox(height: 14),
-                const Text(
-                  'Sign in to your Inbox',
-                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.w600),
-                ),
-                const SizedBox(height: 8),
-                const Text(
-                  'Your messages are protected by the Inbox Worker account.',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(color: AppColors.muted),
-                ),
-                const SizedBox(height: 22),
-                FilledButton.icon(
-                  onPressed: _signIn,
-                  icon: const Icon(Icons.login),
-                  label: const Text('Sign in'),
-                ),
-                if (_error != null) ...[
-                  const SizedBox(height: 14),
-                  Text(_error!, style: const TextStyle(color: Colors.orangeAccent)),
-                ],
-              ],
-            ),
-          ),
-        ),
-      );
-    }
-
+  Widget _nativeInbox() {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Messages'),
@@ -193,7 +197,12 @@ class _MessagesScreenState extends State<MessagesScreen>
             ? ListView(
                 children: const [
                   SizedBox(height: 260),
-                  Center(child: Text('No messages yet.', style: TextStyle(color: AppColors.muted))),
+                  Center(
+                    child: Text(
+                      'No messages yet.',
+                      style: TextStyle(color: AppColors.muted),
+                    ),
+                  ),
                 ],
               )
             : ListView.builder(
@@ -206,8 +215,13 @@ class _MessagesScreenState extends State<MessagesScreen>
                     alignment: Alignment.centerLeft,
                     child: Container(
                       margin: const EdgeInsets.symmetric(vertical: 5),
-                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
-                      constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * .82),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 14,
+                        vertical: 11,
+                      ),
+                      constraints: BoxConstraints(
+                        maxWidth: MediaQuery.of(context).size.width * .82,
+                      ),
                       decoration: BoxDecoration(
                         color: AppColors.card,
                         borderRadius: BorderRadius.circular(16),
@@ -220,17 +234,30 @@ class _MessagesScreenState extends State<MessagesScreen>
                               Expanded(
                                 child: Text(
                                   message.senderName,
-                                  style: const TextStyle(fontWeight: FontWeight.w600, color: AppColors.accent),
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.w600,
+                                    color: AppColors.accent,
+                                  ),
                                 ),
                               ),
-                              Text(_formatTime(message.createdAt),
-                                  style: const TextStyle(fontSize: 10, color: AppColors.muted)),
+                              Text(
+                                _formatTime(message.createdAt),
+                                style: const TextStyle(
+                                  fontSize: 10,
+                                  color: AppColors.muted,
+                                ),
+                              ),
                             ],
                           ),
                           if (message.senderEmail.isNotEmpty) ...[
                             const SizedBox(height: 2),
-                            Text(message.senderEmail,
-                                style: const TextStyle(fontSize: 10, color: AppColors.muted)),
+                            Text(
+                              message.senderEmail,
+                              style: const TextStyle(
+                                fontSize: 10,
+                                color: AppColors.muted,
+                              ),
+                            ),
                           ],
                           const SizedBox(height: 7),
                           Text(message.text),
@@ -241,6 +268,71 @@ class _MessagesScreenState extends State<MessagesScreen>
                 },
               ),
       ),
+    );
+  }
+
+  Widget _loginFallback() {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Messages')),
+      body: Stack(
+        children: [
+          _authLayer(),
+          if (_authReady && _error != null)
+            Positioned(
+              left: 12,
+              right: 12,
+              bottom: 12,
+              child: Material(
+                color: AppColors.card,
+                borderRadius: BorderRadius.circular(14),
+                elevation: 6,
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.info_outline, color: Colors.orangeAccent),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          _error!,
+                          style: const TextStyle(fontSize: 12),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_loading && !_signedIn) {
+      // Keep the WebView mounted while checking the session. Once the page is
+      // ready it becomes the login surface instead of showing the inbox web UI.
+      return Stack(
+        children: [
+          _authLayer(),
+          if (!_authReady)
+            const Scaffold(
+              body: Center(child: CircularProgressIndicator()),
+            ),
+        ],
+      );
+    }
+
+    if (!_signedIn) return _loginFallback();
+
+    // Keep the authenticated WebView mounted offstage while the native inbox
+    // is visible. This is the key to retaining Better Auth's httpOnly cookie.
+    return Stack(
+      children: [
+        _nativeInbox(),
+        _authLayer(),
+      ],
     );
   }
 }
