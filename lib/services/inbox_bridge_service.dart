@@ -100,6 +100,11 @@ class InboxBridgeService {
     return jsonDecode(text);
   }
 
+  /// Returns the actual /api/me response body.
+  ///
+  /// The JavaScript bridge wraps HTTP responses as {status, data}. Keep that
+  /// transport wrapper private so callers receive the same shape documented
+  /// by the Worker: {user, isOwner}.
   Future<Map<String, dynamic>> me() async {
     await ensureController();
     await waitForPage();
@@ -111,24 +116,35 @@ class InboxBridgeService {
     credentials: 'include',
     cache: 'no-store'
   });
-  return JSON.stringify({status: r.status, data: await r.json()});
+  let data = null;
+  try {
+    data = await r.json();
+  } catch (_) {}
+  return JSON.stringify({status: r.status, data: data});
 })()
 ''');
-    return Map<String, dynamic>.from(result as Map);
+
+    final envelope = Map<String, dynamic>.from(result as Map);
+    final status = envelope['status'];
+    final body = envelope['data'];
+
+    if (status != 200) {
+      throw StateError('Inbox session check failed ($status).');
+    }
+    if (body is! Map) {
+      throw StateError('Inbox session response was invalid.');
+    }
+
+    return Map<String, dynamic>.from(body);
   }
 
   Future<Map<String, dynamic>> sessionInfo() async {
-    final data = await me();
-    return data;
+    return me();
   }
 
   Future<void> ensureOwner() async {
     final data = await me();
-    if (data['status'] != 200) {
-      throw StateError('Inbox sign-in check failed (${data['status']}).');
-    }
-    final body = Map<String, dynamic>.from(data['data'] as Map);
-    if (body['user'] == null || body['isOwner'] != true) {
+    if (data['user'] == null || data['isOwner'] != true) {
       throw StateError('This account is not the Inbox owner.');
     }
   }
