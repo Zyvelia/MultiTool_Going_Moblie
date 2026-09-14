@@ -1,5 +1,6 @@
 import 'package:flutter/widgets.dart';
 import '../screens/home_shell.dart';
+import '../screens/ai_approvals_screen.dart';
 
 /// Bridges taps on OS-level notifications back into in-app navigation.
 ///
@@ -18,8 +19,24 @@ class AppNavigation {
   /// the app in the first place. HomeShell claims this via
   /// [consumePendingTabIndex] once it's up.
   static int? _pendingTabIndex;
+  static String? _pendingApprovalId;
 
   static void goToMessages() => _goToTab(HomeShellState.messagesTabIndex);
+
+  static void goToAiApproval([String? approvalId]) {
+    final state = homeShellKey.currentState;
+    if (state != null) {
+      state.openAiApproval(approvalId);
+    } else {
+      _pendingApprovalId = approvalId;
+    }
+  }
+
+  static String? consumePendingApprovalId() {
+    final id = _pendingApprovalId;
+    _pendingApprovalId = null;
+    return id;
+  }
 
   static void _goToTab(int index) {
     final state = homeShellKey.currentState;

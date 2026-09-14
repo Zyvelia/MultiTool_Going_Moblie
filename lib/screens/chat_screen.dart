@@ -5,6 +5,7 @@ import '../services/ai_api_service.dart';
 import '../services/settings_service.dart';
 import '../services/user_facing_error.dart';
 import '../theme/app_colors.dart';
+import 'ai_approvals_screen.dart';
 
 class ChatScreen extends StatefulWidget {
   const ChatScreen({super.key});
@@ -364,6 +365,13 @@ class _ChatScreenState extends State<ChatScreen> {
                 onChanged: _sending ? null : (v) => setState(() => _agent = v),
               ),
             ],
+          ),
+          IconButton(
+            icon: const Icon(Icons.approval_outlined),
+            tooltip: 'AI approvals',
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const AiApprovalsScreen()),
+            ),
           ),
           IconButton(
             icon: const Icon(Icons.link),

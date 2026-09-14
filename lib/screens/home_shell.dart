@@ -11,6 +11,7 @@ import 'chat_screen.dart';
 import 'settings_screen.dart';
 import '../services/settings_service.dart';
 import '../services/app_navigation.dart';
+import 'ai_approvals_screen.dart';
 
 /// Lets code outside the widget tree (notably LocalNotificationService,
 /// which fires from a plugin callback with no BuildContext of its own)
@@ -63,6 +64,13 @@ class HomeShellState extends State<HomeShell> {
     // Claim it now that we're up, once the first frame after this build
     // has actually gone out (jumping pages mid-build throws).
     final pendingTab = AppNavigation.consumePendingTabIndex();
+    final pendingApproval = AppNavigation.consumePendingApprovalId();
+    if (pendingApproval != null && mounted) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) openAiApproval(pendingApproval);
+      });
+    }
+
     if (pendingTab != null && mounted) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) selectTab(pendingTab);
@@ -73,6 +81,10 @@ class HomeShellState extends State<HomeShell> {
   /// Public entry point for switching tabs from outside this State —
   /// used by AppNavigation to deep-link in from a tapped notification.
   void selectTab(int i) => _onDestinationSelected(i);
+
+  void openAiApproval([String? approvalId]) {
+    Navigator.of(context).push(MaterialPageRoute(builder: (_) => AiApprovalsScreen(requestedId: approvalId)));
+  }
 
   Future<void> _promptForHostname() async {
     await Navigator.of(context).push(

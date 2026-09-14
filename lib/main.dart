@@ -66,6 +66,7 @@ Future<void> main() async {
       androidNotificationOngoing: true,
     );
     LocalNotificationService.instance.requestPermission();
+    InboxPushService.instance.start();
   });
 }
 

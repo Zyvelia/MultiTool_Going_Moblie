@@ -1,5 +1,6 @@
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'app_navigation.dart';
+import 'dart:convert';
 
 /// Native OS notifications for this app. Used for foreground FCM message notifications and other local alerts, but kept generic (a plain
 /// title/body `show()`) rather than message-specific so anything else
@@ -25,6 +26,7 @@ class LocalNotificationService {
   /// means something there, not any future notification kind that
   /// reuses this same show() plumbing.
   static const messagePayload = 'messages';
+  static const aiApprovalPayload = 'ai_approval';
 
   Future<void> init() async {
     if (_initialized) return;
@@ -79,9 +81,22 @@ class LocalNotificationService {
   }
 
   void _handlePayload(String? payload) {
+    if (payload != null && payload.startsWith('{')) {
+      try {
+        final data = jsonDecode(payload);
+        if (data is Map && data['type'] == 'ai_approval') {
+          AppNavigation.goToAiApproval(data['id']?.toString());
+          return;
+        }
+      } catch (_) {}
+    }
     switch (payload) {
       case messagePayload:
         AppNavigation.goToMessages();
+        return;
+      case aiApprovalPayload:
+        AppNavigation.goToAiApproval();
+        return;
     }
   }
 
