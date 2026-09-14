@@ -5,6 +5,7 @@ import 'package:just_audio_background/just_audio_background.dart';
 import 'screens/home_shell.dart';
 import 'services/local_notification_service.dart';
 import 'services/inbox_push_service.dart';
+import 'services/ai_push_service.dart';
 import 'theme/app_theme.dart';
 
 /// App-wide navigator handle. Not used directly for the notification
@@ -66,7 +67,11 @@ Future<void> main() async {
       androidNotificationOngoing: true,
     );
     LocalNotificationService.instance.requestPermission();
+    // These are separate notification channels. AI approvals do not depend
+    // on the Inbox/WebView system. Both use the phone's normal OS push tray
+    // through FCM.
     InboxPushService.instance.start();
+    AiPushService.instance.start();
   });
 }
 

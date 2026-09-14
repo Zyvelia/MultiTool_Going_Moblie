@@ -1,48 +1,36 @@
-# AI Remote Approvals / FCM Integration
+# AI Remote Approvals
 
-The mobile app already uses Firebase Cloud Messaging for the existing Inbox/Cloudflare notification flow. AI approvals reuse that **same FCM token and Firebase configuration**; no second Firebase project is required.
+The AI approval notification system is intentionally separate from the Inbox.
 
-## Mobile behavior
+## Flow
 
-- The existing Inbox Worker registration remains unchanged.
-- The same FCM token is optionally registered with the PC AI endpoint:
-  `POST /api/ai/mobile/fcm-token`
-- If that endpoint returns 404, the mobile app silently keeps working with the existing Inbox FCM registration. This preserves compatibility with older desktop AI builds.
-- Foreground `ai_approval` messages become native local notifications.
-- Background/terminated notification taps are routed through Firebase's `onMessageOpenedApp` / `getInitialMessage` path.
-- Tapping an approval opens the AI Approvals screen.
-- Accept/Deny sends only the approval decision; the phone never receives filesystem access.
-
-## FCM data contract
-
-Send a notification/data message containing:
-
-```json
-{
-  "data": {
-    "type": "ai_approval",
-    "approval_id": "approval-id"
-  },
-  "notification": {
-    "title": "AI approval required",
-    "body": "The AI wants to modify 6 files."
-  }
-}
+```text
+PC AI -> FCM -> Android/iOS OS notification -> Accept/Deny -> PC AI approval API
 ```
 
-## PC AI approval API
+The Inbox WebView, Inbox message database, and Inbox push registration are not
+required for AI approvals.
 
-The mobile client expects:
+## Phone behavior
 
-- `POST /api/ai/mobile/fcm-token`
-- `GET /api/ai/approvals/pending`
-- `GET /api/ai/approvals/{id}`
-- `POST /api/ai/approvals/{id}/decision`
+1. The app initializes Firebase Messaging.
+2. `AiPushService` gets the device FCM token.
+3. The token is registered directly with the PC AI `/api/ai/mobile/fcm-token`
+   endpoint using the existing Chat connection/access code.
+4. The PC AI sends an FCM notification with:
+   - `type=ai_approval`
+   - `approval_id=<pending approval id>`
+5. If the app is in the foreground, the app creates a normal OS local
+   notification so it appears in the notification tray.
+6. If the app is backgrounded/terminated, an FCM notification payload is shown
+   by Android/iOS normally.
+7. Tapping the notification opens the AI approval screen.
+8. Accept/Deny calls the PC AI approval endpoint for that exact approval ID.
 
-Decision body:
+## Important
 
-```json
-{"approved": true, "ok": true}
-```
+The PC still needs an FCM sending credential. Keep that credential on the PC,
+never in the mobile app. The PC AI supports either a Firebase Admin service
+account or an authenticated relay.
 
-The client also falls back to the existing `/api/pending_confirm` and `/api/confirm` endpoints for compatibility.
+The mobile app does not contain a Firebase private key.
