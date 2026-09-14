@@ -63,16 +63,34 @@ class AiApiService {
   }
 
   Future<AiChatReply> send(String text, {bool agent = true}) async {
-    final res = await trustedHttp
-        .post(
-          _uri('/api/chat'),
-          headers: _headers,
-          body: jsonEncode({'text': text, 'agent': agent}),
-        )
-        .timeout(const Duration(minutes: 10));
-    ensureOk(res, doing: 'send that chat', requireOk: true);
-    final data = jsonDecode(res.body) as Map<String, dynamic>;
-    return _replyFrom(data);
+    Future<AiChatReply> attempt() async {
+      final res = await trustedHttp
+          .post(
+            _uri('/api/chat'),
+            headers: _headers,
+            body: jsonEncode({'text': text, 'agent': agent}),
+          )
+          .timeout(const Duration(minutes: 10));
+      ensureOk(res, doing: 'send that chat', requireOk: true);
+      final data = jsonDecode(res.body) as Map<String, dynamic>;
+      return _replyFrom(data);
+    }
+
+    try {
+      return await attempt();
+    } on AppIssue catch (e) {
+      // Tailscale can briefly return 502/503 while its reverse-proxy
+      // backend is being reloaded. Give the connection one short retry
+      // instead of immediately surfacing a misleading failure.
+      final msg = e.message.toLowerCase();
+      if (msg.contains('(502)') || msg.contains('(503)') ||
+          msg.contains('temporarily unavailable') ||
+          msg.contains('not reachable through tailscale')) {
+        await Future<void>.delayed(const Duration(milliseconds: 800));
+        return await attempt();
+      }
+      rethrow;
+    }
   }
 
   Future<AiChatReply> build(String prompt) async {

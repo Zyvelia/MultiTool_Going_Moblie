@@ -141,8 +141,9 @@ String _fromHttpStatus(int? status, String extra) {
     case 404:
       return 'Nothing on the PC answered that request. Go Live on Remote Hub, then retry.';
     case 408:
+      return 'The PC did not finish that request in time. Try again in a moment.';
     case 504:
-      return 'The PC or Tailscale timed out. Try again in a moment.';
+      return 'The PC or Tailscale timed out while waiting for the request. Try again in a moment.';
     case 409:
       return 'The PC is busy with something else. Wait a few seconds and retry.';
     case 413:
@@ -151,10 +152,11 @@ String _fromHttpStatus(int? status, String extra) {
       return 'Too many tries. Wait a minute, then retry.';
     case 500:
     case 501:
-      return 'The PC hit an internal error. Check that module on the desktop, then retry.';
+      return 'The AI Chat service on the PC hit an internal error. Check AI Chat on the PC, then retry.';
     case 502:
+      return 'The AI Chat service is not reachable through Tailscale right now. Keep Tailscale on and tap Go Live, then retry.';
     case 503:
-      return 'Tailscale dropped the hop to the PC. Keep Tailscale on and tap Go Live, then retry.';
+      return 'The AI Chat service is temporarily unavailable on the PC. Keep Tailscale on and tap Go Live, then retry.';
     default:
       if (status != null && status >= 400) {
         return 'The PC answered with an error ($status). Go Live on Remote Hub and retry.';
