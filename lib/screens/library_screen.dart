@@ -20,6 +20,8 @@ import 'downloads_screen.dart';
 
 enum _PlaySource { phone, pc }
 
+enum _BrowseTab { songs, artists }
+
 class LibraryScreen extends StatefulWidget {
   const LibraryScreen({super.key});
 
@@ -27,7 +29,8 @@ class LibraryScreen extends StatefulWidget {
   State<LibraryScreen> createState() => _LibraryScreenState();
 }
 
-class _LibraryScreenState extends State<LibraryScreen> {
+class _LibraryScreenState extends State<LibraryScreen>
+    with SingleTickerProviderStateMixin {
   final _settings = SettingsService();
   ApiService? _api;
   ResolvedServer? _server;
@@ -50,10 +53,6 @@ class _LibraryScreenState extends State<LibraryScreen> {
 
   int _currentIndex = -1;
 
-  // "Phone" streams audio into this screen's own AudioPlayer and plays
-  // locally. "PC" instead remote-controls the desktop app's own player
-  // (audio comes out of the PC's speakers) via polling /api/now-playing
-  // and posting to /api/control.
   _PlaySource _source = _PlaySource.phone;
   Timer? _pollTimer;
   NowPlaying? _nowPlaying;
@@ -61,35 +60,42 @@ class _LibraryScreenState extends State<LibraryScreen> {
 
   int _midStreamRetries = 0;
 
-  // Explicit offline cache — separate from (and takes priority over) the
-  // implicit per-play caching LockCachingAudioSource does below. Progress
-  // is keyed by song id; a song not present here and not [_cache.isCached]
-  // is simply not downloaded.
   final _cache = OfflineCacheService.instance;
   StreamSubscription<CacheEvent>? _cacheSub;
   final Map<int, double> _downloadProgress = {};
-  // "Download all" batch state, driven by OfflineCacheService's
-  // batchStarted/batchProgress/batchFinished events (see _onCacheEvent).
   bool _batchActive = false;
   int _batchDone = 0;
   int _batchTotal = 0;
   bool _fetchingBatchList = false;
-  // True when the song list currently on screen came from the offline
-  // cache manifest rather than a live /api/songs response, because the
-  // desktop was unreachable. Search is disabled in this state — the
-  // cache has no search index, just whatever's downloaded.
   bool _offlineFallback = false;
 
-  // Built lazily on tap (not while the tab is opening) so ExoPlayer isn't
-  // mutating an empty concatenating source — that was skipping/failing the
-  // first few downloaded tracks.
   ConcatenatingAudioSource? _playlist;
   int _playGen = 0;
   Directory? _remoteCacheDir;
 
+  // Browse tab state
+  _BrowseTab _browseTab = _BrowseTab.songs;
+  // Artist expand state — key is artist name
+  final Set<String> _expandedArtists = {};
+  // Artist list built from the cached songs (always available offline)
+  Map<String, List<Song>> _artistMap = {};
+
+  late final TabController _tabController;
+
   @override
   void initState() {
     super.initState();
+    _tabController = TabController(length: 2, vsync: this)
+      ..addListener(() {
+        if (!_tabController.indexIsChanging) {
+          setState(() {
+            _browseTab =
+                _tabController.index == 0 ? _BrowseTab.songs : _BrowseTab.artists;
+          });
+          // When switching to Artists tab, always build from cache
+          if (_browseTab == _BrowseTab.artists) _rebuildArtistMap();
+        }
+      });
     _init();
     _initConnectivity();
     _cacheSub = _cache.events.listen(_onCacheEvent);
@@ -98,9 +104,6 @@ class _LibraryScreenState extends State<LibraryScreen> {
   AudioPlayer get _player => _audio!;
   bool get _hasPlayer => _audio != null;
 
-  /// Native player init is expensive (ExoPlayer / AVPlayer). Don't do it
-  /// during the first Music-tab frame — that's what made the tab freeze
-  /// for a couple of seconds on open.
   Future<void> _ensurePlayer() async {
     if (_audio != null) return;
     final player = AudioPlayer();
@@ -142,9 +145,6 @@ class _LibraryScreenState extends State<LibraryScreen> {
     );
   }
 
-  // Swaps in a fresh LockCachingAudioSource at [index] (the cached item
-  // may be stuck in a broken state after a dropped connection) and
-  // resumes from where playback left off.
   Future<void> _recoverTrack(int index, Duration resumeAt) async {
     if (index < 0 || index >= _songs.length) return;
     final song = _songs[index];
@@ -187,14 +187,10 @@ class _LibraryScreenState extends State<LibraryScreen> {
     await _cache.ensureReady();
     unawaited(_ensureRemoteCacheDir());
 
-    // Paint the downloaded list immediately — do NOT attach audio sources
-    // yet. Building a ConcatenatingAudioSource for every file (and then
-    // throwing it away when the live library arrives) is what froze the
-    // Music tab for a few seconds on first open.
     if (_cache.count > 0) {
       _paintCachedLibrary();
+      _rebuildArtistMap();
       if (mounted) setState(() => _reconnecting = true);
-      // Let the list actually draw before we start network / player work.
       await Future<void>.delayed(Duration.zero);
     }
 
@@ -233,7 +229,6 @@ class _LibraryScreenState extends State<LibraryScreen> {
     await _loadSongs(reset: true);
   }
 
-  /// Updates the on-screen list without touching the audio player.
   void _paintSongs(
     List<Song> songs, {
     required bool reset,
@@ -259,6 +254,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
       _error = null;
       _reconnecting = false;
     });
+    _rebuildArtistMap();
   }
 
   void _paintCachedLibrary() {
@@ -289,6 +285,45 @@ class _LibraryScreenState extends State<LibraryScreen> {
     _paintSongs(list, reset: true, offlineFallback: true);
   }
 
+  /// Rebuilds the artist → songs map from the current _songs list.
+  /// Called whenever _songs changes, or when switching to Artists tab.
+  void _rebuildArtistMap() {
+    final map = <String, List<Song>>{};
+    final source =
+        _offlineFallback ? _cache.downloadedSongs : _songs;
+    for (final song in source) {
+      final artist = song.artist.isNotEmpty ? song.artist : 'Unknown Artist';
+      (map[artist] ??= []).add(song);
+    }
+    // Sort artists alphabetically
+    final sorted = Map.fromEntries(
+      map.entries.toList()..sort((a, b) => a.key.compareTo(b.key)),
+    );
+    if (mounted) setState(() => _artistMap = sorted);
+  }
+
+  /// Filters the artist map by the current search query.
+  Map<String, List<Song>> get _filteredArtistMap {
+    final q = _query.trim().toLowerCase();
+    if (q.isEmpty) return _artistMap;
+    final result = <String, List<Song>>{};
+    for (final entry in _artistMap.entries) {
+      if (entry.key.toLowerCase().contains(q)) {
+        // Whole artist matches — show all songs
+        result[entry.key] = entry.value;
+      } else {
+        // Check individual songs
+        final matching = entry.value
+            .where((s) =>
+                s.title.toLowerCase().contains(q) ||
+                s.album.toLowerCase().contains(q))
+            .toList();
+        if (matching.isNotEmpty) result[entry.key] = matching;
+      }
+    }
+    return result;
+  }
+
   Future<void> _applySongList(
     List<Song> songs, {
     required bool reset,
@@ -303,8 +338,6 @@ class _LibraryScreenState extends State<LibraryScreen> {
       hasMore: hasMore,
       offlineFallback: offlineFallback,
     );
-    // Playlist is built on tap so we never mutate an already-playing
-    // ConcatenatingAudioSource. Stale mapping is dropped on a full reset.
     if (reset) _playlist = null;
   }
 
@@ -321,13 +354,6 @@ class _LibraryScreenState extends State<LibraryScreen> {
     );
   }
 
-  // Watches for Wi-Fi/cellular/offline transitions. This doesn't touch
-  // playback directly — LockCachingAudioSource + the retry logic below
-  // already ride out a drop mid-track — it's specifically for the
-  // "connection came back after being offline" case: re-resolve which
-  // server answers fastest (private vs public may have flipped after a
-  // network change) and refresh the library/now-playing state instead
-  // of silently sitting on stale data.
   void _initConnectivity() {
     ConnectivityService.instance.current().then((t) {
       if (mounted) setState(() => _networkType = t);
@@ -341,7 +367,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
         if (!_offlineFallback) await _showCachedLibrary();
         return;
       }
-      if (!wasOffline) return; // only act on offline -> back-online edges
+      if (!wasOffline) return;
 
       setState(() => _reconnecting = true);
       final server = await _settings.resolveMusicServer();
@@ -365,6 +391,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
 
   @override
   void dispose() {
+    _tabController.dispose();
     _debounce?.cancel();
     _pollTimer?.cancel();
     _connectivitySub?.cancel();
@@ -418,12 +445,15 @@ class _LibraryScreenState extends State<LibraryScreen> {
           break;
       }
     });
+    // Keep artist map fresh when cache changes
+    if (evt.type == CacheEventType.completed ||
+        evt.type == CacheEventType.removed ||
+        evt.type == CacheEventType.batchFinished ||
+        evt.type == CacheEventType.cleared) {
+      _rebuildArtistMap();
+    }
   }
 
-  /// Kicks off downloading every song matching the current search across
-  /// the whole library, not just the page(s) scrolled into view — the
-  /// list on screen is paginated 100 at a time, so this pages through
-  /// /api/songs itself first to build the full set.
   Future<void> _downloadAllTapped() async {
     if (_batchActive) {
       _cache.cancelBatch();
@@ -501,10 +531,6 @@ class _LibraryScreenState extends State<LibraryScreen> {
     _cache.downloadAll(pending, _api!);
   }
 
-  /// Pages through /api/songs with the current search query until
-  /// exhausted. Separate from the incremental _songs/_offset state used
-  /// for on-screen scrolling — this always starts from offset 0 and
-  /// doesn't touch that state.
   Future<List<Song>> _fetchAllMatchingSongs() async {
     final all = <Song>[];
     var offset = 0;
@@ -557,7 +583,6 @@ class _LibraryScreenState extends State<LibraryScreen> {
   Future<void> _loadSongs({bool reset = false}) async {
     if (_api == null || _fetching) return;
 
-    // OS already knows there's no interface — don't sit on HTTP timeouts.
     if (reset && _networkType == NetworkType.offline) {
       await _showCachedLibrary();
       return;
@@ -611,13 +636,6 @@ class _LibraryScreenState extends State<LibraryScreen> {
     }
   }
 
-  // LockCachingAudioSource streams like a normal URL source on first play,
-  // but writes what it downloads to a local cache file as it goes — so
-  // replaying the same song (even with a flaky Tailscale connection) reads
-  // from disk instead of re-streaming. The MediaItem tag is what shows up
-  // on the lock screen / notification via just_audio_background, and
-  // (now that tracks live in a real playlist) is also what tells it
-  // there's a next/previous item to show skip buttons for.
   AudioSource _sourceFor(Song song) {
     final tag = MediaItem(
       id: song.id.toString(),
@@ -627,11 +645,6 @@ class _LibraryScreenState extends State<LibraryScreen> {
       duration: song.duration > 0 ? Duration(seconds: song.duration) : null,
     );
 
-    // Explicitly downloaded songs play straight from disk — no network,
-    // no dependence on the desktop being reachable, and it's what makes
-    // the offline-fallback song list above actually playable rather than
-    // just browsable. Only reachable songs (from a live /api/songs
-    // response, i.e. _api != null) fall through to network streaming.
     final local = _cache.isCached(song.id) ? _cache.localFile(song.id) : null;
     if (local != null && local.existsSync()) {
       return AudioSource.file(local.path, tag: tag);
@@ -641,9 +654,6 @@ class _LibraryScreenState extends State<LibraryScreen> {
     }
     final uri = Uri.parse(_api!.streamUrl(song.id));
     final dir = _remoteCacheDir;
-    // Pass an explicit cache file so we don't fire getTemporaryDirectory()
-    // once per song — that platform-channel storm was freezing the Music
-    // tab for a few seconds on first open.
     if (dir != null) {
       return LockCachingAudioSource(
         uri,
@@ -658,6 +668,11 @@ class _LibraryScreenState extends State<LibraryScreen> {
     _debounce?.cancel();
     _debounce = Timer(const Duration(milliseconds: 350), () {
       setState(() => _query = value);
+      if (_browseTab == _BrowseTab.artists) {
+        // Artist tab always filters locally — no server hit needed
+        _rebuildArtistMap();
+        return;
+      }
       if (_offlineFallback || _networkType == NetworkType.offline) {
         _showCachedLibrary();
       } else {
@@ -670,7 +685,6 @@ class _LibraryScreenState extends State<LibraryScreen> {
     if (source == _source) return;
     setState(() => _source = source);
     if (source == _PlaySource.pc) {
-      // Only one place should be making sound at a time.
       if (_hasPlayer) _player.pause();
       _startPolling();
     } else {
@@ -695,10 +709,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
     try {
       final np = await _api!.nowPlaying();
       if (mounted) setState(() => _nowPlaying = np);
-    } catch (_) {
-      // Desktop unreachable for a beat — keep showing the last known
-      // state rather than flashing an error on every missed poll.
-    }
+    } catch (_) {}
   }
 
   Future<void> _sendControl(String action, {int? songId, double? value}) async {
@@ -708,9 +719,6 @@ class _LibraryScreenState extends State<LibraryScreen> {
       await _api!.control(action, songId: songId, value: value);
       await _pollNowPlaying();
     } on ControlException catch (e) {
-      // Refresh state regardless — a transient failure (dropped response
-      // on the Tailscale hop) usually still means the command landed on
-      // the PC, so the next poll shows the real, current state.
       await _pollNowPlaying();
       if (mounted && !e.transient) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -798,6 +806,49 @@ class _LibraryScreenState extends State<LibraryScreen> {
     }
   }
 
+  /// Play a song directly from the Artists view — loads it as a single
+  /// track (no cross-artist playlist context).
+  Future<void> _playArtistSong(Song song) async {
+    // Find the song in _songs list to get a proper index if it's there
+    final idx = _songs.indexWhere((s) => s.id == song.id);
+    if (idx >= 0) {
+      _playIndex(idx);
+      return;
+    }
+    // Song only exists in cache (offline fallback with no server list)
+    // Load it as a single track
+    final gen = ++_playGen;
+    await _ensurePlayer();
+    await _ensureRemoteCacheDir();
+    if (gen != _playGen || !mounted) return;
+
+    // Inject it into _songs temporarily so mini player has context
+    final tempList = [song];
+    setState(() {
+      _songs
+        ..clear()
+        ..addAll(tempList);
+      _currentIndex = 0;
+      _offset = 1;
+      _total = 1;
+      _hasMore = false;
+    });
+    _playlist = null;
+
+    try {
+      await _player.setAudioSource(_sourceFor(song));
+      if (gen != _playGen) return;
+      await _player.play();
+      _midStreamRetries = 0;
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(explainError(e, doing: 'play this song'))),
+        );
+      }
+    }
+  }
+
   void _playNext() {
     if (_currentIndex + 1 >= _songs.length) return;
     if (_hasPlayer && _playlist != null && _player.hasNext) {
@@ -824,6 +875,8 @@ class _LibraryScreenState extends State<LibraryScreen> {
     }
   }
 
+  // ─── Build ────────────────────────────────────────────────────────────────
+
   @override
   Widget build(BuildContext context) {
     if (_api == null && _songs.isEmpty && !_offlineFallback) {
@@ -846,6 +899,16 @@ class _LibraryScreenState extends State<LibraryScreen> {
     return Scaffold(
       appBar: AppBar(
         title: Text(_total > 0 ? '$_total songs' : 'Library'),
+        bottom: TabBar(
+          controller: _tabController,
+          indicatorColor: AppColors.accent,
+          labelColor: AppColors.accent,
+          unselectedLabelColor: Colors.white38,
+          tabs: const [
+            Tab(icon: Icon(Icons.queue_music), text: 'Songs'),
+            Tab(icon: Icon(Icons.person), text: 'Artists'),
+          ],
+        ),
         actions: [
           if (!_offlineFallback)
             IconButton(
@@ -858,9 +921,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
                   : Icon(_batchActive
                       ? Icons.cancel_outlined
                       : Icons.download_for_offline_outlined),
-              tooltip: _batchActive
-                  ? 'Cancel downloading all'
-                  : 'Download all songs',
+              tooltip: _batchActive ? 'Cancel downloading all' : 'Download all songs',
               onPressed: _fetchingBatchList ? null : _downloadAllTapped,
             ),
           IconButton(
@@ -874,40 +935,23 @@ class _LibraryScreenState extends State<LibraryScreen> {
       ),
       body: Column(
         children: [
+          // ── Status banners ──────────────────────────────────────────────
           if (_reconnecting)
-            Container(
-              width: double.infinity,
-              color: Colors.amber.withValues(alpha: 0.15),
-              padding: const EdgeInsets.symmetric(vertical: 6),
-              child: const Text(
-                'Checking connection… downloaded songs are ready',
-                textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 12, color: Colors.amber),
-              ),
+            _StatusBanner(
+              message: 'Checking connection… downloaded songs are ready',
+              color: Colors.amber,
             )
           else if (_offlineFallback)
-            Container(
-              width: double.infinity,
-              color: Colors.amber.withValues(alpha: 0.15),
-              padding: const EdgeInsets.symmetric(vertical: 6),
-              child: Text(
-                _networkType == NetworkType.offline
-                    ? 'Offline — playing downloaded songs'
-                    : 'Desktop unreachable — showing downloaded songs only',
-                textAlign: TextAlign.center,
-                style: const TextStyle(fontSize: 12, color: Colors.amber),
-              ),
+            _StatusBanner(
+              message: _networkType == NetworkType.offline
+                  ? 'Offline — playing downloaded songs'
+                  : 'Desktop unreachable — showing downloaded songs only',
+              color: Colors.amber,
             )
           else if (_networkType == NetworkType.offline)
-            Container(
-              width: double.infinity,
-              color: Colors.redAccent.withValues(alpha: 0.15),
-              padding: const EdgeInsets.symmetric(vertical: 6),
-              child: const Text(
-                'Offline — showing cached data',
-                textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 12, color: Colors.redAccent),
-              ),
+            _StatusBanner(
+              message: 'Offline — showing cached data',
+              color: Colors.redAccent,
             )
           else if (_server != null)
             Padding(
@@ -917,6 +961,8 @@ class _LibraryScreenState extends State<LibraryScreen> {
                 style: const TextStyle(color: Colors.white24, fontSize: 11),
               ),
             ),
+
+          // ── Batch download progress ──────────────────────────────────────
           if (_batchActive)
             Container(
               width: double.infinity,
@@ -930,16 +976,13 @@ class _LibraryScreenState extends State<LibraryScreen> {
                       children: [
                         Text(
                           'Downloading $_batchDone/$_batchTotal…',
-                          style: const TextStyle(
-                              color: Colors.white70, fontSize: 12.5),
+                          style: const TextStyle(color: Colors.white70, fontSize: 12.5),
                         ),
                         const SizedBox(height: 4),
                         ClipRRect(
                           borderRadius: BorderRadius.circular(4),
                           child: LinearProgressIndicator(
-                            value: _batchTotal > 0
-                                ? _batchDone / _batchTotal
-                                : null,
+                            value: _batchTotal > 0 ? _batchDone / _batchTotal : null,
                             minHeight: 4,
                             backgroundColor: Colors.white12,
                           ),
@@ -949,14 +992,15 @@ class _LibraryScreenState extends State<LibraryScreen> {
                   ),
                   TextButton(
                     onPressed: () => _cache.cancelBatch(),
-                    child: const Text('Cancel',
-                        style: TextStyle(color: Colors.redAccent)),
+                    child: const Text('Cancel', style: TextStyle(color: Colors.redAccent)),
                   ),
                 ],
               ),
             ),
+
+          // ── Play source toggle ───────────────────────────────────────────
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+            padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
             child: SegmentedButton<_PlaySource>(
               segments: const [
                 ButtonSegment(
@@ -976,9 +1020,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
                 if (offline && s.first == _PlaySource.pc) {
                   ScaffoldMessenger.of(context).showSnackBar(
                     const SnackBar(
-                      content: Text(
-                        'PC speakers need a connection to the desktop',
-                      ),
+                      content: Text('PC speakers need a connection to the desktop'),
                     ),
                   );
                   return;
@@ -987,79 +1029,62 @@ class _LibraryScreenState extends State<LibraryScreen> {
               },
             ),
           ),
+
+          // ── Search ───────────────────────────────────────────────────────
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+            padding: const EdgeInsets.fromLTRB(16, 10, 16, 8),
             child: TextField(
               controller: _searchController,
               onChanged: _onSearchChanged,
               decoration: InputDecoration(
                 hintText: _offlineFallback
                     ? 'Search downloaded songs…'
-                    : 'Search songs, artists…',
-                prefixIcon: const Icon(Icons.search),
+                    : 'Search songs, artists, albums…',
+                prefixIcon: const Icon(Icons.search, color: Colors.white38),
+                suffixIcon: _query.isNotEmpty
+                    ? IconButton(
+                        icon: const Icon(Icons.clear, color: Colors.white38, size: 18),
+                        onPressed: () {
+                          _searchController.clear();
+                          _onSearchChanged('');
+                        },
+                      )
+                    : null,
                 filled: true,
                 fillColor: AppColors.card,
                 border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(10),
+                  borderRadius: BorderRadius.circular(12),
                   borderSide: BorderSide.none,
                 ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: const BorderSide(color: AppColors.border, width: 1),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: const BorderSide(color: AppColors.accent, width: 1.5),
+                ),
                 isDense: true,
+                contentPadding: const EdgeInsets.symmetric(vertical: 12, horizontal: 12),
               ),
             ),
           ),
-          if (_error != null)
-            Expanded(
-              child: Center(
-                child: Padding(
-                  padding: const EdgeInsets.all(24),
-                  child: Text(
-                    _error!,
-                    style: const TextStyle(color: Colors.redAccent),
-                    textAlign: TextAlign.center,
-                  ),
-                ),
-              ),
-            )
-          else
-            Expanded(
-              child: NotificationListener<ScrollNotification>(
-                onNotification: (notif) {
-                  if (_hasMore &&
-                      !_loading &&
-                      notif.metrics.pixels >
-                          notif.metrics.maxScrollExtent - 300) {
-                    _loadSongs();
-                  }
-                  return false;
-                },
-                child: ListView.builder(
-                  itemCount: _songs.length + (_loading ? 1 : 0),
-                  itemBuilder: (context, index) {
-                    if (index >= _songs.length) {
-                      return const Padding(
-                        padding: EdgeInsets.all(16),
-                        child: Center(child: CircularProgressIndicator()),
-                      );
-                    }
-                    final song = _songs[index];
-                    final active = _source == _PlaySource.phone
-                        ? index == _currentIndex
-                        : song.id == activeSongId;
-                    return SongTile(
-                      song: song,
-                      active: active,
-                      onTap: () => _onSongTap(index),
-                      cacheState: _cacheStateFor(song.id),
-                      downloadProgress: _downloadProgress[song.id],
-                      onCacheTap: () => _onCacheIconTap(song),
-                    );
-                  },
-                ),
-              ),
+
+          // ── Tab content ──────────────────────────────────────────────────
+          Expanded(
+            child: TabBarView(
+              controller: _tabController,
+              children: [
+                _buildSongsTab(activeSongId),
+                _buildArtistsTab(),
+              ],
             ),
+          ),
+
+          // ── PC hint ─────────────────────────────────────────────────────
           if (_source == _PlaySource.pc && !(_nowPlaying?.attached ?? false))
             Padding(
-              padding: const EdgeInsets.fromLTRB(24, 8, 24, 0),
+              padding: const EdgeInsets.fromLTRB(24, 8, 24, 4),
               child: Text(
                 'Open the Music Player page in the desktop app first — '
                 'that\'s what actually drives the PC\'s speakers.',
@@ -1067,6 +1092,8 @@ class _LibraryScreenState extends State<LibraryScreen> {
                 textAlign: TextAlign.center,
               ),
             ),
+
+          // ── Mini players ─────────────────────────────────────────────────
           if (_source == _PlaySource.phone &&
               _hasPlayer &&
               _currentIndex >= 0 &&
@@ -1088,13 +1115,251 @@ class _LibraryScreenState extends State<LibraryScreen> {
               duration: _nowPlaying!.duration,
               hasPrev: _nowPlaying!.hasPrev,
               hasNext: _nowPlaying!.hasNext,
-              onPlayPause: () => _sendControl(
-                  _nowPlaying!.isPlaying ? 'pause' : 'play'),
+              onPlayPause: () =>
+                  _sendControl(_nowPlaying!.isPlaying ? 'pause' : 'play'),
               onPrev: () => _sendControl('prev'),
               onNext: () => _sendControl('next'),
               onSeek: (v) => _sendControl('seek', value: v),
             ),
         ],
+      ),
+    );
+  }
+
+  // ─── Songs tab ────────────────────────────────────────────────────────────
+
+  Widget _buildSongsTab(int? activeSongId) {
+    if (_error != null) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Text(
+            _error!,
+            style: const TextStyle(color: Colors.redAccent),
+            textAlign: TextAlign.center,
+          ),
+        ),
+      );
+    }
+    return NotificationListener<ScrollNotification>(
+      onNotification: (notif) {
+        if (_hasMore &&
+            !_loading &&
+            notif.metrics.pixels > notif.metrics.maxScrollExtent - 300) {
+          _loadSongs();
+        }
+        return false;
+      },
+      child: ListView.builder(
+        itemCount: _songs.length + (_loading ? 1 : 0),
+        itemBuilder: (context, index) {
+          if (index >= _songs.length) {
+            return const Padding(
+              padding: EdgeInsets.all(16),
+              child: Center(child: CircularProgressIndicator()),
+            );
+          }
+          final song = _songs[index];
+          final active = _source == _PlaySource.phone
+              ? index == _currentIndex
+              : song.id == activeSongId;
+          return SongTile(
+            song: song,
+            active: active,
+            onTap: () => _onSongTap(index),
+            cacheState: _cacheStateFor(song.id),
+            downloadProgress: _downloadProgress[song.id],
+            onCacheTap: () => _onCacheIconTap(song),
+          );
+        },
+      ),
+    );
+  }
+
+  // ─── Artists tab ──────────────────────────────────────────────────────────
+
+  Widget _buildArtistsTab() {
+    final map = _filteredArtistMap;
+
+    if (map.isEmpty) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(32),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.person_off_outlined, color: Colors.white24, size: 48),
+              const SizedBox(height: 12),
+              Text(
+                _query.isNotEmpty
+                    ? 'No artists match "$_query"'
+                    : 'No downloaded songs yet.\nDownload songs to browse by artist offline.',
+                style: const TextStyle(color: Colors.white38, fontSize: 14),
+                textAlign: TextAlign.center,
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    return ListView.builder(
+      itemCount: map.length,
+      itemBuilder: (context, i) {
+        final artist = map.keys.elementAt(i);
+        final songs = map[artist]!;
+        final isExpanded = _expandedArtists.contains(artist);
+        final cachedCount = songs.where((s) => _cache.isCached(s.id)).length;
+
+        return Column(
+          children: [
+            // Artist header row
+            InkWell(
+              onTap: () {
+                setState(() {
+                  if (isExpanded) {
+                    _expandedArtists.remove(artist);
+                  } else {
+                    _expandedArtists.add(artist);
+                  }
+                });
+              },
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                decoration: BoxDecoration(
+                  border: Border(
+                    bottom: BorderSide(
+                      color: isExpanded
+                          ? AppColors.accent.withValues(alpha: 0.3)
+                          : AppColors.border,
+                      width: 0.5,
+                    ),
+                  ),
+                  color: isExpanded
+                      ? AppColors.accentMuted
+                      : null,
+                ),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 36,
+                      height: 36,
+                      decoration: BoxDecoration(
+                        color: AppColors.wine,
+                        borderRadius: BorderRadius.circular(18),
+                      ),
+                      child: const Icon(Icons.person, color: AppColors.accent, size: 18),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            artist,
+                            style: TextStyle(
+                              color: isExpanded ? AppColors.accent : Colors.white,
+                              fontWeight: isExpanded
+                                  ? FontWeight.w600
+                                  : FontWeight.normal,
+                              fontSize: 15,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          const SizedBox(height: 2),
+                          Row(
+                            children: [
+                              Text(
+                                '${songs.length} song${songs.length == 1 ? '' : 's'}',
+                                style: const TextStyle(
+                                    color: Colors.white38, fontSize: 12),
+                              ),
+                              if (cachedCount > 0) ...[
+                                const SizedBox(width: 6),
+                                const Icon(Icons.offline_pin,
+                                    size: 11, color: AppColors.accent),
+                                const SizedBox(width: 2),
+                                Text(
+                                  '$cachedCount',
+                                  style: const TextStyle(
+                                      color: AppColors.accent, fontSize: 12),
+                                ),
+                              ],
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                    Icon(
+                      isExpanded
+                          ? Icons.keyboard_arrow_up
+                          : Icons.keyboard_arrow_down,
+                      color: Colors.white24,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+
+            // Expanded songs
+            if (isExpanded)
+              ...songs.map((song) {
+                final active = _source == _PlaySource.phone &&
+                    _songs.isNotEmpty &&
+                    _currentIndex >= 0 &&
+                    _currentIndex < _songs.length &&
+                    _songs[_currentIndex].id == song.id;
+                return Container(
+                  decoration: const BoxDecoration(
+                    color: AppColors.accentMuted,
+                    border: Border(
+                      bottom: BorderSide(color: AppColors.border, width: 0.5),
+                    ),
+                  ),
+                  child: SongTile(
+                    song: song,
+                    active: active,
+                    onTap: () {
+                      if (_source == _PlaySource.pc && !_offlineFallback) {
+                        _sendControl('play_song', songId: song.id);
+                      } else {
+                        _playArtistSong(song);
+                      }
+                    },
+                    cacheState: _cacheStateFor(song.id),
+                    downloadProgress: _downloadProgress[song.id],
+                    onCacheTap: _api != null || _cache.isCached(song.id)
+                        ? () => _onCacheIconTap(song)
+                        : null,
+                  ),
+                );
+              }),
+          ],
+        );
+      },
+    );
+  }
+}
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+class _StatusBanner extends StatelessWidget {
+  final String message;
+  final Color color;
+
+  const _StatusBanner({required this.message, required this.color});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      color: color.withValues(alpha: 0.15),
+      padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 16),
+      child: Text(
+        message,
+        textAlign: TextAlign.center,
+        style: TextStyle(fontSize: 12, color: color),
       ),
     );
   }
