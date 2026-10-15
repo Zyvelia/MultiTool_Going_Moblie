@@ -21,6 +21,7 @@ class ModulePorts {
   static const gsm = 8453;
   static const chat = 8454;
   static const trust = 8455;
+  static const stream = 8457;
 }
 
 class SettingsService {
@@ -41,6 +42,9 @@ class SettingsService {
   static const _brickBreakerLbUrlKey = 'brick_breaker_leaderboard_url';
   static const _musicPreferredServerKey = 'music_preferred_server';
   static const _musicWifiOnlyKey = 'music_wifi_only_downloads';
+  static const _wolMacKey = 'wol_mac_address';
+  static const _wolBroadcastKey = 'wol_broadcast';
+  static const _streamCodeKey = 'stream_access_code';
 
   /// Default global leaderboard (Cloudflare Worker) — same board as the web game.
   static const brickBreakerLeaderboardDefaultUrl =
@@ -154,6 +158,28 @@ class SettingsService {
     await _storage.write(key: _chatApiKey, value: v);
   }
 
+  Future<String?> getWolMac() => _storage.read(key: _wolMacKey);
+
+  Future<void> setWolMac(String mac) async {
+    final v = mac.trim();
+    if (v.isEmpty) {
+      await _storage.delete(key: _wolMacKey);
+      return;
+    }
+    await _storage.write(key: _wolMacKey, value: v);
+  }
+
+  Future<String?> getWolBroadcast() => _storage.read(key: _wolBroadcastKey);
+
+  Future<void> setWolBroadcast(String broadcast) async {
+    final v = broadcast.trim();
+    if (v.isEmpty) {
+      await _storage.delete(key: _wolBroadcastKey);
+      return;
+    }
+    await _storage.write(key: _wolBroadcastKey, value: v);
+  }
+
   Future<void> setSocialInviteKey(String key) async {
     final v = key.trim();
     if (v.isEmpty) {
@@ -176,6 +202,8 @@ class SettingsService {
         return _gamesCodeKey;
       case 'yt':
         return _ytCodeKey;
+      case 'stream':
+        return _streamCodeKey;
       default:
         return '${moduleKey}_access_code';
     }
@@ -197,6 +225,7 @@ class SettingsService {
       'gsm' => ModulePorts.gsm,
       'chat' => ModulePorts.chat,
       'trust' => ModulePorts.trust,
+      'stream' => ModulePorts.stream,
       _ => throw ArgumentError('unknown module $moduleKey'),
     };
     return 'https://$host:$port';

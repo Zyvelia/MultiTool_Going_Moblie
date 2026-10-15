@@ -19,6 +19,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   final _gamesCodeController = TextEditingController();
   final _ytCodeController = TextEditingController();
   final _gsmCodeController = TextEditingController();
+  final _streamCodeController = TextEditingController();
   final _inviteController = TextEditingController();
   final _chatCodeController = TextEditingController();
   final _musicPublicUrlController = TextEditingController();
@@ -46,6 +47,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final gamesCode = await _settings.getAccessCode('games');
     final ytCode = await _settings.getAccessCode('yt');
     final gsmCode = await _settings.getAccessCode('gsm');
+    final streamCode = await _settings.getAccessCode('stream');
     final invite = await _settings.getSocialInviteKey();
     final chatCode = await _settings.getAccessCode('chat');
     final musicPublicUrl = await _settings.getMusicPublicUrl();
@@ -55,6 +57,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _gamesCodeController.text = gamesCode ?? '';
     _ytCodeController.text = ytCode ?? '';
     _gsmCodeController.text = gsmCode ?? '';
+    _streamCodeController.text = streamCode ?? '';
     _inviteController.text = invite ?? '';
     _chatCodeController.text = chatCode ?? '';
     _musicPublicUrlController.text = musicPublicUrl ?? '';
@@ -112,6 +115,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     await _settings.setAccessCode('games', _gamesCodeController.text);
     await _settings.setAccessCode('yt', _ytCodeController.text);
     await _settings.setAccessCode('gsm', _gsmCodeController.text);
+    await _settings.setAccessCode('stream', _streamCodeController.text);
     await _settings.setSocialInviteKey(_inviteController.text);
     await _settings.setAccessCode('chat', _chatCodeController.text);
     await _settings.setMusicPublicUrl(_musicPublicUrlController.text);
@@ -153,6 +157,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _gamesCodeController.clear();
     _ytCodeController.clear();
     _gsmCodeController.clear();
+    _streamCodeController.clear();
     _inviteController.clear();
     _chatCodeController.clear();
     _musicPublicUrlController.clear();
@@ -174,6 +179,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _gamesCodeController.dispose();
     _ytCodeController.dispose();
     _gsmCodeController.dispose();
+    _streamCodeController.dispose();
     _inviteController.dispose();
     _chatCodeController.dispose();
     _musicPublicUrlController.dispose();
@@ -365,6 +371,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
             obscureText: true,
             decoration: const InputDecoration(
               labelText: 'Game servers code (optional)',
+              border: OutlineInputBorder(),
+            ),
+          ),
+          const SizedBox(height: 10),
+          TextField(
+            controller: _streamCodeController,
+            obscureText: true,
+            decoration: const InputDecoration(
+              labelText: 'Stream Service code (optional)',
               border: OutlineInputBorder(),
             ),
           ),

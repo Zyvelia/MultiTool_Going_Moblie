@@ -9,6 +9,7 @@ import 'clipboard_screen.dart';
 import 'messages_screen.dart';
 import 'chat_screen.dart';
 import 'settings_screen.dart';
+import 'stream_service_screen.dart';
 import '../services/settings_service.dart';
 import '../services/app_navigation.dart';
 import 'ai_approvals_screen.dart';
@@ -30,7 +31,7 @@ class HomeShellState extends State<HomeShell> {
   /// Index of the Messages tab in [_index] / [screens] below — kept in
   /// sync manually since the list is a plain literal, not something we
   /// derive an index from. Update this if a tab is added/reordered.
-  static const int messagesTabIndex = 7;
+  static const int messagesTabIndex = 8;
 
   int _index = 0;
   late final PageController _pageController;
@@ -138,6 +139,7 @@ class HomeShellState extends State<HomeShell> {
       _KeepAlive(child: ClipboardScreen()),
       _KeepAlive(child: MessagesScreen()),
       _KeepAlive(child: ChatScreen()),
+      _KeepAlive(child: StreamServiceScreen()),
       _KeepAlive(child: SettingsScreen()),
     ];
 
@@ -161,6 +163,7 @@ class HomeShellState extends State<HomeShell> {
           NavigationDestination(icon: Icon(Icons.content_paste), label: 'Clip'),
           NavigationDestination(icon: Icon(Icons.chat_bubble_outline), label: 'Messages'),
           NavigationDestination(icon: Icon(Icons.smart_toy_outlined), label: 'Chat'),
+          NavigationDestination(icon: Icon(Icons.desktop_windows_outlined), label: 'PC'),
           NavigationDestination(icon: Icon(Icons.settings), label: 'Settings'),
         ],
       ),
