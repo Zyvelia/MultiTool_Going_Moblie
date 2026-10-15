@@ -187,6 +187,31 @@ def _set_gradle_property(props_path: Path, key: str, value: str) -> None:
     props_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
+def patch_plugin_compile_sdk() -> None:
+    """Raise compileSdk for Android library plugins (flutter_webrtc still uses API 31)."""
+    path = ROOT / "android/build.gradle.kts"
+    if not path.is_file():
+        raise SystemExit(f"Missing {path} — run flutter create first.")
+    text = path.read_text(encoding="utf-8")
+    if "ZS_PLUGIN_COMPILE_SDK_PATCH" in text:
+        print(f"Plugin compileSdk patch already in {path}")
+        return
+    block = """
+// ZS_PLUGIN_COMPILE_SDK_PATCH — align plugin modules with androidx deps (API 34+).
+import com.android.build.gradle.LibraryExtension
+
+subprojects {
+    afterEvaluate {
+        extensions.findByType<LibraryExtension>()?.apply {
+            compileSdk = 36
+        }
+    }
+}
+"""
+    path.write_text(text.rstrip() + "\n" + block, encoding="utf-8")
+    print(f"Patched plugin compileSdk in {path}")
+
+
 def patch_agp_kotlin_compat() -> None:
     """AGP 9+ defaults to built-in Kotlin; many Flutter plugins still apply kotlin-android.
 
@@ -264,6 +289,7 @@ def main() -> None:
     patch_manifest()
     patch_main_activity()
     patch_compile_sdk()
+    patch_plugin_compile_sdk()
     patch_core_library_desugaring()
     patch_agp_kotlin_compat()
     print("Android patches applied.")
