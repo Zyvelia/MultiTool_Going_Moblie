@@ -1,87 +1,48 @@
-import 'dart:convert';
-import 'dart:io';
-import 'package:http/http.dart' as http;
-import '../models/download_job.dart';
+# Same flow as push_to_github.bat — use this if you prefer PowerShell.
+param(
+    [string]$RepoUrl = "",
+    [string]$Message = "Update"
+)
 
-/// Talks to modules/yt_downloader/web_server.py.
-class YtApiService {
-  final String baseUrl;
-  final String? accessCode;
-  YtApiService(this.baseUrl, {this.accessCode});
+$ErrorActionPreference = "Stop"
+Set-Location $PSScriptRoot
 
-  Uri _uri(String path) => Uri.parse('$baseUrl$path');
-
-  Map<String, String> get _headers => {
-        'Content-Type': 'application/json',
-        if (accessCode != null && accessCode!.isNotEmpty)
-          'X-Access-Code': accessCode!,
-      };
-
-  Future<bool> checkStatus() async {
-    try {
-      final res =
-          await http.get(_uri('/api/status')).timeout(const Duration(seconds: 6));
-      return res.statusCode == 200;
-    } catch (_) {
-      return false;
-    }
-  }
-
-  Future<List<DownloadJob>> fetchJobs() async {
-    final res = await http.get(_uri('/api/jobs'));
-    if (res.statusCode != 200) {
-      throw Exception('Failed to load jobs (${res.statusCode})');
-    }
-    final data = jsonDecode(res.body) as Map<String, dynamic>;
-    return (data['jobs'] as List)
-        .map((j) => DownloadJob.fromJson(j as Map<String, dynamic>))
-        .toList();
-  }
-
-  Future<void> queueDownload({
-    required String url,
-    required String format, // 'mp3' | 'mp4'
-    required String type, // 'video' | 'playlist'
-  }) async {
-    final res = await http.post(_uri('/api/download'),
-        headers: _headers,
-        body: jsonEncode({'url': url, 'format': format, 'type': type}));
-    final data = jsonDecode(res.body) as Map<String, dynamic>;
-    if (res.statusCode != 200 || data['ok'] != true) {
-      throw Exception(data['error'] ?? 'Queue failed (${res.statusCode})');
-    }
-  }
-
-  /// Streams a completed job's file (by index into DownloadJob.files) to
-  /// [savePath], reporting 0.0–1.0 progress via [onProgress]. Throws if
-  /// the file is missing/moved or the request fails.
-  Future<void> downloadJobFile({
-    required String jobId,
-    required int index,
-    required String savePath,
-    void Function(double progress)? onProgress,
-  }) async {
-    final req = http.Request(
-      'GET',
-      _uri('/api/jobs/$jobId/download/$index'),
-    );
-    req.headers.addAll(_headers);
-    final streamed = await http.Client().send(req);
-    if (streamed.statusCode != 200 && streamed.statusCode != 206) {
-      throw Exception('Download failed (${streamed.statusCode})');
-    }
-
-    final total = streamed.contentLength ?? 0;
-    var received = 0;
-    final file = await File(savePath).open(mode: FileMode.write);
-    try {
-      await for (final chunk in streamed.stream) {
-        await file.writeFrom(chunk);
-        received += chunk.length;
-        if (total > 0) onProgress?.call(received / total);
-      }
-    } finally {
-      await file.close();
-    }
-  }
+if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
+    Write-Error "Git is not on PATH. Install Git for Windows first."
+    exit 1
 }
+
+if (-not (Test-Path ".git")) {
+    Write-Host "Initializing git repo..."
+    git init | Out-Null
+    git branch -M main
+}
+
+if ($RepoUrl) {
+    $hasOrigin = $false
+    try { git remote get-url origin 2>$null | Out-Null; $hasOrigin = $true } catch {}
+    if ($hasOrigin) {
+        git remote set-url origin $RepoUrl
+    } else {
+        git remote add origin $RepoUrl
+    }
+} elseif (-not (git remote get-url origin 2>$null)) {
+    Write-Error "No origin remote. Run once with: .\push_to_github.ps1 -RepoUrl https://github.com/you/repo.git"
+    exit 1
+}
+
+git add -A
+git diff --cached --quiet
+if ($LASTEXITCODE -ne 0) {
+    git commit -m $Message | Out-Null
+    Write-Host "Committed: $Message"
+} else {
+    Write-Host "No changes to commit."
+}
+
+git fetch origin main 2>$null | Out-Null
+Write-Host ""
+Write-Host "WARNING: Force-updating origin/main to match this folder."
+git push --force -u origin main
+Write-Host ""
+Write-Host "Done. Check GitHub Actions for the build."

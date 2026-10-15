@@ -1,0 +1,80 @@
+name: multi_tool_remote
+description: Unified remote for Zs Multi Tool - Vault, Gaming Hub, YouTube Downloader.
+publish_to: 'none'
+version: 2.6.0+3
+
+environment:
+  sdk: '>=3.10.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  http: ^1.2.0
+  crypto: ^3.0.6
+  flutter_secure_storage: ^11.0.0
+  just_audio: ^0.9.40
+  audio_service: ^0.18.15
+  just_audio_background: ^0.0.1-beta.17
+  # Game SFX only. just_audio routes through audio_service, which would put a
+  # sub-second blip on the lock screen and require a MediaItem tag.
+  audioplayers: ^6.8.1
+  share_plus: ^13.2.0
+  shared_preferences: ^2.3.3
+  path_provider: ^2.1.4
+  file_picker: ^12.0.0
+  gal: ^2.3.2
+  connectivity_plus: ^6.1.3
+  web_socket_channel: ^3.0.1
+  flutter_local_notifications: ^19.5.0
+  printing: ^5.13.4
+  pdf: ^3.11.1
+  firebase_core: ^4.2.1
+  firebase_messaging: ^16.0.4
+  webview_flutter: ^4.13.0
+  flutter_webrtc: ^0.12.12
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+  flutter_launcher_icons: ^0.14.1
+  flutter_native_splash: ^2.4.8
+
+# path_provider_foundation 2.6.0 can break unsigned IPA layout (Flutter #187752).
+dependency_overrides:
+  path_provider_foundation: 2.5.1
+  archive: ^4.1.0
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/icon/icon.png
+    - assets/games/brick_breaker/music/
+    - assets/games/brick_breaker/sfx/
+
+flutter_launcher_icons:
+  android: true
+  ios: true
+  # Opaque square, artwork inset to 85% so the HUD corner brackets survive
+  # iOS's squircle mask. Alpha stripping is belt-and-braces: iOS rejects any
+  # icon carrying an alpha channel.
+  image_path: "assets/icon/icon.png"
+  remove_alpha_ios: true
+  background_color_ios: "#070309"
+  # Android masks to circle/squircle/rounded-square, so the foreground is
+  # inset to 76% to keep the whole Z inside the guaranteed-visible centre.
+  adaptive_icon_background: "#070309"
+  adaptive_icon_foreground: "assets/icon/icon_foreground.png"
+
+flutter_native_splash:
+  color: "#070309"
+  image: assets/splash/splash.png
+  android_gravity: center
+  ios_content_mode: scaleAspectFit
+  # Android 12+ ignores the old splash entirely and masks its own to a circle,
+  # so the poster is replaced by the Z mark there.
+  android_12:
+    color: "#070309"
+    image: assets/splash/splash_android12.png
+    icon_background_color: "#070309"
+

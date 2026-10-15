@@ -122,6 +122,9 @@ def _add_screen_security(kt: str, path: Path) -> str:
 def patch_compile_sdk() -> None:
     path = ROOT / "android/app/build.gradle.kts"
     gradle = path.read_text(encoding="utf-8")
+    if re.search(r"compileSdk\s*=\s*37\b", gradle):
+        print(f"compileSdk already 37 in {path}")
+        return
     gradle, n = re.subn(
         r"compileSdk\s*=\s*flutter\.compileSdkVersion",
         "compileSdk = 37",
@@ -174,43 +177,51 @@ def patch_core_library_desugaring() -> None:
         print(f"Enabled core library desugaring in {path}")
 
 
-def patch_built_in_kotlin() -> None:
-    """Migrate the app module off the legacy kotlin-android plugin (AGP 9+)."""
+def _set_gradle_property(props_path: Path, key: str, value: str) -> None:
+    lines = [
+        ln
+        for ln in props_path.read_text(encoding="utf-8").splitlines()
+        if not ln.startswith(f"{key}=")
+    ]
+    lines.append(f"{key}={value}")
+    props_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def patch_agp_kotlin_compat() -> None:
+    """AGP 9+ defaults to built-in Kotlin; many Flutter plugins still apply kotlin-android.
+
+    Flutter's template already sets android.builtInKotlin=false. An older version of
+    this patch script flipped it to true, which breaks audio_service / WebRTC builds.
+    """
+    props_path = ROOT / "android/gradle.properties"
+    if not props_path.is_file():
+        raise SystemExit(f"Missing {props_path} — run flutter create first.")
+    _set_gradle_property(props_path, "android.builtInKotlin", "false")
+    _set_gradle_property(props_path, "android.newDsl", "false")
+    print(f"Set android.builtInKotlin=false in {props_path}")
+
     app_gradle = ROOT / "android/app/build.gradle.kts"
     text = app_gradle.read_text(encoding="utf-8")
-    original = text
-
-    text = re.sub(r'\s*id\("kotlin-android"\)\n', "\n", text)
-    text = re.sub(r'\s*id\("org\.jetbrains\.kotlin\.android"\)\n', "\n", text)
+    # Remove legacy built-in-Kotlin block if a previous patch run added it.
     text = re.sub(
-        r"\s*kotlinOptions\s*\{\s*jvmTarget\s*=\s*JavaVersion\.VERSION_17\.toString\(\)\s*\}\s*",
+        r"\nkotlin\s*\{\s*compilerOptions\s*\{[^}]*\}\s*\}\s*",
         "\n",
         text,
-        flags=re.MULTILINE,
+        flags=re.DOTALL,
     )
+    app_gradle.write_text(text, encoding="utf-8")
 
-    if "kotlin {" not in text and "compilerOptions" not in text:
-        kotlin_block = """
-kotlin {
-    compilerOptions {
-        jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17
-    }
-}
-"""
-        text = text.rstrip() + "\n" + kotlin_block
-
-    if text != original:
-        app_gradle.write_text(text, encoding="utf-8")
-        print(f"Migrated {app_gradle} to built-in Kotlin")
-
-    props_path = ROOT / "android/gradle.properties"
-    props = props_path.read_text(encoding="utf-8")
-    lines = [ln for ln in props.splitlines() if not ln.startswith("android.builtInKotlin=")]
-    lines.append("android.builtInKotlin=true")
-    if not any(ln.startswith("android.newDsl=") for ln in lines):
-        lines.append("android.newDsl=false")
-    props_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    print(f"Set android.builtInKotlin=true in {props_path}")
+    settings = ROOT / "android/settings.gradle.kts"
+    if settings.is_file():
+        st = settings.read_text(encoding="utf-8")
+        if "org.jetbrains.kotlin.android" not in st and "plugins {" in st:
+            st = st.replace(
+                "plugins {\n",
+                'plugins {\n    id("org.jetbrains.kotlin.android") version "2.4.0" apply false\n',
+                1,
+            )
+            settings.write_text(st, encoding="utf-8")
+            print(f"Added Kotlin Gradle plugin to {settings}")
 
 
 def patch_firebase() -> None:
@@ -254,7 +265,7 @@ def main() -> None:
     patch_main_activity()
     patch_compile_sdk()
     patch_core_library_desugaring()
-    patch_built_in_kotlin()
+    patch_agp_kotlin_compat()
     print("Android patches applied.")
 
 
