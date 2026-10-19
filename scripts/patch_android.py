@@ -193,7 +193,8 @@ def patch_plugin_compile_sdk() -> None:
     if not path.is_file():
         raise SystemExit(f"Missing {path} — run flutter create first.")
     text = path.read_text(encoding="utf-8")
-    import_lines = (
+    strip_prefixes = (
+        "@file:Suppress(\"DEPRECATION\")",
         "import com.android.build.gradle.LibraryExtension",
         "import org.gradle.api.ProjectState",
     )
@@ -202,25 +203,24 @@ def patch_plugin_compile_sdk() -> None:
     lines = [
         ln
         for ln in text.splitlines()
-        if ln.strip() not in import_lines
+        if ln.strip() not in strip_prefixes
     ]
     text = "\n".join(lines).strip() + "\n"
-    if not text.startswith(import_lines[0]):
-        text = "\n".join(import_lines) + "\n\n" + text
+    header = (
+        '@file:Suppress("DEPRECATION")\n\n'
+        "import com.android.build.gradle.LibraryExtension\n"
+    )
+    if not text.startswith("@file:Suppress"):
+        text = header + "\n" + text
     block = """
 // ZS_PLUGIN_COMPILE_SDK_PATCH - align plugin modules with androidx deps (API 34+).
 // flutter_webrtc still declares compileSdkVersion 31 in its own build.gradle;
-// pluginManager.withPlugin runs before that block, so override after configure.
+// override after its build.gradle is applied (withPlugin runs too early).
 subprojects {
-    val zsRaiseLibraryCompileSdk = {
+    afterEvaluate {
         extensions.findByType<LibraryExtension>()?.apply {
             compileSdk = 37
         }
-    }
-    if (state == ProjectState.EVALUATED) {
-        zsRaiseLibraryCompileSdk()
-    } else {
-        afterEvaluate { zsRaiseLibraryCompileSdk() }
     }
 }
 """
