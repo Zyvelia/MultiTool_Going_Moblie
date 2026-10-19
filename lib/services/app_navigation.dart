@@ -9,8 +9,6 @@ import '../screens/ai_approvals_screen.dart';
 /// so it can't just call Navigator.of(context) or reach HomeShell's state
 /// directly. This is the shared handle both sides use instead: main.dart
 /// attaches `homeShellKey` to the live HomeShell, and
-/// LocalNotificationService calls [goToMessages] whenever a message
-/// notification is tapped.
 class AppNavigation {
   AppNavigation._();
 
@@ -20,8 +18,6 @@ class AppNavigation {
   /// [consumePendingTabIndex] once it's up.
   static int? _pendingTabIndex;
   static String? _pendingApprovalId;
-
-  static void goToMessages() => _goToTab(HomeShellState.messagesTabIndex);
 
   static void goToAiApproval([String? approvalId]) {
     final state = homeShellKey.currentState;

@@ -11,6 +11,15 @@ String formatDuration(int seconds) {
 
 enum SongCacheState { none, downloading, cached }
 
+String _metadataLine(Song song) {
+  final artist = song.artist.trim();
+  final album = song.album.trim();
+  if (artist.isEmpty && album.isEmpty) return 'Unknown artist';
+  if (album.isEmpty) return artist;
+  if (artist.isEmpty) return album;
+  return '$artist · $album';
+}
+
 class SongTile extends StatelessWidget {
   final Song song;
   final bool active;
@@ -53,7 +62,7 @@ class SongTile extends StatelessWidget {
         ),
       ),
       subtitle: Text(
-        song.artist,
+        _metadataLine(song),
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
         style: const TextStyle(color: Colors.white54),

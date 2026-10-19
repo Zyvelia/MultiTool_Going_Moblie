@@ -22,6 +22,7 @@ class ModulePorts {
   static const chat = 8454;
   static const trust = 8455;
   static const stream = 8457;
+  static const wolRelay = 8458;
 }
 
 class SettingsService {
@@ -45,6 +46,9 @@ class SettingsService {
   static const _wolMacKey = 'wol_mac_address';
   static const _wolBroadcastKey = 'wol_broadcast';
   static const _wolPortKey = 'wol_udp_port';
+  static const _wolHideLanDetailsKey = 'wol_hide_lan_details';
+  static const _wolRelayHostKey = 'wol_relay_hostname';
+  static const _wolRelayCodeKey = 'wol_relay_access_code';
   static const defaultWolPort = 9;
   static const _streamCodeKey = 'stream_access_code';
 
@@ -198,6 +202,48 @@ class SettingsService {
     await _storage.write(key: _wolPortKey, value: port.toString());
   }
 
+  /// When true (default), PC control hides MAC / broadcast / port on screen.
+  Future<bool> getWolHideLanDetails() async {
+    final v = await _storage.read(key: _wolHideLanDetailsKey);
+    return v != 'false';
+  }
+
+  Future<void> setWolHideLanDetails(bool hide) async {
+    await _storage.write(key: _wolHideLanDetailsKey, value: hide.toString());
+  }
+
+  /// Tailscale hostname of the always-on home relay (e.g. your laptop).
+  Future<String?> getWolRelayHostname() => _storage.read(key: _wolRelayHostKey);
+
+  Future<void> setWolRelayHostname(String hostname) async {
+    var h = hostname.trim();
+    h = h.replaceFirst(RegExp(r'^https?://'), '');
+    h = h.split('/').first;
+    h = h.split(':').first;
+    if (h.isEmpty) {
+      await _storage.delete(key: _wolRelayHostKey);
+      return;
+    }
+    await _storage.write(key: _wolRelayHostKey, value: h);
+  }
+
+  Future<String?> getWolRelayAccessCode() => _storage.read(key: _wolRelayCodeKey);
+
+  Future<void> setWolRelayAccessCode(String code) async {
+    final v = code.trim();
+    if (v.isEmpty) {
+      await _storage.delete(key: _wolRelayCodeKey);
+      return;
+    }
+    await _storage.write(key: _wolRelayCodeKey, value: v);
+  }
+
+  Future<String?> wolRelayBaseUrl() async {
+    final host = await getWolRelayHostname();
+    if (host == null || host.isEmpty) return null;
+    return 'https://$host:${ModulePorts.wolRelay}';
+  }
+
   Future<void> setSocialInviteKey(String key) async {
     final v = key.trim();
     if (v.isEmpty) {
@@ -244,6 +290,7 @@ class SettingsService {
       'chat' => ModulePorts.chat,
       'trust' => ModulePorts.trust,
       'stream' => ModulePorts.stream,
+      'wol_relay' => ModulePorts.wolRelay,
       _ => throw ArgumentError('unknown module $moduleKey'),
     };
     return 'https://$host:$port';

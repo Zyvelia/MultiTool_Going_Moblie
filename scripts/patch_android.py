@@ -206,10 +206,12 @@ def patch_plugin_compile_sdk() -> None:
         text = f"{import_line}\n\n{text}"
     block = """
 // ZS_PLUGIN_COMPILE_SDK_PATCH — align plugin modules with androidx deps (API 34+).
+// Do not use afterEvaluate here: Flutter's evaluationDependsOn(":app") can evaluate
+// subprojects first, which triggers "already evaluated" on CI.
 subprojects {
-    afterEvaluate {
-        extensions.findByType<LibraryExtension>()?.apply {
-            compileSdk = 36
+    pluginManager.withPlugin("com.android.library") {
+        extensions.configure<LibraryExtension>("android") {
+            compileSdk = 37
         }
     }
 }

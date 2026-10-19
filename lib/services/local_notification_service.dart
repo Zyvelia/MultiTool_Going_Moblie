@@ -11,9 +11,8 @@ import 'dart:convert';
 /// (foreground or backgrounded-but-not-killed) — there's no
 /// FCM/APNs/background-service piece here, so if the OS has fully killed
 /// the app, notifications won't arrive until it's reopened, at which
-/// point MessagingApiService's fetchHistory() catch-up fills in whatever
-/// was missed. Treat this as "live while the app's running," not
-/// "always-on push," until a background-service follow-up is built.
+/// Treat this as "live while the app's running," not "always-on push,"
+/// unless a background handler is added for that feature.
 class LocalNotificationService {
   LocalNotificationService._();
   static final instance = LocalNotificationService._();
@@ -21,11 +20,6 @@ class LocalNotificationService {
   final _plugin = FlutterLocalNotificationsPlugin();
   bool _initialized = false;
 
-  /// Payload tag for message notifications — checked on tap so we only
-  /// deep-link into Messages for the notification type that actually
-  /// means something there, not any future notification kind that
-  /// reuses this same show() plumbing.
-  static const messagePayload = 'messages';
   static const aiApprovalPayload = 'ai_approval';
 
   Future<void> init() async {
@@ -90,13 +84,8 @@ class LocalNotificationService {
         }
       } catch (_) {}
     }
-    switch (payload) {
-      case messagePayload:
-        AppNavigation.goToMessages();
-        return;
-      case aiApprovalPayload:
-        AppNavigation.goToAiApproval();
-        return;
+    if (payload == aiApprovalPayload) {
+      AppNavigation.goToAiApproval();
     }
   }
 
@@ -122,24 +111,6 @@ class LocalNotificationService {
     await _plugin.show(id, title, body.isEmpty ? null : body, details, payload: payload);
   }
 
-  /// Notification id must fit a 32-bit int on Android — message ids are
-  /// arbitrary strings (uuid4 hex from the desktop, or our own
-  /// Message.newId() hex), so hash defensively rather than assuming any
-  /// particular format.
-  static int idFor(String messageId) => messageId.hashCode & 0x7FFFFFFF;
-
-  Future<void> showMessage({
-    required String messageId,
-    required String senderLabel,
-    required String text,
-  }) {
-    return show(
-      id: idFor(messageId),
-      title: senderLabel,
-      body: text,
-      channelId: 'z_messages',
-      channelName: 'Messages',
-      payload: messagePayload,
-    );
-  }
+  /// Notification id must fit a 32-bit int on Android.
+  static int idFor(String key) => key.hashCode & 0x7FFFFFFF;
 }

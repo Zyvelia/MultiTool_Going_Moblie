@@ -20,6 +20,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
   final _ytCodeController = TextEditingController();
   final _gsmCodeController = TextEditingController();
   final _streamCodeController = TextEditingController();
+  final _wolRelayHostController = TextEditingController();
+  final _wolRelayCodeController = TextEditingController();
   final _inviteController = TextEditingController();
   final _chatCodeController = TextEditingController();
   final _musicPublicUrlController = TextEditingController();
@@ -48,6 +50,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final ytCode = await _settings.getAccessCode('yt');
     final gsmCode = await _settings.getAccessCode('gsm');
     final streamCode = await _settings.getAccessCode('stream');
+    final wolRelayHost = await _settings.getWolRelayHostname();
+    final wolRelayCode = await _settings.getWolRelayAccessCode();
     final invite = await _settings.getSocialInviteKey();
     final chatCode = await _settings.getAccessCode('chat');
     final musicPublicUrl = await _settings.getMusicPublicUrl();
@@ -58,6 +62,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _ytCodeController.text = ytCode ?? '';
     _gsmCodeController.text = gsmCode ?? '';
     _streamCodeController.text = streamCode ?? '';
+    _wolRelayHostController.text = wolRelayHost ?? '';
+    _wolRelayCodeController.text = wolRelayCode ?? '';
     _inviteController.text = invite ?? '';
     _chatCodeController.text = chatCode ?? '';
     _musicPublicUrlController.text = musicPublicUrl ?? '';
@@ -116,6 +122,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
     await _settings.setAccessCode('yt', _ytCodeController.text);
     await _settings.setAccessCode('gsm', _gsmCodeController.text);
     await _settings.setAccessCode('stream', _streamCodeController.text);
+    await _settings.setWolRelayHostname(_wolRelayHostController.text);
+    await _settings.setWolRelayAccessCode(_wolRelayCodeController.text);
     await _settings.setSocialInviteKey(_inviteController.text);
     await _settings.setAccessCode('chat', _chatCodeController.text);
     await _settings.setMusicPublicUrl(_musicPublicUrlController.text);
@@ -180,6 +188,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _ytCodeController.dispose();
     _gsmCodeController.dispose();
     _streamCodeController.dispose();
+    _wolRelayHostController.dispose();
+    _wolRelayCodeController.dispose();
     _inviteController.dispose();
     _chatCodeController.dispose();
     _musicPublicUrlController.dispose();
@@ -380,6 +390,25 @@ class _SettingsScreenState extends State<SettingsScreen> {
             obscureText: true,
             decoration: const InputDecoration(
               labelText: 'Stream Service code (optional)',
+              border: OutlineInputBorder(),
+            ),
+          ),
+          const SizedBox(height: 10),
+          TextField(
+            controller: _wolRelayHostController,
+            decoration: const InputDecoration(
+              labelText: 'WoL relay hostname (laptop)',
+              hintText: 'Tailscale name of always-on home laptop',
+              border: OutlineInputBorder(),
+            ),
+          ),
+          const SizedBox(height: 10),
+          TextField(
+            controller: _wolRelayCodeController,
+            obscureText: true,
+            decoration: const InputDecoration(
+              labelText: 'WoL relay code (optional)',
+              hintText: 'Matches WOL_RELAY_CODE on the laptop',
               border: OutlineInputBorder(),
             ),
           ),

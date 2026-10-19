@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../services/settings_service.dart';
 import '../services/stream_api_service.dart';
 import '../services/user_facing_error.dart';
 import '../services/wol_service.dart';
+import '../services/wol_relay_service.dart';
 import '../theme/app_colors.dart';
 import 'remote_desktop_screen.dart';
 
@@ -29,6 +31,12 @@ class _StreamServiceScreenState extends State<StreamServiceScreen> {
   bool _wakeConnecting = false;
   String? _wakeStatus;
   String? _busyAction;
+  bool _hideLanDetails = true;
+  bool _revealLanValues = false;
+  bool _cancelWakeWait = false;
+  final _macFocus = FocusNode();
+  final _broadcastFocus = FocusNode();
+  final _portFocus = FocusNode();
 
   @override
   void initState() {
@@ -41,16 +49,50 @@ class _StreamServiceScreenState extends State<StreamServiceScreen> {
     _macController.dispose();
     _broadcastController.dispose();
     _portController.dispose();
+    _macFocus.dispose();
+    _broadcastFocus.dispose();
+    _portFocus.dispose();
     super.dispose();
+  }
+
+  void _dismissKeyboard() {
+    FocusManager.instance.primaryFocus?.unfocus();
+  }
+
+  Future<bool> _waitForPcOnline({
+    Duration timeout = const Duration(minutes: 4),
+    Duration interval = const Duration(seconds: 4),
+  }) async {
+    final end = DateTime.now().add(timeout);
+    while (DateTime.now().isBefore(end)) {
+      if (_cancelWakeWait || !mounted) return false;
+      if (await _api!.checkStatus()) return true;
+      await Future<void>.delayed(interval);
+    }
+    return false;
+  }
+
+  void _cancelWakeFlow() {
+    _cancelWakeWait = true;
+    setState(() {
+      _waking = false;
+      _wakeConnecting = false;
+      _wakeStatus = null;
+    });
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Stopped waiting for the PC.')),
+    );
   }
 
   Future<void> _init() async {
     final mac = await _settings.getWolMac();
     final broadcast = await _settings.getWolBroadcast();
     final port = await _settings.getWolPort();
+    final hideLan = await _settings.getWolHideLanDetails();
     _macController.text = mac ?? '';
     _broadcastController.text = broadcast ?? '255.255.255.255';
     _portController.text = port.toString();
+    _hideLanDetails = hideLan;
 
     final base = await _settings.baseUrl('stream');
     final code = await _settings.getAccessCode('stream');
@@ -118,15 +160,36 @@ class _StreamServiceScreenState extends State<StreamServiceScreen> {
     return WolService.parsePort(_portController.text, defaultPort: SettingsService.defaultWolPort);
   }
 
-  Future<void> _saveWolLocally() async {
+  bool get _obscureLanFields => !_revealLanValues;
+
+  String _packetSentSummary(WolSendResult sent) {
+    if (_hideLanDetails) {
+      return 'Magic packet sent. This does not confirm the PC woke.';
+    }
+    return 'Magic packet sent (${sent.bytesSent} bytes to ${sent.destination}:${sent.port}). '
+        'This does not confirm the PC woke — especially over Wi‑Fi from sleep.';
+  }
+
+  Future<void> _setHideLanDetails(bool hide) async {
+    await _settings.setWolHideLanDetails(hide);
+    if (!mounted) return;
+    setState(() {
+      _hideLanDetails = hide;
+      if (hide) _revealLanValues = false;
+    });
+  }
+
+  Future<void> _persistWolLocally({bool showSavedMessage = false}) async {
     await _settings.setWolMac(_macController.text.trim());
     await _settings.setWolBroadcast(_broadcastController.text.trim());
     await _settings.setWolPort(_readWolPort());
-    if (!mounted) return;
+    if (!mounted || !showSavedMessage) return;
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('LAN wake settings saved on this phone')),
     );
   }
+
+  Future<void> _saveWolLocally() => _persistWolLocally(showSavedMessage: true);
 
   Future<WolSendResult> _sendLanWakePacket() async {
     final mac = _macController.text.trim();
@@ -136,6 +199,32 @@ class _StreamServiceScreenState extends State<StreamServiceScreen> {
     final broadcast = _broadcastController.text.trim();
     final port = _readWolPort();
     return WolService.send(
+      macAddress: mac,
+      broadcast: broadcast.isEmpty ? '255.255.255.255' : broadcast,
+      port: port,
+    );
+  }
+
+  Future<WolRelayService> _relayClient() async {
+    final base = await _settings.wolRelayBaseUrl();
+    if (base == null || base.isEmpty) {
+      throw WolException(
+        'Set the WoL relay hostname in Settings (your always-on laptop\'s Tailscale name).',
+      );
+    }
+    final code = await _settings.getWolRelayAccessCode();
+    return WolRelayService(base, accessCode: code);
+  }
+
+  Future<WolSendResult> _sendRelayWakePacket() async {
+    final mac = _macController.text.trim();
+    if (mac.isEmpty) {
+      throw WolException('Enter the PC MAC address first.');
+    }
+    final broadcast = _broadcastController.text.trim();
+    final port = _readWolPort();
+    final relay = await _relayClient();
+    return relay.wake(
       macAddress: mac,
       broadcast: broadcast.isEmpty ? '255.255.255.255' : broadcast,
       port: port,
@@ -157,6 +246,8 @@ class _StreamServiceScreenState extends State<StreamServiceScreen> {
   }
 
   Future<void> _wakeAndConnect({bool openRemote = false}) async {
+    _dismissKeyboard();
+    _cancelWakeWait = false;
     setState(() {
       _waking = true;
       _wakeConnecting = true;
@@ -164,14 +255,16 @@ class _StreamServiceScreenState extends State<StreamServiceScreen> {
     });
     try {
       final sent = await _sendLanWakePacket();
-      await _saveWolLocally();
+      await _persistWolLocally();
       if (!mounted) return;
       if (_api == null) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              'Magic packet sent (${sent.bytesSent} bytes to ${sent.destination}:${sent.port}). '
-              'Set Tailscale hostname in Settings to check when the PC is online.',
+              _hideLanDetails
+                  ? 'Magic packet sent. Set Tailscale hostname in Settings to check when the PC is online.'
+                  : 'Magic packet sent (${sent.bytesSent} bytes to ${sent.destination}:${sent.port}). '
+                      'Set Tailscale hostname in Settings to check when the PC is online.',
             ),
           ),
         );
@@ -181,8 +274,8 @@ class _StreamServiceScreenState extends State<StreamServiceScreen> {
         () => _wakeStatus =
             'Magic packet sent — waiting for PC on Tailscale (not proof the PC woke)…',
       );
-      final up = await _api!.waitUntilOnline();
-      if (!mounted) return;
+      final up = await _waitForPcOnline();
+      if (!mounted || _cancelWakeWait) return;
       if (!up) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -214,6 +307,7 @@ class _StreamServiceScreenState extends State<StreamServiceScreen> {
           _waking = false;
           _wakeConnecting = false;
           _wakeStatus = null;
+          _cancelWakeWait = false;
         });
       }
     }
@@ -232,7 +326,9 @@ class _StreamServiceScreenState extends State<StreamServiceScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            'Config OK — packet would be ${r.bytesSent} bytes to ${r.destination}:${r.port} (not sent).',
+            _hideLanDetails
+                ? 'Config OK (not sent).'
+                : 'Config OK — packet would be ${r.bytesSent} bytes to ${r.destination}:${r.port} (not sent).',
           ),
         ),
       );
@@ -244,18 +340,92 @@ class _StreamServiceScreenState extends State<StreamServiceScreen> {
     }
   }
 
+  Future<void> _wakeViaRelay({bool waitForDesktop = false, bool openRemote = false}) async {
+    _dismissKeyboard();
+    _cancelWakeWait = false;
+    setState(() {
+      _waking = true;
+      _wakeConnecting = waitForDesktop;
+      _wakeStatus = waitForDesktop ? 'Asking home relay to send wake packet…' : null;
+    });
+    try {
+      final sent = await _sendRelayWakePacket();
+      await _persistWolLocally();
+      if (!mounted) return;
+      if (!waitForDesktop) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            duration: const Duration(seconds: 5),
+            content: Text(
+              _hideLanDetails
+                  ? 'Relay sent a magic packet. This does not confirm the desktop woke.'
+                  : 'Relay sent magic packet (${sent.bytesSent} bytes to ${sent.destination}:${sent.port}).',
+            ),
+          ),
+        );
+        return;
+      }
+      setState(
+        () => _wakeStatus = 'Relay sent wake — waiting for desktop on Tailscale…',
+      );
+      if (_api == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Wake sent via relay. Set the main Tailscale hostname in Settings to detect when the desktop is online.',
+            ),
+          ),
+        );
+        return;
+      }
+      final up = await _waitForPcOnline();
+      if (!mounted || _cancelWakeWait) return;
+      if (!up) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Desktop did not answer on Tailscale in time. The relay still sent the wake packet.',
+            ),
+          ),
+        );
+        return;
+      }
+      await _refresh();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Desktop reachable on Tailscale.')),
+      );
+      if (openRemote && _online && _caps?.remoteScreen == true) {
+        await _openRemoteDesktop();
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(explainError(e))),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _waking = false;
+          _wakeConnecting = false;
+          _wakeStatus = null;
+          _cancelWakeWait = false;
+        });
+      }
+    }
+  }
+
   Future<void> _wakePc() async {
+    _dismissKeyboard();
     setState(() => _waking = true);
     try {
       final sent = await _sendLanWakePacket();
-      await _saveWolLocally();
+      await _persistWolLocally();
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(
-            'Magic packet sent (${sent.bytesSent} bytes to ${sent.destination}:${sent.port}). '
-            'This does not confirm the PC woke — especially over Wi‑Fi from sleep.',
-          ),
+          duration: const Duration(seconds: 5),
+          content: Text(_packetSentSummary(sent)),
         ),
       );
     } catch (e) {
@@ -301,16 +471,26 @@ class _StreamServiceScreenState extends State<StreamServiceScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final keyboardOpen = MediaQuery.viewInsetsOf(context).bottom > 0;
     return Scaffold(
       appBar: AppBar(
         title: const Text('PC control'),
         actions: [
+          if (keyboardOpen)
+            TextButton(
+              onPressed: _dismissKeyboard,
+              child: const Text('Done'),
+            ),
           IconButton(onPressed: _loading ? null : _refresh, icon: const Icon(Icons.refresh)),
         ],
       ),
-      body: _loading
-          ? const Center(child: CircularProgressIndicator())
-          : ListView(
+      body: GestureDetector(
+        behavior: HitTestBehavior.translucent,
+        onTap: _dismissKeyboard,
+        child: _loading
+            ? const Center(child: CircularProgressIndicator())
+            : ListView(
+              keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
               padding: const EdgeInsets.all(16),
               children: [
                 if (_remoteError != null)
@@ -319,44 +499,104 @@ class _StreamServiceScreenState extends State<StreamServiceScreen> {
                 if (_wakeStatus != null)
                   Padding(
                     padding: const EdgeInsets.only(top: 8),
-                    child: Text(_wakeStatus!, style: const TextStyle(color: AppColors.muted)),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Text(_wakeStatus!, style: const TextStyle(color: AppColors.muted)),
+                        if (_wakeConnecting) ...[
+                          const SizedBox(height: 8),
+                          OutlinedButton(
+                            onPressed: _cancelWakeFlow,
+                            child: const Text('Cancel wait'),
+                          ),
+                        ],
+                      ],
+                    ),
                   ),
                 const SizedBox(height: 16),
-                Text('LAN wake (no Tailscale)', style: Theme.of(context).textTheme.titleMedium),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text('LAN wake (no Tailscale)', style: Theme.of(context).textTheme.titleMedium),
+                    ),
+                    IconButton(
+                      tooltip: _hideLanDetails ? 'Show LAN details' : 'Hide LAN details',
+                      onPressed: () => _setHideLanDetails(!_hideLanDetails),
+                      icon: Icon(_hideLanDetails ? Icons.visibility_off_outlined : Icons.visibility_outlined),
+                    ),
+                  ],
+                ),
                 const SizedBox(height: 6),
-                const Text(
-                  'Phone must be on the same home Wi‑Fi as the PC. '
-                  'Use your subnet broadcast (e.g. 192.168.1.255) — iOS may block 255.255.255.255. '
-                  'Wake from sleep over Wi‑Fi depends on your adapter, driver, and Windows settings.',
-                  style: TextStyle(color: AppColors.muted, fontSize: 12),
-                ),
-                const SizedBox(height: 8),
-                TextField(
-                  controller: _macController,
-                  decoration: const InputDecoration(
-                    labelText: 'PC MAC address',
-                    hintText: 'aa:bb:cc:dd:ee:ff',
+                if (_hideLanDetails) ...[
+                  Text(
+                    _macController.text.trim().isEmpty
+                        ? 'LAN wake not set up — tap the eye to enter MAC and broadcast.'
+                        : 'LAN wake ready — details hidden. Tap the eye to view or edit.',
+                    style: const TextStyle(color: AppColors.muted, fontSize: 12),
                   ),
-                ),
-                const SizedBox(height: 8),
-                TextField(
-                  controller: _broadcastController,
-                  decoration: const InputDecoration(
-                    labelText: 'LAN broadcast address',
-                    hintText: '192.168.1.255',
+                  const SizedBox(height: 12),
+                ] else ...[
+                  const Text(
+                    'Phone must be on the same home Wi‑Fi as the PC. '
+                    'Use your subnet broadcast (e.g. 192.168.1.255) — iOS may block 255.255.255.255. '
+                    'Wake from sleep over Wi‑Fi depends on your adapter, driver, and Windows settings.',
+                    style: TextStyle(color: AppColors.muted, fontSize: 12),
                   ),
-                  keyboardType: TextInputType.number,
-                ),
-                const SizedBox(height: 8),
-                TextField(
-                  controller: _portController,
-                  decoration: const InputDecoration(
-                    labelText: 'UDP port',
-                    hintText: '9',
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: _macController,
+                    focusNode: _macFocus,
+                    obscureText: _obscureLanFields,
+                    enableSuggestions: false,
+                    autocorrect: false,
+                    textInputAction: TextInputAction.next,
+                    onSubmitted: (_) => _broadcastFocus.requestFocus(),
+                    decoration: InputDecoration(
+                      labelText: 'PC MAC address',
+                      hintText: 'aa-bb-cc-dd-ee-ff (as in ipconfig)',
+                      suffixIcon: IconButton(
+                        tooltip: _revealLanValues ? 'Hide values' : 'Show values',
+                        onPressed: () => setState(() => _revealLanValues = !_revealLanValues),
+                        icon: Icon(_revealLanValues ? Icons.visibility_outlined : Icons.visibility_off_outlined),
+                      ),
+                    ),
                   ),
-                  keyboardType: TextInputType.number,
-                ),
-                const SizedBox(height: 12),
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: _broadcastController,
+                    focusNode: _broadcastFocus,
+                    obscureText: _obscureLanFields,
+                    enableSuggestions: false,
+                    autocorrect: false,
+                    textInputAction: TextInputAction.next,
+                    onSubmitted: (_) => _portFocus.requestFocus(),
+                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    inputFormatters: [
+                      FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
+                    ],
+                    decoration: const InputDecoration(
+                      labelText: 'LAN broadcast address',
+                      hintText: '192.168.1.255',
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: _portController,
+                    focusNode: _portFocus,
+                    obscureText: _obscureLanFields,
+                    enableSuggestions: false,
+                    autocorrect: false,
+                    textInputAction: TextInputAction.done,
+                    onSubmitted: (_) => _dismissKeyboard(),
+                    keyboardType: TextInputType.number,
+                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                    decoration: const InputDecoration(
+                      labelText: 'UDP port',
+                      hintText: '9',
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                ],
                 FilledButton.icon(
                   onPressed: _waking ? null : _wakePc,
                   icon: _waking && !_wakeConnecting
@@ -389,6 +629,38 @@ class _StreamServiceScreenState extends State<StreamServiceScreen> {
                 const SizedBox(height: 8),
                 TextButton(onPressed: _saveWolLocally, child: const Text('Save LAN wake settings')),
                 TextButton(onPressed: _validateWolConfig, child: const Text('Validate config (no send)')),
+                const SizedBox(height: 24),
+                Text('Home relay (away from Wi‑Fi)', style: Theme.of(context).textTheme.titleMedium),
+                const SizedBox(height: 6),
+                const Text(
+                  'Your always-on laptop runs scripts/wol_relay.py on the home LAN and forwards wake packets. '
+                  'Set its Tailscale name under Settings → WoL relay. Main hostname stays the desktop.',
+                  style: TextStyle(color: AppColors.muted, fontSize: 12),
+                ),
+                const SizedBox(height: 12),
+                OutlinedButton.icon(
+                  onPressed: _waking ? null : () => _wakeViaRelay(waitForDesktop: false),
+                  icon: const Icon(Icons.laptop_mac),
+                  label: const Text('Wake desktop via home relay'),
+                ),
+                const SizedBox(height: 8),
+                OutlinedButton.icon(
+                  onPressed: _wakeConnecting ? null : () => _wakeViaRelay(waitForDesktop: true),
+                  icon: _wakeConnecting
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.cloud_sync),
+                  label: const Text('Relay wake, then wait for desktop'),
+                ),
+                const SizedBox(height: 8),
+                OutlinedButton.icon(
+                  onPressed: _wakeConnecting ? null : () => _wakeViaRelay(waitForDesktop: true, openRemote: true),
+                  icon: const Icon(Icons.desktop_windows),
+                  label: const Text('Relay wake, then open remote desktop'),
+                ),
                 const SizedBox(height: 24),
                 Text('While PC is online (Tailscale)', style: Theme.of(context).textTheme.titleMedium),
                 const SizedBox(height: 8),
@@ -437,6 +709,7 @@ class _StreamServiceScreenState extends State<StreamServiceScreen> {
                 ],
               ],
             ),
+      ),
     );
   }
 }

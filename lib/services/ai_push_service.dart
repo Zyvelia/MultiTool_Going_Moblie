@@ -9,10 +9,15 @@ import 'app_navigation.dart';
 import 'local_notification_service.dart';
 import 'settings_service.dart';
 
+@pragma('vm:entry-point')
+Future<void> aiFirebaseBackgroundHandler(RemoteMessage message) async {
+  // FCM may display notification payloads while the app is backgrounded.
+  // AI approval handling is wired in [AiPushService] when the app is alive.
+}
+
 /// Push channel dedicated to the PC AI approval system.
 ///
-/// This is intentionally independent from the Inbox/WebView system. It uses
-/// the phone's normal OS push notification tray through FCM, while the
+/// Uses the phone's normal OS push notification tray through FCM, while the
 /// approval API remains a separate HTTP API on the PC AI server.
 class AiPushService {
   AiPushService._();

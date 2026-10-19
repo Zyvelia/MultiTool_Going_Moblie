@@ -4,7 +4,6 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:just_audio_background/just_audio_background.dart';
 import 'screens/home_shell.dart';
 import 'services/local_notification_service.dart';
-import 'services/inbox_push_service.dart';
 import 'services/ai_push_service.dart';
 import 'theme/app_theme.dart';
 
@@ -21,10 +20,10 @@ Future<void> main() async {
 
   // Firebase client files are project-specific and are intentionally not
   // included in source control. Until they are added under firebase/, the
-  // app still starts normally; Inbox push notifications simply remain off.
+  // app still starts normally; FCM-backed features simply remain off.
   try {
     await Firebase.initializeApp();
-    FirebaseMessaging.onBackgroundMessage(inboxFirebaseBackgroundHandler);
+    FirebaseMessaging.onBackgroundMessage(aiFirebaseBackgroundHandler);
   } catch (e) {
     debugPrint('Firebase is not configured yet: $e');
   }
@@ -67,10 +66,6 @@ Future<void> main() async {
       androidNotificationOngoing: true,
     );
     LocalNotificationService.instance.requestPermission();
-    // These are separate notification channels. AI approvals do not depend
-    // on the Inbox/WebView system. Both use the phone's normal OS push tray
-    // through FCM.
-    InboxPushService.instance.start();
     AiPushService.instance.start();
   });
 }

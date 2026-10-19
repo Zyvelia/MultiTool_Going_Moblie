@@ -9,6 +9,7 @@ import '../models/server_profile.dart';
 import '../models/song.dart';
 import '../services/api_service.dart';
 import '../services/connectivity_service.dart';
+import '../services/library_index_service.dart';
 import '../services/offline_cache_service.dart';
 import '../services/settings_service.dart';
 import '../services/user_facing_error.dart';
@@ -61,7 +62,12 @@ class _LibraryScreenState extends State<LibraryScreen>
   int _midStreamRetries = 0;
 
   final _cache = OfflineCacheService.instance;
+  final _libraryIndex = LibraryIndexService.instance;
   StreamSubscription<CacheEvent>? _cacheSub;
+  StreamSubscription<LibraryIndexState>? _libraryIndexSub;
+  bool _indexSyncing = false;
+  int _indexSyncDone = 0;
+  int _indexSyncTotal = 0;
   final Map<int, double> _downloadProgress = {};
   bool _batchActive = false;
   int _batchDone = 0;
@@ -99,6 +105,7 @@ class _LibraryScreenState extends State<LibraryScreen>
     _init();
     _initConnectivity();
     _cacheSub = _cache.events.listen(_onCacheEvent);
+    _libraryIndexSub = _libraryIndex.events.listen(_onLibraryIndexEvent);
   }
 
   AudioPlayer get _player => _audio!;
@@ -185,6 +192,8 @@ class _LibraryScreenState extends State<LibraryScreen>
 
   Future<void> _init() async {
     await _cache.ensureReady();
+    await _libraryIndex.ensureReady();
+    if (_libraryIndex.count > 0) _rebuildArtistMap();
     unawaited(_ensureRemoteCacheDir());
 
     if (_cache.count > 0) {
@@ -226,7 +235,46 @@ class _LibraryScreenState extends State<LibraryScreen>
   Future<void> _connectAndLoadLive() async {
     await _resolveServer();
     if (!mounted || _api == null) return;
+    _rebuildArtistMap();
+    unawaited(_syncLibraryIndex());
     await _loadSongs(reset: true);
+  }
+
+  Future<void> _syncLibraryIndex() async {
+    final api = _api;
+    if (api == null) return;
+    await _libraryIndex.sync(api);
+  }
+
+  void _onLibraryIndexEvent(LibraryIndexState state) {
+    if (!mounted) return;
+    switch (state.event) {
+      case LibraryIndexEvent.syncStarted:
+        setState(() {
+          _indexSyncing = true;
+          _indexSyncDone = 0;
+          _indexSyncTotal = 0;
+        });
+        break;
+      case LibraryIndexEvent.syncProgress:
+        setState(() {
+          _indexSyncing = true;
+          _indexSyncDone = state.done;
+          _indexSyncTotal = state.total;
+        });
+        break;
+      case LibraryIndexEvent.syncFinished:
+        setState(() {
+          _indexSyncing = false;
+          _indexSyncDone = state.done;
+          _indexSyncTotal = state.total;
+        });
+        _rebuildArtistMap();
+        break;
+      case LibraryIndexEvent.syncFailed:
+        setState(() => _indexSyncing = false);
+        break;
+    }
   }
 
   void _paintSongs(
@@ -285,20 +333,25 @@ class _LibraryScreenState extends State<LibraryScreen>
     _paintSongs(list, reset: true, offlineFallback: true);
   }
 
-  /// Rebuilds the artist → songs map from the current _songs list.
-  /// Called whenever _songs changes, or when switching to Artists tab.
+  /// Artist browse uses the synced library index when available (full PC
+  /// metadata). Falls back to the current song page or downloads only.
   void _rebuildArtistMap() {
-    final map = <String, List<Song>>{};
-    final source =
-        _offlineFallback ? _cache.downloadedSongs : _songs;
-    for (final song in source) {
-      final artist = song.artist.isNotEmpty ? song.artist : 'Unknown Artist';
-      (map[artist] ??= []).add(song);
+    Map<String, List<Song>> sorted;
+    if (_libraryIndex.count > 0) {
+      sorted = _libraryIndex.artistMap();
+    } else {
+      final map = <String, List<Song>>{};
+      final source =
+          _offlineFallback ? _cache.downloadedSongs : _songs;
+      for (final song in source) {
+        final artist =
+            song.artist.isNotEmpty ? song.artist : 'Unknown Artist';
+        (map[artist] ??= []).add(song);
+      }
+      sorted = Map.fromEntries(
+        map.entries.toList()..sort((a, b) => a.key.compareTo(b.key)),
+      );
     }
-    // Sort artists alphabetically
-    final sorted = Map.fromEntries(
-      map.entries.toList()..sort((a, b) => a.key.compareTo(b.key)),
-    );
     if (mounted) setState(() => _artistMap = sorted);
   }
 
@@ -397,6 +450,7 @@ class _LibraryScreenState extends State<LibraryScreen>
     _connectivitySub?.cancel();
     _cacheSub?.cancel();
     _indexSub?.cancel();
+    _libraryIndexSub?.cancel();
     _audio?.dispose();
     _searchController.dispose();
     super.dispose();
@@ -953,11 +1007,20 @@ class _LibraryScreenState extends State<LibraryScreen>
               message: 'Offline — showing cached data',
               color: Colors.redAccent,
             )
+          else if (_indexSyncing)
+            _StatusBanner(
+              message: _indexSyncTotal > 0
+                  ? 'Syncing library metadata $_indexSyncDone / $_indexSyncTotal…'
+                  : 'Syncing library metadata for Artists…',
+              color: AppColors.accent,
+            )
           else if (_server != null)
             Padding(
               padding: const EdgeInsets.only(top: 4),
               child: Text(
-                'Connected: ${_server!.label}',
+                _libraryIndex.lastSynced != null && _libraryIndex.count > 0
+                    ? 'Connected: ${_server!.label} · ${_libraryIndex.count} tracks indexed'
+                    : 'Connected: ${_server!.label}',
                 style: const TextStyle(color: Colors.white24, fontSize: 11),
               ),
             ),
@@ -1193,7 +1256,9 @@ class _LibraryScreenState extends State<LibraryScreen>
               Text(
                 _query.isNotEmpty
                     ? 'No artists match "$_query"'
-                    : 'No downloaded songs yet.\nDownload songs to browse by artist offline.',
+                    : _indexSyncing
+                        ? 'Syncing artist info from your PC…'
+                        : 'No artist metadata yet.\nConnect to your desktop and open Library to sync.',
                 style: const TextStyle(color: Colors.white38, fontSize: 14),
                 textAlign: TextAlign.center,
               ),
