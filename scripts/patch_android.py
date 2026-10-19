@@ -193,26 +193,34 @@ def patch_plugin_compile_sdk() -> None:
     if not path.is_file():
         raise SystemExit(f"Missing {path} — run flutter create first.")
     text = path.read_text(encoding="utf-8")
-    import_line = "import com.android.build.gradle.LibraryExtension"
+    import_lines = (
+        "import com.android.build.gradle.LibraryExtension",
+        "import org.gradle.api.ProjectState",
+    )
     if "// ZS_PLUGIN_COMPILE_SDK_PATCH" in text:
         text = text[: text.index("// ZS_PLUGIN_COMPILE_SDK_PATCH")].rstrip() + "\n"
     lines = [
         ln
         for ln in text.splitlines()
-        if ln.strip() != import_line
+        if ln.strip() not in import_lines
     ]
     text = "\n".join(lines).strip() + "\n"
-    if not text.startswith(import_line):
-        text = f"{import_line}\n\n{text}"
+    if not text.startswith(import_lines[0]):
+        text = "\n".join(import_lines) + "\n\n" + text
     block = """
-// ZS_PLUGIN_COMPILE_SDK_PATCH — align plugin modules with androidx deps (API 34+).
-// Do not use afterEvaluate here: Flutter's evaluationDependsOn(":app") can evaluate
-// subprojects first, which triggers "already evaluated" on CI.
+// ZS_PLUGIN_COMPILE_SDK_PATCH - align plugin modules with androidx deps (API 34+).
+// flutter_webrtc still declares compileSdkVersion 31 in its own build.gradle;
+// pluginManager.withPlugin runs before that block, so override after configure.
 subprojects {
-    pluginManager.withPlugin("com.android.library") {
-        extensions.configure<LibraryExtension>("android") {
+    val zsRaiseLibraryCompileSdk = {
+        extensions.findByType<LibraryExtension>()?.apply {
             compileSdk = 37
         }
+    }
+    if (state == ProjectState.EVALUATED) {
+        zsRaiseLibraryCompileSdk()
+    } else {
+        afterEvaluate { zsRaiseLibraryCompileSdk() }
     }
 }
 """
