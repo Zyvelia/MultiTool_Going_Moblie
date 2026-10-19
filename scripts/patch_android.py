@@ -193,13 +193,19 @@ def patch_plugin_compile_sdk() -> None:
     if not path.is_file():
         raise SystemExit(f"Missing {path} — run flutter create first.")
     text = path.read_text(encoding="utf-8")
-    if "ZS_PLUGIN_COMPILE_SDK_PATCH" in text:
-        print(f"Plugin compileSdk patch already in {path}")
-        return
+    import_line = "import com.android.build.gradle.LibraryExtension"
+    if "// ZS_PLUGIN_COMPILE_SDK_PATCH" in text:
+        text = text[: text.index("// ZS_PLUGIN_COMPILE_SDK_PATCH")].rstrip() + "\n"
+    lines = [
+        ln
+        for ln in text.splitlines()
+        if ln.strip() != import_line
+    ]
+    text = "\n".join(lines).strip() + "\n"
+    if not text.startswith(import_line):
+        text = f"{import_line}\n\n{text}"
     block = """
 // ZS_PLUGIN_COMPILE_SDK_PATCH — align plugin modules with androidx deps (API 34+).
-import com.android.build.gradle.LibraryExtension
-
 subprojects {
     afterEvaluate {
         extensions.findByType<LibraryExtension>()?.apply {
