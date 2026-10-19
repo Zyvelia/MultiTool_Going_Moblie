@@ -4,9 +4,14 @@ import 'dart:io';
 
 import 'package:http/http.dart' as http;
 
+import 'wol_service.dart';
+
 /// One English sentence (plus a next step) for anything the phone surfaces.
 String explainError(Object error, {String? doing}) {
   if (error is AppIssue) {
+    return error.message;
+  }
+  if (error is WolException) {
     return error.message;
   }
   if (error is TimeoutException) {

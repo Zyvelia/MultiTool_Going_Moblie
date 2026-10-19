@@ -34,7 +34,7 @@ def main() -> None:
     text = _insert_after_dict_open(
         text,
         "\t<key>NSLocalNetworkUsageDescription</key>\n"
-        "\t<string>Used to find printers on your Wi-Fi network so notes can be printed.</string>\n"
+        "\t<string>Used for Wake-on-LAN to your PC, printers on your Wi-Fi, and other local network features.</string>\n"
         "\t<key>NSBonjourServices</key>\n"
         "\t<array>\n"
         "\t\t<string>_ipp._tcp</string>\n"

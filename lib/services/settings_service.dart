@@ -44,6 +44,8 @@ class SettingsService {
   static const _musicWifiOnlyKey = 'music_wifi_only_downloads';
   static const _wolMacKey = 'wol_mac_address';
   static const _wolBroadcastKey = 'wol_broadcast';
+  static const _wolPortKey = 'wol_udp_port';
+  static const defaultWolPort = 9;
   static const _streamCodeKey = 'stream_access_code';
 
   /// Default global leaderboard (Cloudflare Worker) — same board as the web game.
@@ -178,6 +180,22 @@ class SettingsService {
       return;
     }
     await _storage.write(key: _wolBroadcastKey, value: v);
+  }
+
+  Future<int> getWolPort() async {
+    final raw = await _storage.read(key: _wolPortKey);
+    if (raw == null || raw.isEmpty) return defaultWolPort;
+    final port = int.tryParse(raw);
+    if (port == null || port < 1 || port > 65535) return defaultWolPort;
+    return port;
+  }
+
+  Future<void> setWolPort(int port) async {
+    if (port < 1 || port > 65535) {
+      await _storage.delete(key: _wolPortKey);
+      return;
+    }
+    await _storage.write(key: _wolPortKey, value: port.toString());
   }
 
   Future<void> setSocialInviteKey(String key) async {
