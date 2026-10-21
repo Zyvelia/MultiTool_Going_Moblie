@@ -247,11 +247,12 @@ def patch_plugin_compile_sdk() -> None:
         text = header + "\n" + text
     block = """
 // ZS_PLUGIN_COMPILE_SDK_PATCH - align plugin modules with androidx deps (API 34+).
-// flutter_webrtc still declares compileSdkVersion 31 in its own build.gradle;
-// override after its build.gradle is applied (withPlugin runs too early).
+// flutter_webrtc still declares compileSdkVersion 31 in its own build.gradle.
+// Do not use afterEvaluate here — Flutter's evaluationDependsOn(":app") can
+// evaluate subprojects before that hook is registered (AGP 9 / Gradle 9 CI).
 subprojects {
-    afterEvaluate {
-        extensions.findByType<LibraryExtension>()?.apply {
+    pluginManager.withPlugin("com.android.library") {
+        extensions.configure<LibraryExtension> {
             compileSdk = 37
         }
     }
