@@ -5,7 +5,9 @@ import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 
 import '../models/shared_file.dart';
+import '../services/connectivity_service.dart';
 import '../services/quick_send_api_service.dart';
+import '../services/quick_send_outbox_service.dart';
 import '../services/user_facing_error.dart';
 import '../services/settings_service.dart';
 import '../theme/app_colors.dart';
@@ -19,9 +21,11 @@ class QuickSendScreen extends StatefulWidget {
 
 class _QuickSendScreenState extends State<QuickSendScreen> {
   final _settings = SettingsService();
+  final _localOutbox = QuickSendOutboxService.instance;
   QuickSendApiService? _api;
 
   List<SharedFile> _outbox = [];
+  List<QueuedSendItem> _queued = [];
   bool _loading = false;
   String? _error;
 
@@ -37,10 +41,26 @@ class _QuickSendScreenState extends State<QuickSendScreen> {
   }
 
   Future<void> _init() async {
+    await _localOutbox.ensureReady();
+    setState(() => _queued = _localOutbox.items);
     final base = await _settings.baseUrl('send');
     if (base == null) return;
     setState(() => _api = QuickSendApiService(base));
     await _loadOutbox();
+    await _flushLocalQueue();
+  }
+
+  Future<void> _flushLocalQueue() async {
+    if (_api == null || _queued.isEmpty) return;
+    final net = await ConnectivityService.instance.current();
+    if (net == NetworkType.offline) return;
+    final sent = await _localOutbox.flush(_api!);
+    if (sent > 0 && mounted) {
+      setState(() {
+        _queued = _localOutbox.items;
+        _sendStatus = 'Sent $sent queued file${sent == 1 ? '' : 's'} to PC ✓';
+      });
+    }
   }
 
   Future<void> _loadOutbox() async {
@@ -64,7 +84,7 @@ class _QuickSendScreenState extends State<QuickSendScreen> {
   }
 
   Future<void> _pickAndSend({required bool photosOnly}) async {
-    if (_api == null || _sending) return;
+    if (_sending) return;
     final pickedFiles = await FilePicker.pickFiles(
       type: photosOnly ? FileType.media : FileType.any,
       allowMultiple: photosOnly,
@@ -77,14 +97,42 @@ class _QuickSendScreenState extends State<QuickSendScreen> {
     });
 
     var sent = 0;
+    var queued = 0;
     try {
       for (final picked in pickedFiles) {
         final path = picked.path;
         if (path == null) continue;
-        await _api!.sendFile(path, filenameOverride: picked.name);
-        sent++;
+        if (_api == null) {
+          await _localOutbox.enqueue(path, filename: picked.name);
+          queued++;
+          continue;
+        }
+        try {
+          await _api!.sendFile(path, filenameOverride: picked.name);
+          sent++;
+        } catch (e) {
+          final net = await ConnectivityService.instance.current();
+          if (net == NetworkType.offline ||
+              explainError(e).toLowerCase().contains('reachable')) {
+            await _localOutbox.enqueue(path, filename: picked.name);
+            queued++;
+          } else {
+            rethrow;
+          }
+        }
       }
-      setState(() => _sendStatus = sent == 1 ? 'Sent to PC ✓' : 'Sent $sent files to PC ✓');
+      setState(() {
+        _queued = _localOutbox.items;
+        if (queued > 0 && sent == 0) {
+          _sendStatus =
+              'PC unreachable — queued $queued file${queued == 1 ? '' : 's'} on this phone';
+        } else if (queued > 0) {
+          _sendStatus = 'Sent $sent; queued $queued for later';
+        } else {
+          _sendStatus =
+              sent == 1 ? 'Sent to PC ✓' : 'Sent $sent files to PC ✓';
+        }
+      });
     } catch (e) {
       setState(() => _sendStatus = explainError(e, doing: 'send that file to the PC'));
     } finally {
@@ -163,32 +211,66 @@ class _QuickSendScreenState extends State<QuickSendScreen> {
 
   @override
   Widget build(BuildContext context) {
-    if (_api == null) {
-      return const Scaffold(
-        body: Center(
-          child: Text(
-            'Set your PC hostname in Settings first.',
-            style: TextStyle(color: Colors.white54),
-          ),
-        ),
-      );
-    }
-
     return Scaffold(
       appBar: AppBar(
         title: const Text('Quick Send'),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.refresh),
-            onPressed: _loadOutbox,
-          ),
+          if (_queued.isNotEmpty)
+            TextButton(
+              onPressed: _api == null ? null : _flushLocalQueue,
+              child: Text('Upload ${_queued.length}'),
+            ),
+          if (_api != null)
+            IconButton(
+              icon: const Icon(Icons.refresh),
+              onPressed: _loadOutbox,
+            ),
         ],
       ),
       body: RefreshIndicator(
-        onRefresh: _loadOutbox,
+        onRefresh: () async {
+          await _flushLocalQueue();
+          if (_api != null) await _loadOutbox();
+        },
         child: ListView(
           padding: const EdgeInsets.all(16),
           children: [
+            if (_queued.isNotEmpty) ...[
+              Text(
+                'QUEUED ON PHONE (${_queued.length})',
+                style: TextStyle(
+                  color: Colors.amber.withValues(alpha: 0.9),
+                  fontSize: 11,
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: 0.5,
+                ),
+              ),
+              const SizedBox(height: 8),
+              ..._queued.map(
+                (q) => ListTile(
+                  leading: const Icon(Icons.cloud_upload_outlined),
+                  title: Text(q.filename, maxLines: 1, overflow: TextOverflow.ellipsis),
+                  subtitle: Text('Waiting for PC · ${q.queuedAt}'),
+                  trailing: IconButton(
+                    icon: const Icon(Icons.close),
+                    onPressed: () async {
+                      await _localOutbox.remove(q.id);
+                      if (mounted) setState(() => _queued = _localOutbox.items);
+                    },
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+            ],
+            if (_api == null)
+              const Padding(
+                padding: EdgeInsets.only(bottom: 12),
+                child: Text(
+                  'Set hostname in Settings to browse the PC outbox. '
+                  'You can still queue uploads offline.',
+                  style: TextStyle(color: Colors.white54, fontSize: 12),
+                ),
+              ),
             Text(
               'SEND TO PC',
               style: TextStyle(
@@ -222,6 +304,7 @@ class _QuickSendScreenState extends State<QuickSendScreen> {
                 ),
               ],
             ),
+            if (_api != null) ...[
             const SizedBox(height: 28),
             Text(
               'GET FROM PC',
@@ -320,6 +403,7 @@ class _QuickSendScreenState extends State<QuickSendScreen> {
                   ),
                 );
               }),
+            ],
           ],
         ),
       ),

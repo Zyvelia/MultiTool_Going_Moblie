@@ -10,27 +10,31 @@ import '../models/song.dart';
 import '../services/api_service.dart';
 import '../services/connectivity_service.dart';
 import '../services/library_index_service.dart';
+import '../services/app_navigation.dart';
+import '../services/music_auto_cache_service.dart';
 import '../services/offline_cache_service.dart';
 import '../services/settings_service.dart';
 import '../services/user_facing_error.dart';
 import '../theme/app_colors.dart';
 import '../widgets/mini_player.dart';
+import '../widgets/now_playing_sheet.dart';
 import '../widgets/pc_mini_player.dart';
 import '../widgets/song_tile.dart';
 import 'downloads_screen.dart';
 
 enum _PlaySource { phone, pc }
 
-enum _BrowseTab { songs, artists }
+enum _BrowseTab { songs, artists, downloads }
 
 class LibraryScreen extends StatefulWidget {
   const LibraryScreen({super.key});
 
   @override
-  State<LibraryScreen> createState() => _LibraryScreenState();
+  State<LibraryScreen> createState() => LibraryScreenState();
 }
 
-class _LibraryScreenState extends State<LibraryScreen>
+class LibraryScreenState extends State<LibraryScreen>
+
     with SingleTickerProviderStateMixin {
   final _settings = SettingsService();
   ApiService? _api;
@@ -78,6 +82,8 @@ class _LibraryScreenState extends State<LibraryScreen>
   ConcatenatingAudioSource? _playlist;
   int _playGen = 0;
   Directory? _remoteCacheDir;
+  bool _shuffleEnabled = false;
+  LoopMode _loopMode = LoopMode.off;
 
   // Browse tab state
   _BrowseTab _browseTab = _BrowseTab.songs;
@@ -91,12 +97,15 @@ class _LibraryScreenState extends State<LibraryScreen>
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 2, vsync: this)
+    _tabController = TabController(length: 3, vsync: this)
       ..addListener(() {
         if (!_tabController.indexIsChanging) {
           setState(() {
-            _browseTab =
-                _tabController.index == 0 ? _BrowseTab.songs : _BrowseTab.artists;
+            _browseTab = switch (_tabController.index) {
+              0 => _BrowseTab.songs,
+              1 => _BrowseTab.artists,
+              _ => _BrowseTab.downloads,
+            };
           });
           // When switching to Artists tab, always build from cache
           if (_browseTab == _BrowseTab.artists) _rebuildArtistMap();
@@ -105,6 +114,7 @@ class _LibraryScreenState extends State<LibraryScreen>
     _init();
     _initConnectivity();
     _cacheSub = _cache.events.listen(_onCacheEvent);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _handleExternalOpen());
     _libraryIndexSub = _libraryIndex.events.listen(_onLibraryIndexEvent);
   }
 
@@ -119,6 +129,15 @@ class _LibraryScreenState extends State<LibraryScreen>
       if (mounted && index != null && index != _currentIndex) {
         setState(() => _currentIndex = index);
       }
+    });
+    player.processingStateStream.listen((state) {
+      if (state != ProcessingState.completed) return;
+      if (_playlist != null) return;
+      if (_loopMode == LoopMode.one) return;
+      if (_currentIndex < 0 || _currentIndex >= _songs.length) return;
+      final atEnd = _currentIndex + 1 >= _songs.length;
+      if (atEnd && _loopMode == LoopMode.off) return;
+      _playNext();
     });
     player.playbackEventStream.listen(
       (_) {},
@@ -161,6 +180,7 @@ class _LibraryScreenState extends State<LibraryScreen>
           _sourceFor(song),
           initialPosition: resumeAt,
         );
+        await _applyPlaybackModes();
         await _player.play();
         _midStreamRetries = 0;
         _playlist = null;
@@ -195,6 +215,7 @@ class _LibraryScreenState extends State<LibraryScreen>
     await _libraryIndex.ensureReady();
     if (_libraryIndex.count > 0) _rebuildArtistMap();
     unawaited(_ensureRemoteCacheDir());
+    unawaited(_ensurePlayer());
 
     if (_cache.count > 0) {
       _paintCachedLibrary();
@@ -355,26 +376,70 @@ class _LibraryScreenState extends State<LibraryScreen>
     if (mounted) setState(() => _artistMap = sorted);
   }
 
-  /// Filters the artist map by the current search query.
+  /// Artists tab: match artist **names** only; each hit shows their full catalog.
   Map<String, List<Song>> get _filteredArtistMap {
     final q = _query.trim().toLowerCase();
     if (q.isEmpty) return _artistMap;
     final result = <String, List<Song>>{};
     for (final entry in _artistMap.entries) {
       if (entry.key.toLowerCase().contains(q)) {
-        // Whole artist matches — show all songs
         result[entry.key] = entry.value;
-      } else {
-        // Check individual songs
-        final matching = entry.value
-            .where((s) =>
-                s.title.toLowerCase().contains(q) ||
-                s.album.toLowerCase().contains(q))
-            .toList();
-        if (matching.isNotEmpty) result[entry.key] = matching;
       }
     }
     return result;
+  }
+
+  List<Song> _songsForLibraryPlayback({bool applyQuery = true}) {
+    List<Song> list;
+    if (_libraryIndex.count > 0) {
+      list = List<Song>.from(_libraryIndex.songs);
+    } else if (_offlineFallback) {
+      list = List<Song>.from(_cache.downloadedSongs);
+    } else {
+      list = List<Song>.from(_songs);
+    }
+    if (applyQuery && _query.trim().isNotEmpty) {
+      final q = _query.trim().toLowerCase();
+      list = list
+          .where((s) =>
+              s.title.toLowerCase().contains(q) ||
+              s.artist.toLowerCase().contains(q) ||
+              s.album.toLowerCase().contains(q))
+          .toList();
+    }
+    return list;
+  }
+
+  List<Song> _songsForArtist(String artist) {
+    return List<Song>.from(
+      _artistMap[artist] ?? _filteredArtistMap[artist] ?? const [],
+    );
+  }
+
+  Future<void> _applyPlaybackModes() async {
+    if (!_hasPlayer) return;
+    await _player.setShuffleModeEnabled(_shuffleEnabled);
+    await _player.setLoopMode(_loopMode);
+  }
+
+  void _toggleShuffle() {
+    if (!_hasPlayer) {
+      setState(() => _shuffleEnabled = !_shuffleEnabled);
+      return;
+    }
+    setState(() => _shuffleEnabled = !_shuffleEnabled);
+    _player.setShuffleModeEnabled(_shuffleEnabled);
+  }
+
+  void _toggleRepeat() {
+    setState(() {
+      _loopMode = switch (_loopMode) {
+        LoopMode.off => LoopMode.all,
+        LoopMode.all => LoopMode.one,
+        LoopMode.one => LoopMode.off,
+      };
+    });
+    if (_hasPlayer) _player.setLoopMode(_loopMode);
   }
 
   Future<void> _applySongList(
@@ -392,6 +457,14 @@ class _LibraryScreenState extends State<LibraryScreen>
       offlineFallback: offlineFallback,
     );
     if (reset) _playlist = null;
+    if (_api != null && !offlineFallback && songs.isNotEmpty) {
+      unawaited(
+        MusicAutoCacheService.instance.runIfAllowed(
+          librarySongs: _songs,
+          api: _api!,
+        ),
+      );
+    }
   }
 
   Future<void> _showCachedLibrary() async {
@@ -400,11 +473,25 @@ class _LibraryScreenState extends State<LibraryScreen>
     _playlist = null;
   }
 
-  ConcatenatingAudioSource _playlistFrom(List<Song> songs) {
+  /// Small window around the tapped track — building hundreds of
+  /// [LockCachingAudioSource]s before the first byte was the main tap delay.
+  ConcatenatingAudioSource _playlistWindow(
+    List<Song> songs,
+    int focusIndex, {
+    int maxItems = 32,
+  }) {
+    final start = focusIndex > 0 ? focusIndex - 1 : 0;
+    final end = (start + maxItems).clamp(0, songs.length);
+    final slice = songs.sublist(start, end);
     return ConcatenatingAudioSource(
       useLazyPreparation: true,
-      children: [for (final s in songs) _sourceFor(s)],
+      children: [for (final s in slice) _sourceFor(s)],
     );
+  }
+
+  int _playlistWindowInitialIndex(List<Song> songs, int focusIndex, int maxItems) {
+    final start = focusIndex > 0 ? focusIndex - 1 : 0;
+    return focusIndex - start;
   }
 
   void _initConnectivity() {
@@ -690,6 +777,20 @@ class _LibraryScreenState extends State<LibraryScreen>
     }
   }
 
+  void handleExternalOpen() => _handleExternalOpen();
+
+  void _handleExternalOpen() {
+    if (!AppNavigation.pendingOpenNowPlaying) return;
+    if (!mounted) return;
+    if (!_hasPlayer ||
+        _currentIndex < 0 ||
+        _currentIndex >= _songs.length) {
+      return;
+    }
+    AppNavigation.clearPendingOpenNowPlaying();
+    _openNowPlaying();
+  }
+
   AudioSource _sourceFor(Song song) {
     final tag = MediaItem(
       id: song.id.toString(),
@@ -697,6 +798,7 @@ class _LibraryScreenState extends State<LibraryScreen>
       artist: song.artist,
       album: song.album,
       duration: song.duration > 0 ? Duration(seconds: song.duration) : null,
+      artUri: _cache.artUriFor(song.id),
     );
 
     final local = _cache.isCached(song.id) ? _cache.localFile(song.id) : null;
@@ -721,10 +823,22 @@ class _LibraryScreenState extends State<LibraryScreen>
   void _onSearchChanged(String value) {
     _debounce?.cancel();
     _debounce = Timer(const Duration(milliseconds: 350), () {
-      setState(() => _query = value);
+      setState(() {
+        _query = value;
+        if (_browseTab == _BrowseTab.artists) {
+          final q = value.trim().toLowerCase();
+          if (q.isEmpty) {
+            _expandedArtists.clear();
+          } else {
+            for (final name in _artistMap.keys) {
+              if (name.toLowerCase().contains(q)) {
+                _expandedArtists.add(name);
+              }
+            }
+          }
+        }
+      });
       if (_browseTab == _BrowseTab.artists) {
-        // Artist tab always filters locally — no server hit needed
-        _rebuildArtistMap();
         return;
       }
       if (_offlineFallback || _networkType == NetworkType.offline) {
@@ -793,43 +907,76 @@ class _LibraryScreenState extends State<LibraryScreen>
 
   Future<void> _playIndex(int index) async {
     if (index < 0 || index >= _songs.length) return;
+    await _playQueue(List<Song>.from(_songs), startIndex: index);
+  }
+
+  Future<void> _playQueue(
+    List<Song> queue, {
+    int startIndex = 0,
+    bool? shuffle,
+  }) async {
+    if (queue.isEmpty || startIndex < 0 || startIndex >= queue.length) return;
+    if (shuffle != null) {
+      setState(() => _shuffleEnabled = shuffle);
+    }
     final gen = ++_playGen;
-    final song = _songs[index];
+    final song = queue[startIndex];
     final local = _cache.isCached(song.id);
 
+    unawaited(_ensureRemoteCacheDir());
     await _ensurePlayer();
-    await _ensureRemoteCacheDir();
     if (gen != _playGen || !mounted) return;
 
-    setState(() => _currentIndex = index);
+    setState(() {
+      _songs
+        ..clear()
+        ..addAll(queue);
+      _currentIndex = startIndex;
+      _offset = queue.length;
+      _total = queue.length;
+      _hasMore = false;
+    });
 
-    Future<void> playAt(int i) async {
-      final source = _playlistFrom(List<Song>.from(_songs));
+    Future<void> playSingle() async {
+      await _player.setAudioSource(_sourceFor(song));
+      if (gen != _playGen) return;
+      _playlist = null;
+      unawaited(_applyPlaybackModes());
+      await _player.play();
+      _midStreamRetries = 0;
+    }
+
+    Future<void> playWindowed(int i) async {
+      final source = _playlistWindow(queue, i);
+      final initial = _playlistWindowInitialIndex(queue, i, 32);
       await _player.setAudioSource(
         source,
-        initialIndex: i,
+        initialIndex: initial,
         initialPosition: Duration.zero,
       );
       if (gen != _playGen) return;
       _playlist = source;
+      unawaited(_applyPlaybackModes());
       await _player.play();
       _midStreamRetries = 0;
     }
 
-    Future<void> playFile() async {
-      await _player.setAudioSource(_sourceFor(song));
-      if (gen != _playGen) return;
-      _playlist = null;
-      await _player.play();
-      _midStreamRetries = 0;
+    final useWindowedPlaylist = _shuffleEnabled && queue.length > 1;
+
+    Future<void> startPlayback() async {
+      if (useWindowedPlaylist) {
+        await playWindowed(startIndex);
+      } else {
+        await playSingle();
+      }
     }
 
     try {
-      await playAt(index);
+      await startPlayback();
     } catch (e) {
       if (local) {
         try {
-          await playFile();
+          await playSingle();
         } catch (e2) {
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
@@ -843,7 +990,7 @@ class _LibraryScreenState extends State<LibraryScreen>
       for (var attempt = 1; attempt <= 3; attempt++) {
         if (gen != _playGen) return;
         try {
-          await playAt(index);
+          await startPlayback();
           return;
         } catch (err) {
           if (attempt == 3) {
@@ -860,65 +1007,73 @@ class _LibraryScreenState extends State<LibraryScreen>
     }
   }
 
-  /// Play a song directly from the Artists view — loads it as a single
-  /// track (no cross-artist playlist context).
-  Future<void> _playArtistSong(Song song) async {
-    // Find the song in _songs list to get a proper index if it's there
-    final idx = _songs.indexWhere((s) => s.id == song.id);
-    if (idx >= 0) {
-      _playIndex(idx);
+  Future<void> _playLibrary({required bool shuffle}) async {
+    if (_source == _PlaySource.pc && !_offlineFallback) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Queue play works on “This phone”')),
+      );
       return;
     }
-    // Song only exists in cache (offline fallback with no server list)
-    // Load it as a single track
-    final gen = ++_playGen;
-    await _ensurePlayer();
-    await _ensureRemoteCacheDir();
-    if (gen != _playGen || !mounted) return;
-
-    // Inject it into _songs temporarily so mini player has context
-    final tempList = [song];
-    setState(() {
-      _songs
-        ..clear()
-        ..addAll(tempList);
-      _currentIndex = 0;
-      _offset = 1;
-      _total = 1;
-      _hasMore = false;
-    });
-    _playlist = null;
-
-    try {
-      await _player.setAudioSource(_sourceFor(song));
-      if (gen != _playGen) return;
-      await _player.play();
-      _midStreamRetries = 0;
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(explainError(e, doing: 'play this song'))),
-        );
-      }
+    final list = _songsForLibraryPlayback();
+    if (list.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Nothing to play')),
+      );
+      return;
     }
+    await _playQueue(list, startIndex: 0, shuffle: shuffle);
+  }
+
+  Future<void> _playArtistCatalog(String artist, {required bool shuffle}) async {
+    final songs = _songsForArtist(artist);
+    if (songs.isEmpty) return;
+    if (_source == _PlaySource.pc && !_offlineFallback) {
+      _sendControl('play_song', songId: songs.first.id);
+      return;
+    }
+    await _playQueue(songs, startIndex: 0, shuffle: shuffle);
+  }
+
+  Future<void> _playArtistSong(Song song, {required String artist}) async {
+    final pool = _songsForArtist(artist);
+    final idx = pool.indexWhere((s) => s.id == song.id);
+    if (pool.isNotEmpty && idx >= 0) {
+      if (_source == _PlaySource.pc && !_offlineFallback) {
+        _sendControl('play_song', songId: song.id);
+        return;
+      }
+      await _playQueue(pool, startIndex: idx);
+      return;
+    }
+    if (_source == _PlaySource.pc && !_offlineFallback) {
+      _sendControl('play_song', songId: song.id);
+      return;
+    }
+    await _playQueue([song], startIndex: 0);
   }
 
   void _playNext() {
-    if (_currentIndex + 1 >= _songs.length) return;
-    if (_hasPlayer && _playlist != null && _player.hasNext) {
-      _player.seekToNext();
-      return;
+    if (_hasPlayer && _playlist != null) {
+      if (_player.hasNext || _loopMode != LoopMode.off) {
+        _player.seekToNext();
+        return;
+      }
     }
-    _playIndex(_currentIndex + 1);
+    if (_currentIndex + 1 < _songs.length) {
+      _playIndex(_currentIndex + 1);
+    }
   }
 
   void _playPrev() {
-    if (_currentIndex <= 0) return;
-    if (_hasPlayer && _playlist != null && _player.hasPrevious) {
-      _player.seekToPrevious();
-      return;
+    if (_hasPlayer && _playlist != null) {
+      if (_player.hasPrevious || _loopMode != LoopMode.off) {
+        _player.seekToPrevious();
+        return;
+      }
     }
-    _playIndex(_currentIndex - 1);
+    if (_currentIndex > 0) {
+      _playIndex(_currentIndex - 1);
+    }
   }
 
   void _onSongTap(int index) {
@@ -927,6 +1082,38 @@ class _LibraryScreenState extends State<LibraryScreen>
     } else {
       _sendControl('play_song', songId: _songs[index].id);
     }
+  }
+
+  void _openNowPlaying() {
+    if (!_hasPlayer ||
+        _currentIndex < 0 ||
+        _currentIndex >= _songs.length) {
+      return;
+    }
+    NowPlayingSheet.show(
+      context,
+      player: _player,
+      song: _songs[_currentIndex],
+      onPrev: _playPrev,
+      onNext: _playNext,
+      hasPrev: _currentIndex > 0 || _loopMode != LoopMode.off,
+      hasNext:
+          _currentIndex + 1 < _songs.length || _loopMode != LoopMode.off,
+      shuffleOn: _shuffleEnabled,
+      loopMode: _loopMode,
+      onToggleShuffle: () {
+        _toggleShuffle();
+      },
+      onToggleRepeat: _toggleRepeat,
+      onPlayAll: () {
+        Navigator.pop(context);
+        _playLibrary(shuffle: false);
+      },
+      onShuffleAll: () {
+        Navigator.pop(context);
+        _playLibrary(shuffle: true);
+      },
+    );
   }
 
   // ─── Build ────────────────────────────────────────────────────────────────
@@ -961,6 +1148,7 @@ class _LibraryScreenState extends State<LibraryScreen>
           tabs: const [
             Tab(icon: Icon(Icons.queue_music), text: 'Songs'),
             Tab(icon: Icon(Icons.person), text: 'Artists'),
+            Tab(icon: Icon(Icons.download_for_offline), text: 'Downloads'),
           ],
         ),
         actions: [
@@ -1100,9 +1288,11 @@ class _LibraryScreenState extends State<LibraryScreen>
               controller: _searchController,
               onChanged: _onSearchChanged,
               decoration: InputDecoration(
-                hintText: _offlineFallback
-                    ? 'Search downloaded songs…'
-                    : 'Search songs, artists, albums…',
+                hintText: _browseTab == _BrowseTab.artists
+                    ? 'Search artist names…'
+                    : _offlineFallback
+                        ? 'Search downloaded songs…'
+                        : 'Search songs, artists, albums…',
                 prefixIcon: const Icon(Icons.search, color: Colors.white38),
                 suffixIcon: _query.isNotEmpty
                     ? IconButton(
@@ -1140,6 +1330,7 @@ class _LibraryScreenState extends State<LibraryScreen>
               children: [
                 _buildSongsTab(activeSongId),
                 _buildArtistsTab(),
+                _buildDownloadsTab(),
               ],
             ),
           ),
@@ -1164,10 +1355,12 @@ class _LibraryScreenState extends State<LibraryScreen>
             MiniPlayer(
               player: _player,
               song: _songs[_currentIndex],
+              onOpenExpanded: _openNowPlaying,
               onPrev: _playPrev,
               onNext: _playNext,
-              hasPrev: _currentIndex > 0,
-              hasNext: _currentIndex + 1 < _songs.length,
+              hasPrev: _currentIndex > 0 || _loopMode != LoopMode.off,
+              hasNext:
+                  _currentIndex + 1 < _songs.length || _loopMode != LoopMode.off,
             ),
           if (_source == _PlaySource.pc && (_nowPlaying?.attached ?? false))
             PcMiniPlayer(
@@ -1356,6 +1549,49 @@ class _LibraryScreenState extends State<LibraryScreen>
                         ],
                       ),
                     ),
+                    FutureBuilder<bool>(
+                      future: MusicAutoCacheService.instance.isArtistEnabled(artist),
+                      builder: (context, snap) {
+                        final on = snap.data ?? false;
+                        return IconButton(
+                          tooltip: on
+                              ? 'Auto-download on Wi‑Fi (on)'
+                              : 'Auto-download on Wi‑Fi (off)',
+                          icon: Icon(
+                            on ? Icons.wifi : Icons.wifi_off,
+                            color: on ? AppColors.accent : Colors.white38,
+                            size: 22,
+                          ),
+                          onPressed: () async {
+                            await MusicAutoCacheService.instance
+                                .toggleArtist(artist, !on);
+                            if (_api != null) {
+                              unawaited(
+                                MusicAutoCacheService.instance.runIfAllowed(
+                                  librarySongs: _songs,
+                                  api: _api!,
+                                ),
+                              );
+                            }
+                            if (mounted) setState(() {});
+                          },
+                        );
+                      },
+                    ),
+                    IconButton(
+                      tooltip: 'Play artist',
+                      icon: const Icon(Icons.play_circle_outline,
+                          color: AppColors.accent),
+                      onPressed: () =>
+                          _playArtistCatalog(artist, shuffle: false),
+                    ),
+                    IconButton(
+                      tooltip: 'Shuffle artist',
+                      icon: const Icon(Icons.shuffle,
+                          color: AppColors.accentGlow),
+                      onPressed: () =>
+                          _playArtistCatalog(artist, shuffle: true),
+                    ),
                     Icon(
                       isExpanded
                           ? Icons.keyboard_arrow_up
@@ -1389,7 +1625,7 @@ class _LibraryScreenState extends State<LibraryScreen>
                       if (_source == _PlaySource.pc && !_offlineFallback) {
                         _sendControl('play_song', songId: song.id);
                       } else {
-                        _playArtistSong(song);
+                        _playArtistSong(song, artist: artist);
                       }
                     },
                     cacheState: _cacheStateFor(song.id),
@@ -1403,6 +1639,98 @@ class _LibraryScreenState extends State<LibraryScreen>
           ],
         );
       },
+    );
+  }
+
+  Widget _buildDownloadsTab() {
+    final songs = _cache.downloadedSongs;
+    return Column(
+      children: [
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+          decoration: const BoxDecoration(
+            border: Border(bottom: BorderSide(color: AppColors.border)),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                '${songs.length} song${songs.length == 1 ? '' : 's'} · '
+                '${formatBytes(_cache.totalBytes)}',
+                style: const TextStyle(color: Colors.white70),
+              ),
+              if (songs.isNotEmpty)
+                TextButton(
+                  onPressed: () async {
+                    final ok = await showDialog<bool>(
+                      context: context,
+                      builder: (ctx) => AlertDialog(
+                        title: const Text('Clear all downloads?'),
+                        content: const Text(
+                          'Removes cached audio from this device. '
+                          'Your PC library is unchanged.',
+                        ),
+                        actions: [
+                          TextButton(
+                            onPressed: () => Navigator.pop(ctx, false),
+                            child: const Text('Cancel'),
+                          ),
+                          TextButton(
+                            onPressed: () => Navigator.pop(ctx, true),
+                            child: const Text(
+                              'Clear',
+                              style: TextStyle(color: Colors.redAccent),
+                            ),
+                          ),
+                        ],
+                      ),
+                    );
+                    if (ok == true) await _cache.clearAll();
+                  },
+                  child: const Text(
+                    'Clear all',
+                    style: TextStyle(color: Colors.redAccent),
+                  ),
+                ),
+            ],
+          ),
+        ),
+        Expanded(
+          child: songs.isEmpty
+              ? const Center(
+                  child: Padding(
+                    padding: EdgeInsets.all(32),
+                    child: Text(
+                      'Nothing downloaded yet.\nUse the download icon on a song '
+                      'or pin an artist for Wi‑Fi auto-cache.',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(color: Colors.white38),
+                    ),
+                  ),
+                )
+              : ListView.builder(
+                  itemCount: songs.length,
+                  itemBuilder: (context, index) {
+                    final song = songs[index];
+                    final idx = _songs.indexWhere((s) => s.id == song.id);
+                    return SongTile(
+                      song: song,
+                      active: idx == _currentIndex,
+                      onTap: () {
+                        if (idx >= 0) {
+                          _onSongTap(idx);
+                        } else {
+                          _playQueue([song], startIndex: 0);
+                        }
+                      },
+                      cacheState: SongCacheState.cached,
+                      onCacheTap: () => _cache.remove(song.id),
+                    );
+                  },
+                ),
+        ),
+      ],
     );
   }
 }

@@ -53,6 +53,8 @@ class _NotesScreenState extends State<NotesScreen> {
             '${failed > 0 ? ' ($failed failed, will retry)' : ''}',
           );
         }
+      } else if (evt.type == NotesSyncEventType.conflictsDetected) {
+        _showNextConflict();
       }
     });
     _init();
@@ -70,9 +72,56 @@ class _NotesScreenState extends State<NotesScreen> {
     await _sync.ensureReady();
     _refreshLocal();
     final base = await _settings.baseUrl('notes');
-    if (base == null) return;
+    if (base == null) {
+      setState(() => _loading = false);
+      return;
+    }
     setState(() => _api = NotesApiService(base));
     await _load();
+  }
+
+  Future<void> _showNextConflict() async {
+    if (!mounted || _sync.conflicts.isEmpty) return;
+    final c = _sync.conflicts.first;
+    final choice = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Note changed on PC too'),
+        content: Text(
+          '“${c.local.title}” was edited on this phone and on the desktop.\n\n'
+          'Phone:\n${c.local.body}\n\n'
+          'Desktop:\n${c.server.body}',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, 'mine'),
+            child: const Text('Keep mine'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, 'theirs'),
+            child: const Text('Keep desktop'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, 'both'),
+            child: const Text('Keep both'),
+          ),
+        ],
+      ),
+    );
+    if (!mounted || choice == null) return;
+    if (choice == 'mine') {
+      await _sync.resolveConflictKeepMine(c.noteId);
+      if (_api != null) await _sync.sync(_api!);
+    } else if (choice == 'theirs') {
+      await _sync.resolveConflictKeepTheirs(c.noteId);
+    } else if (choice == 'both') {
+      await _sync.resolveConflictKeepBoth(c.noteId);
+      if (_api != null) await _sync.sync(_api!);
+    }
+    _refreshLocal();
+    if (_sync.conflicts.isNotEmpty) {
+      await _showNextConflict();
+    }
   }
 
   void _initConnectivity() {
@@ -166,23 +215,24 @@ class _NotesScreenState extends State<NotesScreen> {
 
   @override
   Widget build(BuildContext context) {
-    if (_api == null) {
-      return const Scaffold(
-        body: Center(
-          child: Text('Set your PC hostname in Settings first.',
-              style: TextStyle(color: Colors.white54)),
-        ),
-      );
-    }
-
-    final showOfflineBanner =
-        _networkType == NetworkType.offline || _unreachable;
+    final showOfflineBanner = _api != null &&
+        (_networkType == NetworkType.offline || _unreachable);
     final pending = _sync.pendingCount;
+    final syncBlocked = _api == null;
 
     return Scaffold(
       appBar: AppBar(
         title: Text(_notes.isNotEmpty ? '${_notes.length} notes' : 'Notes'),
         actions: [
+          if (_sync.conflicts.isNotEmpty)
+            IconButton(
+              icon: Badge(
+                label: Text('${_sync.conflicts.length}'),
+                child: const Icon(Icons.merge_type),
+              ),
+              tooltip: 'Resolve sync conflicts',
+              onPressed: _showNextConflict,
+            ),
           if (_syncing)
             const Padding(
               padding: EdgeInsets.symmetric(horizontal: 16),
@@ -213,16 +263,30 @@ class _NotesScreenState extends State<NotesScreen> {
         onRefresh: _load,
         child: Column(
           children: [
-            if (showOfflineBanner)
+            if (syncBlocked)
+              Container(
+                width: double.infinity,
+                color: Colors.blueGrey.withValues(alpha: 0.2),
+                padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 12),
+                child: const Text(
+                  'Showing notes on this phone only. Set your PC hostname in '
+                  'Settings to sync with the desktop.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(fontSize: 12, color: Colors.white70),
+                ),
+              )
+            else if (showOfflineBanner)
               Container(
                 width: double.infinity,
                 color: Colors.amber.withValues(alpha: 0.15),
                 padding: const EdgeInsets.symmetric(vertical: 6),
-                child: const Text(
-                  'Offline — showing notes saved on this phone. '
-                  'Changes will sync once reconnected.',
+                child: Text(
+                  pending > 0
+                      ? 'Offline — $pending change${pending == 1 ? '' : 's'} '
+                          'waiting to sync. Pull down when back online.'
+                      : 'Offline — showing notes saved on this phone.',
                   textAlign: TextAlign.center,
-                  style: TextStyle(fontSize: 12, color: Colors.amber),
+                  style: const TextStyle(fontSize: 12, color: Colors.amber),
                 ),
               ),
             Padding(

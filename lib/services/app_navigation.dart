@@ -1,6 +1,8 @@
 import 'package:flutter/widgets.dart';
-import '../screens/home_shell.dart';
+
 import '../screens/ai_approvals_screen.dart';
+import '../screens/home_shell.dart';
+import 'home_tabs.dart';
 
 /// Bridges taps on OS-level notifications back into in-app navigation.
 ///
@@ -18,6 +20,29 @@ class AppNavigation {
   /// [consumePendingTabIndex] once it's up.
   static int? _pendingTabIndex;
   static String? _pendingApprovalId;
+  static bool _pendingOpenNowPlaying = false;
+
+  static void goToReminders() => _goToTab(HomeTabs.reminders);
+
+  static void goToClock() => _goToTab(HomeTabs.clock);
+
+  /// Music tab; optionally open the now-playing sheet (e.g. media notification tap).
+  static void goToMusic({bool openNowPlaying = false}) {
+    if (openNowPlaying) _pendingOpenNowPlaying = true;
+    _goToTab(HomeTabs.music);
+  }
+
+  static bool get pendingOpenNowPlaying => _pendingOpenNowPlaying;
+
+  static void clearPendingOpenNowPlaying() {
+    _pendingOpenNowPlaying = false;
+  }
+
+  static bool consumePendingOpenNowPlaying() {
+    final v = _pendingOpenNowPlaying;
+    _pendingOpenNowPlaying = false;
+    return v;
+  }
 
   static void goToAiApproval([String? approvalId]) {
     final state = homeShellKey.currentState;

@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:path_provider/path_provider.dart';
 
 import '../models/note.dart';
+import '../models/note_conflict.dart';
 import 'notes_api_service.dart';
 
 enum NoteSyncState { synced, pendingCreate, pendingUpdate, pendingDelete }
@@ -76,7 +77,7 @@ class LocalNote {
   bool get isLocalOnly => id.startsWith('local_');
 }
 
-enum NotesSyncEventType { syncStarted, syncFinished }
+enum NotesSyncEventType { syncStarted, syncFinished, conflictsDetected }
 
 class NotesSyncEvent {
   final NotesSyncEventType type;
@@ -110,6 +111,7 @@ class NotesSyncService {
 
   Directory? _dir;
   final Map<String, LocalNote> _notes = {}; // keyed by current (local or server) id
+  final List<NoteConflict> _conflicts = [];
   bool _initialized = false;
   Future<void>? _initFuture;
   bool _syncing = false;
@@ -181,6 +183,8 @@ class NotesSyncService {
   int get pendingCount =>
       _notes.values.where((n) => n.syncState != NoteSyncState.synced).length;
 
+  List<NoteConflict> get conflicts => List.unmodifiable(_conflicts);
+
   bool isPending(String id) {
     final n = _notes[id];
     return n != null && n.syncState != NoteSyncState.synced;
@@ -195,11 +199,77 @@ class NotesSyncService {
         .where((e) => e.value.syncState != NoteSyncState.synced)
         .map((e) => e.key)
         .toSet();
+
+    for (final n in serverNotes) {
+      if (!pendingIds.contains(n.id)) continue;
+      final local = _notes[n.id];
+      if (local == null || local.syncState != NoteSyncState.pendingUpdate) {
+        continue;
+      }
+      if (n.updatedAt <= local.updatedAt) continue;
+      if (n.title == local.title && n.body == local.body) continue;
+      if (_conflicts.any((c) => c.noteId == n.id)) continue;
+      _conflicts.add(NoteConflict(
+        noteId: n.id,
+        local: LocalNote(
+          id: local.id,
+          title: local.title,
+          body: local.body,
+          pinned: local.pinned,
+          updatedAt: local.updatedAt,
+          syncState: local.syncState,
+        ),
+        server: n,
+      ));
+    }
+    _conflicts.removeWhere(
+      (c) => !serverNotes.any((n) => n.id == c.noteId),
+    );
+
     _notes.removeWhere((id, _) => !pendingIds.contains(id));
     for (final n in serverNotes) {
       if (pendingIds.contains(n.id)) continue;
       _notes[n.id] = LocalNote.fromNote(n);
     }
+    await _save();
+    if (_conflicts.isNotEmpty) {
+      _events.add(const NotesSyncEvent(NotesSyncEventType.conflictsDetected));
+    }
+  }
+
+  Future<void> resolveConflictKeepMine(String noteId) async {
+    _conflicts.removeWhere((c) => c.noteId == noteId);
+  }
+
+  Future<void> resolveConflictKeepTheirs(String noteId) async {
+    final conflict = _conflicts.cast<NoteConflict?>().firstWhere(
+          (c) => c?.noteId == noteId,
+          orElse: () => null,
+        );
+    if (conflict == null) return;
+    _notes[noteId] = LocalNote.fromNote(conflict.server);
+    _conflicts.removeWhere((c) => c.noteId == noteId);
+    await _save();
+  }
+
+  Future<void> resolveConflictKeepBoth(String noteId) async {
+    final conflict = _conflicts.cast<NoteConflict?>().firstWhere(
+          (c) => c?.noteId == noteId,
+          orElse: () => null,
+        );
+    if (conflict == null) return;
+    final newId = 'local_${DateTime.now().microsecondsSinceEpoch}';
+    _notes[newId] = LocalNote(
+      id: newId,
+      title: conflict.server.title.isEmpty
+          ? 'From desktop'
+          : '${conflict.server.title} (desktop)',
+      body: conflict.server.body,
+      pinned: false,
+      updatedAt: conflict.server.updatedAt,
+      syncState: NoteSyncState.pendingCreate,
+    );
+    _conflicts.removeWhere((c) => c.noteId == noteId);
     await _save();
   }
 

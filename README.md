@@ -6,25 +6,26 @@ There is no separate “python patch.” Start **Remote Hub → Go Live** on the
 
 ## Tabs
 
-| Tab | Desktop module | HTTPS |
-| --- | -------------- | ----- |
+| Tab | Desktop module | HTTPS / local |
+| --- | -------------- | ------------- |
 | Vault | Secure Vault | **8443** |
 | Music | Media Player | **8444** |
 | Notes | Notes | **8448** |
+| Reminders | On-device (notifications) | — |
+| Clock | On-device alarms | — |
 | Games | Gaming Hub + GSM + Night (social) | **8446** / **8453** / **8450** |
 | YT | YouTube Downloader | **8445** |
 | Send | Quick Send | **8449** |
-| Clip | Clipboard (hub) | **8451** |
-| Messages | Messages (this PC only) | **8452** |
 | Chat | AI Chat (same model / agent as the desktop) | **8454** |
+| PC | Stream / remote desktop agent | hub |
 | Settings | Hostname, access codes, invite key, chat source | — |
 
-Extra screens opened from those tabs:
+Extra screens (not bottom tabs):
 
 | Screen | Port | Notes |
 | ------ | ---- | ----- |
-| Night | **8450** | Jukebox / soundboard / limited GSM console (invite key) |
-| Notifications | hub | Push-style inbox from the PC |
+| Night | **8450** | Jukebox / soundboard / limited GSM console (invite key); card on Games |
+| Clip / Messages | **8451** / **8452** | Clipboard + this-PC messages — backlog; Inbox worker covers push chat elsewhere |
 
 ## 1. Build (GitHub Actions, no Mac needed)
 

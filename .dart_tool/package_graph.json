@@ -17,6 +17,7 @@
         "flutter",
         "flutter_local_notifications",
         "flutter_secure_storage",
+        "flutter_timezone",
         "flutter_webrtc",
         "gal",
         "http",
@@ -27,6 +28,7 @@
         "printing",
         "share_plus",
         "shared_preferences",
+        "timezone",
         "web_socket_channel"
       ],
       "devDependencies": [
@@ -170,6 +172,22 @@
         "pdf_widget_wrapper",
         "plugin_platform_interface",
         "web"
+      ]
+    },
+    {
+      "name": "flutter_timezone",
+      "version": "4.1.1",
+      "dependencies": [
+        "flutter",
+        "flutter_web_plugins"
+      ]
+    },
+    {
+      "name": "timezone",
+      "version": "0.10.1",
+      "dependencies": [
+        "http",
+        "path"
       ]
     },
     {
@@ -677,14 +695,6 @@
       "name": "ffi",
       "version": "2.2.0",
       "dependencies": []
-    },
-    {
-      "name": "timezone",
-      "version": "0.10.1",
-      "dependencies": [
-        "http",
-        "path"
-      ]
     },
     {
       "name": "flutter_local_notifications_platform_interface",

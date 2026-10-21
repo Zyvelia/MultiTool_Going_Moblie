@@ -21,6 +21,9 @@ def patch_manifest() -> None:
         '    <uses-permission android:name="android.permission.WAKE_LOCK"/>\n'
         '    <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>\n'
         '    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"/>\n'
+        '    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM"/>\n'
+        '    <uses-permission android:name="android.permission.USE_EXACT_ALARM"/>\n'
+        '    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>\n'
     )
     xml, n = re.subn(r"(<manifest[^>]*>\n)", r"\1" + perms, xml, count=1)
     if n == 0:
@@ -36,6 +39,36 @@ def patch_manifest() -> None:
         raise SystemExit(f"Could not patch allowBackup in {path}")
     path.write_text(xml, encoding="utf-8")
     print(f"Patched {path}")
+
+
+def patch_notification_receivers() -> None:
+    """flutter_local_notifications needs boot + scheduled receivers or alarms
+    never fire after reboot / package update."""
+    path = ROOT / "android/app/src/main/AndroidManifest.xml"
+    xml = path.read_text(encoding="utf-8")
+    marker = "ZS_FLUTTER_LOCAL_NOTIFICATIONS"
+    if marker in xml:
+        print(f"Notification receivers already in {path}")
+        return
+    block = (
+        f"        <!-- {marker} -->\n"
+        '        <receiver android:exported="false" '
+        'android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationReceiver" />\n'
+        '        <receiver android:exported="false" '
+        'android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationBootReceiver">\n'
+        "            <intent-filter>\n"
+        '                <action android:name="android.intent.action.BOOT_COMPLETED"/>\n'
+        '                <action android:name="android.intent.action.MY_PACKAGE_REPLACED"/>\n'
+        '                <action android:name="android.intent.action.QUICKBOOT_POWERON"/>\n'
+        '                <action android:name="com.htc.intent.action.QUICKBOOT_POWERON"/>\n'
+        "            </intent-filter>\n"
+        "        </receiver>\n"
+    )
+    xml, n = re.subn(r"(</application>)", block + r"\1", xml, count=1)
+    if n == 0:
+        raise SystemExit(f"Could not add notification receivers in {path}")
+    path.write_text(xml, encoding="utf-8")
+    print(f"Patched notification receivers in {path}")
 
 
 def patch_main_activity() -> None:
@@ -303,6 +336,7 @@ def patch_firebase() -> None:
 def main() -> None:
     patch_firebase()
     patch_manifest()
+    patch_notification_receivers()
     patch_main_activity()
     patch_compile_sdk()
     patch_plugin_compile_sdk()

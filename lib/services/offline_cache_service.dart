@@ -29,6 +29,10 @@ const Map<String, String> _extForMime = {
   'audio/webm': 'webm',
   'audio/3gpp': '3gp',
   'audio/amr': 'amr',
+  'image/jpeg': 'jpg',
+  'image/jpg': 'jpg',
+  'image/png': 'png',
+  'image/webp': 'webp',
 };
 
 enum CacheEventType {
@@ -71,6 +75,7 @@ class _ManifestEntry {
   final int duration;
   final int size;
   final String ext;
+  final String? artExt;
   final DateTime downloadedAt;
 
   _ManifestEntry({
@@ -80,6 +85,7 @@ class _ManifestEntry {
     required this.duration,
     required this.size,
     required this.ext,
+    this.artExt,
     required this.downloadedAt,
   });
 
@@ -90,6 +96,7 @@ class _ManifestEntry {
         duration: (j['duration'] as num?)?.toInt() ?? 0,
         size: (j['size'] as num?)?.toInt() ?? 0,
         ext: j['ext'] as String? ?? 'mp3',
+        artExt: j['artExt'] as String?,
         downloadedAt:
             DateTime.tryParse(j['downloadedAt'] as String? ?? '') ??
                 DateTime.now(),
@@ -102,6 +109,7 @@ class _ManifestEntry {
         'duration': duration,
         'size': size,
         'ext': ext,
+        if (artExt != null) 'artExt': artExt,
         'downloadedAt': downloadedAt.toIso8601String(),
       };
 }
@@ -202,6 +210,19 @@ class OfflineCacheService {
     return File('${_dir!.path}/files/$songId.${e.ext}');
   }
 
+  File? localArtFile(int songId) {
+    final e = _manifest[songId];
+    if (e == null || e.artExt == null || _dir == null) return null;
+    final f = File('${_dir!.path}/files/$songId.cover.${e.artExt}');
+    return f.existsSync() ? f : null;
+  }
+
+  Uri? artUriFor(int songId) {
+    final f = localArtFile(songId);
+    if (f == null) return null;
+    return Uri.file(f.path);
+  }
+
   /// All explicitly-downloaded songs, sorted by title — used both by the
   /// Downloads management screen and as LibraryScreen's fallback song
   /// list when the desktop is completely unreachable.
@@ -270,6 +291,26 @@ class OfflineCacheService {
       if (await finalFile.exists()) await finalFile.delete();
       await tmp.rename(finalFile.path);
 
+      String? artExt;
+      try {
+        final artReq = http.Request('GET', Uri.parse(api.coverArtUrl(song.id)));
+        final artResp = await client.send(artReq).timeout(const Duration(seconds: 8));
+        if (artResp.statusCode == 200) {
+          final artMime =
+              artResp.headers['content-type']?.split(';').first.trim().toLowerCase();
+          artExt = _extForMime[artMime] ?? 'jpg';
+          final artTmp = File('${_dir!.path}/files/.tmp_${song.id}.cover');
+          final artSink = artTmp.openWrite();
+          await artResp.stream.pipe(artSink);
+          await artSink.close();
+          final artFinal = File('${_dir!.path}/files/${song.id}.cover.$artExt');
+          if (await artFinal.exists()) await artFinal.delete();
+          await artTmp.rename(artFinal.path);
+        }
+      } catch (_) {
+        artExt = null;
+      }
+
       _manifest[song.id] = _ManifestEntry(
         title: song.title,
         artist: song.artist,
@@ -277,6 +318,7 @@ class OfflineCacheService {
         duration: song.duration,
         size: received,
         ext: ext,
+        artExt: artExt,
         downloadedAt: DateTime.now(),
       );
       await _saveManifest();

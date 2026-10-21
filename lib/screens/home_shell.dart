@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'vault_screen.dart';
 import 'library_screen.dart';
 import 'notes_screen.dart';
+import 'reminders_screen.dart';
+import 'clock_screen.dart';
 import 'games_screen.dart';
 import 'yt_screen.dart';
 import 'quick_send_screen.dart';
@@ -10,6 +12,7 @@ import 'settings_screen.dart';
 import 'stream_service_screen.dart';
 import '../services/settings_service.dart';
 import '../services/app_navigation.dart';
+import '../services/home_tabs.dart';
 import 'ai_approvals_screen.dart';
 
 /// Lets code outside the widget tree (notably LocalNotificationService,
@@ -17,6 +20,7 @@ import 'ai_approvals_screen.dart';
 /// reach the live HomeShell instance to switch tabs. Attached via
 /// `HomeShell(key: homeShellKey)` in main.dart.
 final homeShellKey = GlobalKey<HomeShellState>();
+final libraryScreenKey = GlobalKey<LibraryScreenState>();
 
 class HomeShell extends StatefulWidget {
   const HomeShell({super.key});
@@ -68,13 +72,25 @@ class HomeShellState extends State<HomeShell> {
     if (pendingTab != null && mounted) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) selectTab(pendingTab);
+        if (pendingTab == HomeTabs.music) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            libraryScreenKey.currentState?.handleExternalOpen();
+          });
+        }
       });
     }
   }
 
   /// Public entry point for switching tabs from outside this State —
   /// used by AppNavigation to deep-link in from a tapped notification.
-  void selectTab(int i) => _onDestinationSelected(i);
+  void selectTab(int i) {
+    _onDestinationSelected(i);
+    if (i == HomeTabs.music) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        libraryScreenKey.currentState?.handleExternalOpen();
+      });
+    }
+  }
 
   void openAiApproval([String? approvalId]) {
     Navigator.of(context).push(MaterialPageRoute(builder: (_) => AiApprovalsScreen(requestedId: approvalId)));
@@ -122,16 +138,18 @@ class HomeShellState extends State<HomeShell> {
     // (or tapping between tabs) doesn't reset scroll position, text
     // fields, or in-flight loads — same persistence IndexedStack gave
     // before, just now living inside a swipeable PageView.
-    final screens = const [
-      _KeepAlive(child: VaultScreen()),
-      _KeepAlive(child: LibraryScreen()),
-      _KeepAlive(child: NotesScreen()),
-      _KeepAlive(child: GamesScreen()),
-      _KeepAlive(child: YtScreen()),
-      _KeepAlive(child: QuickSendScreen()),
-      _KeepAlive(child: ChatScreen()),
-      _KeepAlive(child: StreamServiceScreen()),
-      _KeepAlive(child: SettingsScreen()),
+    final screens = [
+      const _KeepAlive(child: VaultScreen()),
+      _KeepAlive(child: LibraryScreen(key: libraryScreenKey)),
+      const _KeepAlive(child: NotesScreen()),
+      const _KeepAlive(child: RemindersScreen()),
+      const _KeepAlive(child: ClockScreen()),
+      const _KeepAlive(child: GamesScreen()),
+      const _KeepAlive(child: YtScreen()),
+      const _KeepAlive(child: QuickSendScreen()),
+      const _KeepAlive(child: ChatScreen()),
+      const _KeepAlive(child: StreamServiceScreen()),
+      const _KeepAlive(child: SettingsScreen()),
     ];
 
     return Scaffold(
@@ -148,6 +166,14 @@ class HomeShellState extends State<HomeShell> {
           NavigationDestination(icon: Icon(Icons.lock), label: 'Vault'),
           NavigationDestination(icon: Icon(Icons.music_note), label: 'Music'),
           NavigationDestination(icon: Icon(Icons.notes), label: 'Notes'),
+          NavigationDestination(
+            icon: Icon(Icons.alarm_outlined),
+            label: 'Reminders',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.access_time),
+            label: 'Clock',
+          ),
           NavigationDestination(icon: Icon(Icons.sports_esports), label: 'Games'),
           NavigationDestination(icon: Icon(Icons.download), label: 'YT'),
           NavigationDestination(icon: Icon(Icons.send), label: 'Send'),

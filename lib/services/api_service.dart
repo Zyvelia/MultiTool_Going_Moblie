@@ -76,6 +76,9 @@ class ApiService {
   /// server-side, so seeking works fine with just_audio).
   String streamUrl(int songId) => '$baseUrl/api/stream/$songId';
 
+  /// Optional desktop artwork endpoint; 404 is normal when tags have no art.
+  String coverArtUrl(int songId) => '$baseUrl/api/artwork/$songId';
+
   /// Current state of the desktop app's own player — used in "PC" mode,
   /// where the phone controls that separate playback session instead of
   /// streaming audio locally. Polled on an interval by LibraryScreen.

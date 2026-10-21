@@ -1,9 +1,16 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:audio_service/audio_service.dart';
 import 'package:just_audio_background/just_audio_background.dart';
+import 'services/app_navigation.dart';
 import 'screens/home_shell.dart';
 import 'services/local_notification_service.dart';
+import 'services/reminder_service.dart';
+import 'services/alarm_service.dart';
+import 'services/schedule_bootstrap.dart';
 import 'services/ai_push_service.dart';
 import 'theme/app_theme.dart';
 
@@ -64,14 +71,50 @@ Future<void> main() async {
       androidNotificationChannelId: 'com.zsmultitool.multi_tool_remote.audio',
       androidNotificationChannelName: 'Music playback',
       androidNotificationOngoing: true,
+      androidNotificationClickStartsActivity: true,
+      androidResumeOnClick: true,
     );
+    AudioService.notificationClicked.listen((clicked) {
+      if (clicked) {
+        AppNavigation.goToMusic(openNowPlaying: true);
+      }
+    });
     LocalNotificationService.instance.requestPermission();
+    await ReminderService.instance.init();
+    await AlarmService.instance.init();
+    LocalNotificationService.instance.onAlarmTapped =
+        (id) => AlarmService.instance.ringFromNotification(id);
     AiPushService.instance.start();
   });
 }
 
-class MultiToolRemoteApp extends StatelessWidget {
+class MultiToolRemoteApp extends StatefulWidget {
   const MultiToolRemoteApp({super.key});
+
+  @override
+  State<MultiToolRemoteApp> createState() => _MultiToolRemoteAppState();
+}
+
+class _MultiToolRemoteAppState extends State<MultiToolRemoteApp>
+    with WidgetsBindingObserver {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      unawaited(ScheduleBootstrap.rescheduleAll());
+    }
+  }
 
   @override
   Widget build(BuildContext context) {

@@ -1,6 +1,11 @@
-import 'package:flutter_local_notifications/flutter_local_notifications.dart';
-import 'app_navigation.dart';
 import 'dart:convert';
+
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:flutter_timezone/flutter_timezone.dart';
+import 'package:timezone/data/latest_all.dart' as tz_data;
+import 'package:timezone/timezone.dart' as tz;
+
+import 'app_navigation.dart';
 
 /// Native OS notifications for this app. Used for foreground FCM message notifications and other local alerts, but kept generic (a plain
 /// title/body `show()`) rather than message-specific so anything else
@@ -19,8 +24,25 @@ class LocalNotificationService {
 
   final _plugin = FlutterLocalNotificationsPlugin();
   bool _initialized = false;
+  bool _timezoneReady = false;
 
   static const aiApprovalPayload = 'ai_approval';
+  static const reminderPayloadPrefix = 'reminder:';
+  static const alarmPayloadPrefix = 'alarm:';
+  static const _reminderChannelId = 'z_reminders';
+  static const _reminderChannelName = 'Reminders';
+  static const _alarmChannelId = 'z_alarms';
+  static const _alarmChannelName = 'Alarms';
+
+  /// Set from [main] after [AlarmService] is ready — avoids import cycles.
+  void Function(String alarmId)? onAlarmTapped;
+  String? _pendingAlarmId;
+
+  String? consumePendingAlarmId() {
+    final id = _pendingAlarmId;
+    _pendingAlarmId = null;
+    return id;
+  }
 
   Future<void> init() async {
     if (_initialized) return;
@@ -86,7 +108,138 @@ class LocalNotificationService {
     }
     if (payload == aiApprovalPayload) {
       AppNavigation.goToAiApproval();
+      return;
     }
+    if (payload != null && payload.startsWith(reminderPayloadPrefix)) {
+      AppNavigation.goToReminders();
+      return;
+    }
+    if (payload != null && payload.startsWith(alarmPayloadPrefix)) {
+      final id = payload.substring(alarmPayloadPrefix.length);
+      _pendingAlarmId = id;
+      onAlarmTapped?.call(id);
+      AppNavigation.goToClock();
+    }
+  }
+
+  Future<void> ensureTimezoneReady() async {
+    if (_timezoneReady) return;
+    tz_data.initializeTimeZones();
+    try {
+      final name = await FlutterTimezone.getLocalTimezone();
+      tz.setLocalLocation(tz.getLocation(name));
+    } catch (_) {
+      tz.setLocalLocation(tz.local);
+    }
+    _timezoneReady = true;
+  }
+
+  int _mainId(String reminderId) => idFor('reminder:$reminderId');
+  int _nudgeId(String reminderId) => idFor('reminder_nudge:$reminderId');
+
+  Future<void> scheduleReminder({
+    required String reminderId,
+    required String title,
+    required String body,
+    required DateTime dueAt,
+    int nudgeMinutesBefore = 5,
+  }) async {
+    if (!_initialized) await init();
+    await ensureTimezoneReady();
+    await cancelReminder(reminderId);
+
+    final payload = '$reminderPayloadPrefix$reminderId';
+    final android = AndroidNotificationDetails(
+      _reminderChannelId,
+      _reminderChannelName,
+      importance: Importance.high,
+      priority: Priority.high,
+    );
+    const ios = DarwinNotificationDetails();
+    final details = NotificationDetails(android: android, iOS: ios);
+
+    final dueTz = tz.TZDateTime.from(dueAt, tz.local);
+    if (dueTz.isAfter(tz.TZDateTime.now(tz.local))) {
+      await _plugin.zonedSchedule(
+        _mainId(reminderId),
+        title,
+        body.isEmpty ? 'Reminder' : body,
+        dueTz,
+        details,
+        androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+        payload: payload,
+      );
+    }
+
+    if (nudgeMinutesBefore > 0) {
+      final nudgeAt = dueAt.subtract(Duration(minutes: nudgeMinutesBefore));
+      final nudgeTz = tz.TZDateTime.from(nudgeAt, tz.local);
+      if (nudgeTz.isAfter(tz.TZDateTime.now(tz.local))) {
+        await _plugin.zonedSchedule(
+          _nudgeId(reminderId),
+          'Upcoming reminder',
+          body.isEmpty ? 'Due soon' : '$body — in $nudgeMinutesBefore min',
+          nudgeTz,
+          details,
+          androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+          payload: payload,
+        );
+      }
+    }
+  }
+
+  Future<void> cancelReminder(String reminderId) async {
+    if (!_initialized) await init();
+    await _plugin.cancel(_mainId(reminderId));
+    await _plugin.cancel(_nudgeId(reminderId));
+  }
+
+  int _alarmId(String alarmId) => idFor('alarm:$alarmId');
+
+  Future<void> scheduleAlarm({
+    required String alarmId,
+    required String title,
+    required String body,
+    required DateTime at,
+    String? payloadAlarmId,
+  }) async {
+    if (!_initialized) await init();
+    await ensureTimezoneReady();
+    await cancelAlarm(alarmId);
+
+    final when = tz.TZDateTime.from(at, tz.local);
+    if (!when.isAfter(tz.TZDateTime.now(tz.local))) return;
+
+    final android = AndroidNotificationDetails(
+      _alarmChannelId,
+      _alarmChannelName,
+      importance: Importance.max,
+      priority: Priority.max,
+      playSound: true,
+      category: AndroidNotificationCategory.alarm,
+      fullScreenIntent: true,
+    );
+    const ios = DarwinNotificationDetails(
+      presentSound: true,
+      interruptionLevel: InterruptionLevel.timeSensitive,
+    );
+    final details = NotificationDetails(android: android, iOS: ios);
+    final payload = '$alarmPayloadPrefix${payloadAlarmId ?? alarmId}';
+
+    await _plugin.zonedSchedule(
+      _alarmId(alarmId),
+      title,
+      body,
+      when,
+      details,
+      androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+      payload: payload,
+    );
+  }
+
+  Future<void> cancelAlarm(String alarmId) async {
+    if (!_initialized) await init();
+    await _plugin.cancel(_alarmId(alarmId));
   }
 
   Future<void> show({
