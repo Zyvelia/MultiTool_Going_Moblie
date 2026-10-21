@@ -33,7 +33,10 @@ class _RemindersScreenState extends State<RemindersScreen> {
         icon: const Icon(Icons.add_alarm),
         label: const Text('New'),
       ),
-      body: ValueListenableBuilder<List<Reminder>>(
+      body: GestureDetector(
+        onTap: () => FocusManager.instance.primaryFocus?.unfocus(),
+        behavior: HitTestBehavior.deferToChild,
+        child: ValueListenableBuilder<List<Reminder>>(
         valueListenable: _service.reminders,
         builder: (context, items, _) {
           final active = items.where((r) => !r.completed).toList();
@@ -77,6 +80,7 @@ class _RemindersScreenState extends State<RemindersScreen> {
           );
         },
       ),
+      ),
     );
   }
 
@@ -105,16 +109,26 @@ class _RemindersScreenState extends State<RemindersScreen> {
       isScrollControlled: true,
       showDragHandle: true,
       builder: (ctx) {
+        void dismissKeyboard() {
+          FocusManager.instance.primaryFocus?.unfocus();
+        }
+
         return Padding(
           padding: EdgeInsets.only(
             left: 20,
             right: 20,
             top: 8,
-            bottom: MediaQuery.paddingOf(ctx).bottom + 20,
+            bottom: MediaQuery.paddingOf(ctx).bottom +
+                MediaQuery.viewInsetsOf(ctx).bottom +
+                20,
           ),
-          child: StatefulBuilder(
+          child: GestureDetector(
+            onTap: dismissKeyboard,
+            behavior: HitTestBehavior.opaque,
+            child: StatefulBuilder(
             builder: (context, setLocal) {
               Future<void> pickDate() async {
+                dismissKeyboard();
                 final picked = await showDatePicker(
                   context: context,
                   initialDate: date,
@@ -135,6 +149,7 @@ class _RemindersScreenState extends State<RemindersScreen> {
               }
 
               Future<void> pickTime() async {
+                dismissKeyboard();
                 final picked = await showTimePicker(
                   context: context,
                   initialTime: time,
@@ -157,7 +172,10 @@ class _RemindersScreenState extends State<RemindersScreen> {
               final dateLabel = loc.formatMediumDate(date);
               final timeLabel = loc.formatTimeOfDay(time);
 
-              return Column(
+              return SingleChildScrollView(
+                keyboardDismissBehavior:
+                    ScrollViewKeyboardDismissBehavior.onDrag,
+                child: Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
@@ -168,7 +186,12 @@ class _RemindersScreenState extends State<RemindersScreen> {
                   const SizedBox(height: 16),
                   TextField(
                     controller: textCtrl,
-                    maxLines: 3,
+                    minLines: 1,
+                    maxLines: 4,
+                    textInputAction: TextInputAction.done,
+                    onTapOutside: (_) => dismissKeyboard(),
+                    onSubmitted: (_) => dismissKeyboard(),
+                    onEditingComplete: dismissKeyboard,
                     decoration: const InputDecoration(
                       labelText: 'What to remember',
                       hintText: 'Take meds, call mom, raid night…',
@@ -232,8 +255,10 @@ class _RemindersScreenState extends State<RemindersScreen> {
                     child: Text(existing == null ? 'Save reminder' : 'Update'),
                   ),
                 ],
+              ),
               );
             },
+          ),
           ),
         );
       },

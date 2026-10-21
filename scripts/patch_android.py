@@ -220,46 +220,57 @@ def _set_gradle_property(props_path: Path, key: str, value: str) -> None:
     props_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
+def _strip_zs_compile_sdk_patch(text: str) -> str:
+    marker = "// ZS_PLUGIN_COMPILE_SDK_PATCH"
+    if marker not in text:
+        return text
+    return text[: text.index(marker)].rstrip() + "\n"
+
+
 def patch_plugin_compile_sdk() -> None:
-    """Raise compileSdk for Android library plugins (flutter_webrtc still uses API 31)."""
-    path = ROOT / "android/build.gradle.kts"
-    if not path.is_file():
-        raise SystemExit(f"Missing {path} — run flutter create first.")
-    text = path.read_text(encoding="utf-8")
-    strip_prefixes = (
-        "@file:Suppress(\"DEPRECATION\")",
-        "import com.android.build.gradle.LibraryExtension",
-        "import org.gradle.api.ProjectState",
-    )
-    if "// ZS_PLUGIN_COMPILE_SDK_PATCH" in text:
-        text = text[: text.index("// ZS_PLUGIN_COMPILE_SDK_PATCH")].rstrip() + "\n"
-    lines = [
-        ln
-        for ln in text.splitlines()
-        if ln.strip() not in strip_prefixes
-    ]
-    text = "\n".join(lines).strip() + "\n"
-    header = (
-        '@file:Suppress("DEPRECATION")\n\n'
-        "import com.android.build.gradle.LibraryExtension\n"
-    )
-    if not text.startswith("@file:Suppress"):
-        text = header + "\n" + text
+    """Raise compileSdk for Android library plugins (flutter_webrtc still uses API 31).
+
+    Must run from settings.gradle.kts via beforeProject + withPlugin so compileSdk
+    is raised when the android.library plugin is applied — afterEvaluate is too
+    late for :checkReleaseAarMetadata, and a subprojects block at the end of
+    build.gradle.kts may never affect included plugin projects.
+    """
+    build_gradle = ROOT / "android/build.gradle.kts"
+    if build_gradle.is_file():
+        text = build_gradle.read_text(encoding="utf-8")
+        text = _strip_zs_compile_sdk_patch(text)
+        strip_prefixes = (
+            '@file:Suppress("DEPRECATION")',
+            "import com.android.build.gradle.LibraryExtension",
+            "import org.gradle.api.ProjectState",
+        )
+        lines = [ln for ln in text.splitlines() if ln.strip() not in strip_prefixes]
+        text = "\n".join(lines).strip() + "\n"
+        if text and not text.endswith("\n"):
+            text += "\n"
+        build_gradle.write_text(text, encoding="utf-8")
+
+    settings = ROOT / "android/settings.gradle.kts"
+    if not settings.is_file():
+        raise SystemExit(f"Missing {settings} — run flutter create first.")
+    st = _strip_zs_compile_sdk_patch(settings.read_text(encoding="utf-8"))
     block = """
-// ZS_PLUGIN_COMPILE_SDK_PATCH - align plugin modules with androidx deps (API 34+).
-// flutter_webrtc still declares compileSdkVersion 31 in its own build.gradle.
-// Do not use afterEvaluate here — Flutter's evaluationDependsOn(":app") can
-// evaluate subprojects before that hook is registered (AGP 9 / Gradle 9 CI).
-subprojects {
-    pluginManager.withPlugin("com.android.library") {
-        extensions.configure<LibraryExtension> {
-            compileSdk = 37
+// ZS_PLUGIN_COMPILE_SDK_PATCH - flutter_webrtc / old plugins still declare API 31.
+gradle.beforeProject { proj ->
+    if (proj === proj.rootProject) return@beforeProject
+    proj.pluginManager.withPlugin("com.android.library") {
+        val android = proj.extensions.findByName("android") ?: return@withPlugin
+        val setter = android.javaClass.methods.firstOrNull { method ->
+            method.name == "setCompileSdk" && method.parameterCount == 1
+        } ?: android.javaClass.methods.firstOrNull { method ->
+            method.name == "setCompileSdkVersion" && method.parameterCount == 1
         }
+        setter?.invoke(android, 37)
     }
 }
 """
-    path.write_text(text.rstrip() + "\n" + block, encoding="utf-8")
-    print(f"Patched plugin compileSdk in {path}")
+    settings.write_text(st.rstrip() + "\n" + block, encoding="utf-8")
+    print(f"Patched plugin compileSdk in {settings}")
 
 
 def patch_agp_kotlin_compat() -> None:
