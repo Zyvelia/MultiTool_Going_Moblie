@@ -203,7 +203,7 @@ def patch_core_library_desugaring() -> None:
             # append a fresh block at the end of the file instead of
             # hard-failing.
             gradle = gradle.rstrip() + "\n\ndependencies {\n" + dep_line + "}\n"
-            print(f"No dependencies {{}} block found in {path} — appended a new one")
+            print(f"No dependencies {{}} block found in {path} - appended a new one")
 
     if gradle != original:
         path.write_text(gradle, encoding="utf-8")
@@ -221,56 +221,77 @@ def _set_gradle_property(props_path: Path, key: str, value: str) -> None:
 
 
 def _strip_zs_compile_sdk_patch(text: str) -> str:
-    marker = "// ZS_PLUGIN_COMPILE_SDK_PATCH"
-    if marker not in text:
-        return text
-    return text[: text.index(marker)].rstrip() + "\n"
+    for marker in ("// ZS_PLUGIN_COMPILE_SDK_PATCH", "// ZS_PLUGIN_COMPILE_SDK_APPLY"):
+        if marker in text:
+            text = text[: text.index(marker)].rstrip() + "\n"
+    lines = [
+        ln
+        for ln in text.splitlines()
+        if 'apply(from = "zs_plugin_compile_sdk.gradle")' not in ln
+    ]
+    return "\n".join(lines).strip() + "\n"
+
+
+_ZS_PLUGIN_COMPILE_SDK_GRADLE = """\
+// ZS_PLUGIN_COMPILE_SDK_PATCH — Groovy (settings.gradle.kts cannot use Kotlin beforeProject).
+gradle.beforeProject { project ->
+    if (project == project.rootProject) {
+        return
+    }
+    project.pluginManager.withPlugin("com.android.library") {
+        def android = project.extensions.findByName("android")
+        if (android != null) {
+            try {
+                android.compileSdk = 37
+            } catch (Throwable ignored) {
+                try {
+                    android.compileSdkVersion = 37
+                } catch (Throwable ignored2) {
+                }
+            }
+        }
+    }
+}
+"""
+
+_BUILD_GRADLE_HEADER = '''@file:Suppress("DEPRECATION")
+
+import com.android.build.gradle.LibraryExtension
+
+// ZS_PLUGIN_COMPILE_SDK_PATCH
+subprojects {
+    pluginManager.withPlugin("com.android.library") {
+        extensions.configure<LibraryExtension>("android") {
+            compileSdk = 37
+        }
+    }
+}
+
+'''
 
 
 def patch_plugin_compile_sdk() -> None:
-    """Raise compileSdk for Android library plugins (flutter_webrtc still uses API 31).
-
-    Must run from settings.gradle.kts via beforeProject + withPlugin so compileSdk
-    is raised when the android.library plugin is applied — afterEvaluate is too
-    late for :checkReleaseAarMetadata, and a subprojects block at the end of
-    build.gradle.kts may never affect included plugin projects.
-    """
-    build_gradle = ROOT / "android/build.gradle.kts"
-    if build_gradle.is_file():
-        text = build_gradle.read_text(encoding="utf-8")
-        text = _strip_zs_compile_sdk_patch(text)
-        strip_prefixes = (
-            '@file:Suppress("DEPRECATION")',
-            "import com.android.build.gradle.LibraryExtension",
-            "import org.gradle.api.ProjectState",
-        )
-        lines = [ln for ln in text.splitlines() if ln.strip() not in strip_prefixes]
-        text = "\n".join(lines).strip() + "\n"
-        if text and not text.endswith("\n"):
-            text += "\n"
-        build_gradle.write_text(text, encoding="utf-8")
+    """Raise compileSdk for Android library plugins (flutter_webrtc still uses API 31)."""
+    gradle_helper = ROOT / "android/zs_plugin_compile_sdk.gradle"
+    gradle_helper.write_text(_ZS_PLUGIN_COMPILE_SDK_GRADLE, encoding="utf-8")
 
     settings = ROOT / "android/settings.gradle.kts"
     if not settings.is_file():
         raise SystemExit(f"Missing {settings} — run flutter create first.")
     st = _strip_zs_compile_sdk_patch(settings.read_text(encoding="utf-8"))
-    block = """
-// ZS_PLUGIN_COMPILE_SDK_PATCH - flutter_webrtc / old plugins still declare API 31.
-gradle.beforeProject { proj ->
-    if (proj === proj.rootProject) return@beforeProject
-    proj.pluginManager.withPlugin("com.android.library") {
-        val android = proj.extensions.findByName("android") ?: return@withPlugin
-        val setter = android.javaClass.methods.firstOrNull { method ->
-            method.name == "setCompileSdk" && method.parameterCount == 1
-        } ?: android.javaClass.methods.firstOrNull { method ->
-            method.name == "setCompileSdkVersion" && method.parameterCount == 1
-        }
-        setter?.invoke(android, 37)
-    }
-}
-"""
-    settings.write_text(st.rstrip() + "\n" + block, encoding="utf-8")
-    print(f"Patched plugin compileSdk in {settings}")
+    if "// ZS_PLUGIN_COMPILE_SDK_APPLY" not in st:
+        st = st.rstrip() + "\n\n// ZS_PLUGIN_COMPILE_SDK_APPLY\n"
+        st += 'apply(from = "zs_plugin_compile_sdk.gradle")\n'
+    settings.write_text(st, encoding="utf-8")
+
+    build_gradle = ROOT / "android/build.gradle.kts"
+    if not build_gradle.is_file():
+        raise SystemExit(f"Missing {build_gradle} — run flutter create first.")
+    text = _strip_zs_compile_sdk_patch(build_gradle.read_text(encoding="utf-8"))
+    if "// ZS_PLUGIN_COMPILE_SDK_PATCH" not in text:
+        text = _BUILD_GRADLE_HEADER + text.lstrip()
+    build_gradle.write_text(text, encoding="utf-8")
+    print("Patched plugin compileSdk (zs_plugin_compile_sdk.gradle + build.gradle.kts)")
 
 
 def patch_agp_kotlin_compat() -> None:
