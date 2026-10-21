@@ -58,7 +58,11 @@ class AlarmSoundCatalog {
         }
       }
     } catch (_) {}
-    _custom = _custom.where((o) => resolvePath(o.ref) != null).toList();
+    final kept = <AlarmSoundOption>[];
+    for (final o in _custom) {
+      if (await resolvePath(o.ref) != null) kept.add(o);
+    }
+    _custom = kept;
   }
 
   Future<void> _saveCustom() async {
@@ -97,13 +101,12 @@ class AlarmSoundCatalog {
   }
 
   Future<AlarmSoundOption?> importCustom() async {
-    final result = await FilePicker.platform.pickFiles(
+    final pickedFiles = await FilePicker.pickFiles(
       type: FileType.custom,
       allowedExtensions: ['mp3', 'wav', 'm4a', 'aac', 'ogg', 'flac'],
-      withData: false,
     );
-    if (result == null || result.files.isEmpty) return null;
-    final picked = result.files.single;
+    if (pickedFiles.isEmpty) return null;
+    final picked = pickedFiles.single;
     final srcPath = picked.path;
     if (srcPath == null) return null;
 
