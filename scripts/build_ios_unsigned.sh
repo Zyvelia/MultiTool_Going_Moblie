@@ -43,7 +43,8 @@ flutter build ios --release --config-only --no-codesign
 python3 scripts/patch_ios_pub_plugins.py
 
 echo "--- Dart analysis (fail fast before xcodebuild Run Script) ---"
-flutter analyze --no-fatal-infos --no-fatal-warnings
+rm -rf _ci_test_android _gradle_probe
+flutter analyze lib test --no-fatal-infos --no-fatal-warnings
 
 echo "--- Prepare Xcode dependency state ---"
 # A stale/corrupt SwiftPM Package.resolved can produce misleading JSON/

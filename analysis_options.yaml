@@ -13,6 +13,9 @@ analyzer:
   exclude:
     - build/**
     - android/**
+    - ios/**
+    - _ci_test_android/**
+    - _gradle_probe/**
 
 linter:
   # The lint rules applied to this project can be customized in the

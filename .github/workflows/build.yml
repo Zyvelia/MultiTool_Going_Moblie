@@ -32,7 +32,9 @@ jobs:
       - run: flutter pub get
 
       - name: Analyze Dart
-        run: flutter analyze --no-fatal-infos --no-fatal-warnings
+        run: |
+          rm -rf _ci_test_android _gradle_probe
+          flutter analyze lib test --no-fatal-infos --no-fatal-warnings
 
       - name: Patch pub plugin Android Gradle
         run: python3 scripts/patch_android.py --pub-plugins-only
@@ -86,7 +88,8 @@ jobs:
           python3 scripts/verify_firebase.py
           flutter pub get
           python3 scripts/patch_ios_pub_plugins.py
-          flutter analyze --no-fatal-infos --no-fatal-warnings
+          rm -rf _ci_test_android _gradle_probe
+          flutter analyze lib test --no-fatal-infos --no-fatal-warnings
           dart run flutter_launcher_icons
           dart run flutter_native_splash:create
 
