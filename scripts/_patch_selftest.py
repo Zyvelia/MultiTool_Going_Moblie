@@ -48,30 +48,22 @@ def test_android() -> None:
         "class MainActivity : FlutterActivity()",
         "class MainActivity : AudioServiceActivity()",
     )
-    out = pa._add_screen_security(kt, Path("MainActivity.kt"))
-    assert "zsmultitool/screen_security" in out
-    assert "FLAG_SECURE" in out
-    assert "import android.view.WindowManager" in out
-    assert out.count("class MainActivity") == 1
-    assert out.rstrip().endswith("}")
-    # Re-running must be a no-op.
-    assert pa._add_screen_security(out, Path("MainActivity.kt")) == out
+    assert "AudioServiceActivity" in kt
+    assert "FLAG_SECURE" not in kt
+    assert kt.count("class MainActivity") == 1
     print("--- MainActivity.kt ---")
-    print(out)
+    print(kt)
 
 
 def test_ios() -> None:
     pi = load("patch_ios_appdelegate")
     text = APP_DELEGATE
     assert pi.RETURN_LINE in text
-    text = text.replace(pi.RETURN_LINE, pi.RETURN_REPLACEMENT, 1)
-    closing = text.rstrip()
-    assert closing.endswith("}")
-    out = closing[:-1].rstrip("\n") + "\n" + pi.METHOD + "}\n"
+    out = text.replace(pi.RETURN_LINE, pi.RETURN_REPLACEMENT, 1)
+    out = out.replace("import Flutter\n", "import Flutter\nimport FirebaseCore\n", 1)
     assert pi.MARKER in out
-    assert out.count("func setUpScreenSecurity") == 1
+    assert "screen_security" not in out
     assert out.count("@objc class AppDelegate") == 1
-    assert out.rstrip().endswith("}")
     print("--- AppDelegate.swift ---")
     print(out)
 

@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../theme/app_colors.dart';
 import '../models/vault_entry.dart';
-import '../services/screen_security_service.dart';
 import '../services/settings_service.dart';
 import '../services/user_facing_error.dart';
 import '../services/vault_api_service.dart';
@@ -45,11 +44,6 @@ class _VaultScreenState extends State<VaultScreen>
   static const _idleLockAfter = Duration(minutes: 3);
   static const _clipboardClearAfter = Duration(seconds: 30);
 
-  final _screenSecurity = ScreenSecurityService.instance;
-  StreamSubscription<void>? _screenshotSub;
-  StreamSubscription<bool>? _captureSub;
-  bool _screenCaptured = false;
-
   late TabController _tabController;
 
   @override
@@ -57,33 +51,7 @@ class _VaultScreenState extends State<VaultScreen>
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
     WidgetsBinding.instance.addObserver(this);
-    _initScreenSecurity();
     _init();
-  }
-
-  Future<void> _initScreenSecurity() async {
-    await _screenSecurity.protect();
-    _screenshotSub = _screenSecurity.onScreenshot.listen((_) {
-      // iOS cannot block the capture, so the least-bad response is to drop the
-      // codes and tell the user the shot they just took contains one.
-      if (!mounted) return;
-      setState(_hideAllCodes);
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Screenshot detected — codes hidden'),
-          duration: Duration(seconds: 3),
-        ),
-      );
-    });
-    _captureSub = _screenSecurity.onCaptureChanged.listen((captured) {
-      if (!mounted) return;
-      setState(() {
-        _screenCaptured = captured;
-        if (captured) _hideAllCodes();
-      });
-    });
-    final captured = await _screenSecurity.isCaptured();
-    if (mounted && captured) setState(() => _screenCaptured = true);
   }
 
   @override
@@ -142,10 +110,6 @@ class _VaultScreenState extends State<VaultScreen>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    _screenshotSub?.cancel();
-    _captureSub?.cancel();
-    // Leaving FLAG_SECURE set would make the rest of the app unscreenshottable.
-    _screenSecurity.unprotect();
     _totpTimer?.cancel();
     _idleTimer?.cancel();
     _clipboardTimer?.cancel();
@@ -216,15 +180,6 @@ class _VaultScreenState extends State<VaultScreen>
   }
 
   void _toggleReveal(String id) {
-    if (!_revealedIds.contains(id) && _screenCaptured) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Screen is being recorded — stop recording to view codes'),
-          duration: Duration(seconds: 3),
-        ),
-      );
-      return;
-    }
     setState(() {
       if (_revealedIds.remove(id)) {
         _revealTimers.remove(id)?.cancel();
@@ -348,24 +303,6 @@ class _VaultScreenState extends State<VaultScreen>
         onPointerDown: (_) => _resetIdleTimer(),
         child: Column(
           children: [
-            if (_screenCaptured)
-              Container(
-                width: double.infinity,
-                color: Colors.red.withValues(alpha: 0.85),
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                child: const Row(
-                  children: [
-                    Icon(Icons.videocam, size: 16, color: Colors.white),
-                    SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        'Screen is being recorded or mirrored',
-                        style: TextStyle(color: Colors.white, fontSize: 12),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
             Expanded(
               child: TabBarView(
                 controller: _tabController,
