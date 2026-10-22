@@ -327,6 +327,26 @@ def _bump_compile_sdk_in_gradle(text: str, sdk: int) -> tuple[str, int]:
     text = re.sub(r"compileSdk\s*=\s*(\d+)", bump_kts, text)
     # Groovy DSL: `compileSdk 34` (no '=') — used by just_audio and others.
     text = re.sub(r"compileSdk\s+(?!=)(\d+)", bump_kts, text)
+
+    # Flutter 3.44 defaults plugins to compileSdk 36 via flutter.compileSdkVersion; :jni needs 37+.
+    flutter_refs = (
+        (r"compileSdk\s*=\s*flutter\.compileSdkVersion\b", f"compileSdk = {sdk}"),
+        (r"compileSdk\s+flutter\.compileSdkVersion\b", f"compileSdk = {sdk}"),
+        (r"compileSdkVersion\s+flutter\.compileSdkVersion\b", f"compileSdkVersion {sdk}"),
+        (r"compileSdk\s*=\s*flutterCompileSdkVersion\b", f"compileSdk = {sdk}"),
+        (r"compileSdk\s*=\s*project\.ext\.compileSdk\b", f"compileSdk = {sdk}"),
+    )
+    for pattern, repl in flutter_refs:
+        text, n = re.subn(pattern, repl, text)
+        changes += n
+
+    text, n = re.subn(
+        r'val flutterCompileSdkVersion = flutterExtension\.intProperty\("compileSdkVersion"\)',
+        f"val flutterCompileSdkVersion = {sdk}",
+        text,
+    )
+    changes += n
+
     return text, changes
 
 
@@ -345,15 +365,23 @@ def patch_pub_android_plugins(compile_sdk: int = _ZS_COMPILE_SDK) -> None:
         android_dir = root / "android"
         if not android_dir.is_dir():
             continue
-        for gradle_name in ("build.gradle", "build.gradle.kts"):
-            path = android_dir / gradle_name
-            if not path.is_file():
-                continue
+        gradle_files = [
+            android_dir / name
+            for name in ("build.gradle", "build.gradle.kts")
+            if (android_dir / name).is_file()
+        ]
+        gradle_files.extend(
+            p for p in sorted(android_dir.glob("*.gradle")) if p.name not in {
+                "build.gradle",
+                "build.gradle.kts",
+            }
+        )
+        for path in gradle_files:
             original = path.read_text(encoding="utf-8")
-            updated, n = _bump_compile_sdk_in_gradle(original, compile_sdk)
-            if n and updated != original:
+            updated, _ = _bump_compile_sdk_in_gradle(original, compile_sdk)
+            if updated != original:
                 path.write_text(updated, encoding="utf-8")
-                patched.append(f"{pkg.get('name', root.name)}/{gradle_name}")
+                patched.append(f"{pkg.get('name', root.name)}/{path.name}")
 
     if patched:
         print(f"Bumped compileSdk to {compile_sdk} in: {', '.join(patched)}")
