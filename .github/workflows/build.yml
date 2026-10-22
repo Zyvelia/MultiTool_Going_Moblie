@@ -82,6 +82,7 @@ jobs:
           flutter create --platforms=android,ios --org com.zsmultitool --no-pub .
           python3 scripts/verify_firebase.py
           flutter pub get
+          python3 scripts/patch_ios_pub_plugins.py
           dart run flutter_launcher_icons
           dart run flutter_native_splash:create
 

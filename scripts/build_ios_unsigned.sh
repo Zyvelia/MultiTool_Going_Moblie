@@ -39,6 +39,7 @@ python3 scripts/patch_ios_unsigned.py
 
 echo "--- Flutter config (no codesign / no team check) ---"
 flutter build ios --release --config-only --no-codesign
+python3 scripts/patch_ios_pub_plugins.py
 
 echo "--- Prepare Xcode dependency state ---"
 # A stale/corrupt SwiftPM Package.resolved can produce misleading JSON/

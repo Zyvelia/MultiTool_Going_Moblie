@@ -46,6 +46,7 @@ dev_dependencies:
   flutter_native_splash: ^2.4.8
 
 # path_provider_foundation 2.6.0 can break unsigned IPA layout (Flutter #187752).
+# device_info_plus 12.4+: patch_ios_pub_plugins.py after pub get (Xcode 16 CI).
 dependency_overrides:
   path_provider_foundation: 2.5.1
   archive: ^4.1.0
