@@ -54,6 +54,7 @@ find ios -path "*/swiftpm/Package.resolved" -type f -delete 2>/dev/null || true
 echo "--- xcodebuild (unsigned) ---"
 xattr -cr . 2>/dev/null || true
 rm -rf "$DERIVED"
+mkdir -p "$DERIVED"
 
 # Build the workspace, not the bare .xcodeproj, whenever CocoaPods is in
 # play (e.g. the `printing` plugin) — the workspace is what pulls in the
@@ -89,7 +90,11 @@ XC_STATUS=${PIPESTATUS[0]}
 set -e
 if [ "$XC_STATUS" -ne 0 ]; then
   echo "=== xcodebuild failed (exit $XC_STATUS) — last 80 lines ===" >&2
-  tail -n 80 "$XC_LOG" >&2
+  if [ -f "$XC_LOG" ]; then
+    tail -n 80 "$XC_LOG" >&2
+  else
+    echo "(no log at $XC_LOG)" >&2
+  fi
   echo "=== Flutter / Dart errors in log (if any) ===" >&2
   grep -E "Error:|error:|FAILED|PhaseScriptExecution" "$XC_LOG" | tail -n 40 >&2 || true
   exit "$XC_STATUS"

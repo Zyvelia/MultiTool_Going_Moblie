@@ -158,6 +158,27 @@ def patch_main_activity() -> None:
     print(f"Patched {path}")
 
 
+def patch_min_sdk() -> None:
+    """`health` (Health Connect / steps sync) requires minSdk 26+."""
+    path = ROOT / "android/app/build.gradle.kts"
+    gradle = path.read_text(encoding="utf-8")
+    if re.search(r"minSdk\s*=\s*26\b", gradle):
+        print(f"minSdk already 26 in {path}")
+        return
+    gradle, n = re.subn(
+        r"minSdk\s*=\s*flutter\.minSdkVersion",
+        "minSdk = 26",
+        gradle,
+        count=1,
+    )
+    if n == 0:
+        gradle, n = re.subn(r"minSdk\s*=\s*\d+", "minSdk = 26", gradle, count=1)
+    if n == 0:
+        raise SystemExit(f"Could not patch minSdk in {path}")
+    path.write_text(gradle, encoding="utf-8")
+    print(f"Patched minSdk to 26 in {path}")
+
+
 def patch_compile_sdk() -> None:
     path = ROOT / "android/app/build.gradle.kts"
     gradle = path.read_text(encoding="utf-8")
@@ -474,6 +495,7 @@ def main() -> None:
     patch_health_connect()
     patch_main_activity()
     patch_compile_sdk()
+    patch_min_sdk()
     patch_plugin_compile_sdk()
     patch_core_library_desugaring()
     patch_agp_kotlin_compat()
