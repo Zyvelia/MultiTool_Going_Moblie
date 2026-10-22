@@ -325,6 +325,8 @@ def _bump_compile_sdk_in_gradle(text: str, sdk: int) -> tuple[str, int]:
 
     text = re.sub(r"compileSdkVersion\s+(\d+)", bump_version, text)
     text = re.sub(r"compileSdk\s*=\s*(\d+)", bump_kts, text)
+    # Groovy DSL: `compileSdk 34` (no '=') — used by just_audio and others.
+    text = re.sub(r"compileSdk\s+(?!=)(\d+)", bump_kts, text)
     return text, changes
 
 
