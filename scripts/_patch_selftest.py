@@ -38,20 +38,12 @@ def load(name: str):
 
 
 def test_android() -> None:
-    pa = load("patch_android")
-    kt = MAIN_ACTIVITY
-    kt = kt.replace(
-        "import io.flutter.embedding.android.FlutterActivity",
-        "import com.ryanheise.audioservice.AudioServiceActivity",
-    )
-    kt = kt.replace(
-        "class MainActivity : FlutterActivity()",
-        "class MainActivity : AudioServiceActivity()",
-    )
+    overlay = HERE / "android_overlay" / "kotlin" / "MainActivity.kt"
+    kt = overlay.read_text(encoding="utf-8")
     assert "AudioServiceActivity" in kt
-    assert "FLAG_SECURE" not in kt
-    assert kt.count("class MainActivity") == 1
-    print("--- MainActivity.kt ---")
+    assert "screen_security" not in kt
+    assert "StepsGlanceWidget" in kt
+    print("--- MainActivity.kt (overlay) ---")
     print(kt)
 
 

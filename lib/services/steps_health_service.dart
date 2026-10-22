@@ -105,8 +105,16 @@ class StepsHealthService extends ChangeNotifier {
   Future<void> _ensureHealthPlugin() async {
     if (!healthSyncAvailable || !syncWithHealth) return;
     if (configured) return;
-    await _health.configure();
-    configured = true;
+    try {
+      await _health.configure();
+      configured = true;
+    } catch (e, st) {
+      debugPrint('Health plugin configure failed: $e\n$st');
+      healthErrorMessage =
+          'Health Connect is not available on this device yet. Step counting still uses the motion sensor.';
+      syncWithHealth = false;
+      configured = false;
+    }
   }
 
   Future<void> setAllowTracking(bool value) async {
@@ -214,13 +222,19 @@ class StepsHealthService extends ChangeNotifier {
   }
 
   Future<void> startTracking() async {
-    await _ensureConfigured();
-    attachPedometer();
-    await _pedometer.start();
-    _pullTodayFromPedometer();
-    _wasBelowGoal = todaySteps < dailyGoal;
-    await _runCalendarRebuild();
-    notifyListeners();
+    try {
+      await _ensureConfigured();
+      attachPedometer();
+      await _pedometer.start();
+      _pullTodayFromPedometer();
+      _wasBelowGoal = todaySteps < dailyGoal;
+      await _runCalendarRebuild();
+      notifyListeners();
+    } catch (e, st) {
+      debugPrint('startTracking failed: $e\n$st');
+      healthErrorMessage = 'Could not start step tracking. Try opening Settings and allowing physical activity.';
+      notifyListeners();
+    }
   }
 
   Future<void> refresh({bool requestHealthPermission = false}) async {

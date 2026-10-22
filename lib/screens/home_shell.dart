@@ -37,6 +37,10 @@ class HomeShellState extends State<HomeShell> {
   String? _hostname;
   bool _checked = false;
 
+  /// Steps touches pedometer + Health Connect; defer until the tab is opened
+  /// so cold start stays safe on Android 11 / Samsung (Galaxy S20+).
+  bool _stepsTabBuilt = false;
+
   @override
   void initState() {
     super.initState();
@@ -107,6 +111,7 @@ class HomeShellState extends State<HomeShell> {
   // Tapping a destination animates the PageView there — the swipe
   // gesture and the bottom nav stay in sync either way you navigate.
   void _onDestinationSelected(int i) {
+    if (i == HomeTabs.steps) _stepsTabBuilt = true;
     setState(() => _index = i);
     // Guards a narrow edge case unique to the notification deep-link
     // path: if a tap resolves before the PC hostname is set up, build()
@@ -126,7 +131,10 @@ class HomeShellState extends State<HomeShell> {
   // with the finger) and on settle, so the bottom nav's highlighted
   // tab tracks the swipe in real time instead of jumping at the end.
   void _onPageChanged(int i) {
-    setState(() => _index = i);
+    setState(() {
+      _index = i;
+      if (i == HomeTabs.steps) _stepsTabBuilt = true;
+    });
   }
 
   @override
@@ -145,7 +153,11 @@ class HomeShellState extends State<HomeShell> {
       const _KeepAlive(child: NotesScreen()),
       const _KeepAlive(child: RemindersScreen()),
       const _KeepAlive(child: ClockScreen()),
-      const _KeepAlive(child: StepsScreen()),
+      _KeepAlive(
+        child: _stepsTabBuilt
+            ? const StepsScreen()
+            : const SizedBox.shrink(),
+      ),
       const _KeepAlive(child: GamesScreen()),
       const _KeepAlive(child: YtScreen()),
       const _KeepAlive(child: QuickSendScreen()),

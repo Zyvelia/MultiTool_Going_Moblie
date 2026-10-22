@@ -41,6 +41,7 @@ python3 scripts/patch_ios_pub_plugins.py
 echo "--- Flutter config (no codesign / no team check) ---"
 flutter build ios --release --config-only --no-codesign
 python3 scripts/patch_ios_pub_plugins.py
+python3 scripts/patch_ios_deployment.py
 
 echo "--- Dart analysis (fail fast before xcodebuild Run Script) ---"
 rm -rf _ci_test_android _gradle_probe

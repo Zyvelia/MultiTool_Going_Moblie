@@ -15,41 +15,65 @@ import shutil
 from urllib.parse import unquote, urlparse
 
 ROOT = Path(__file__).resolve().parent.parent
+OVERLAY = Path(__file__).resolve().parent / "android_overlay"
+CORE_PERMS_MARKER = "ZS_CORE_PERMS"
+
+
+def _normalize_manifest(xml: str) -> str:
+    xml = re.sub(r'(\sandroid:allowBackup="false")+', ' android:allowBackup="false"', xml)
+    if 'android:allowBackup="false"' not in xml:
+        xml, n = re.subn(
+            r"(<application)(\s[^>]*)?>",
+            r'\1\2 android:allowBackup="false">',
+            xml,
+            count=1,
+        )
+        if n == 0:
+            raise SystemExit("Could not patch allowBackup in AndroidManifest.xml")
+    return xml
 
 
 def patch_manifest() -> None:
     path = ROOT / "android/app/src/main/AndroidManifest.xml"
     xml = path.read_text(encoding="utf-8")
-    perms = (
-        '    <uses-permission android:name="android.permission.WAKE_LOCK"/>\n'
-        '    <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>\n'
-        '    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"/>\n'
-        '    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM"/>\n'
-        '    <uses-permission android:name="android.permission.USE_EXACT_ALARM"/>\n'
-        '    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>\n'
-    )
-    xml, n = re.subn(r"(<manifest[^>]*>\n)", r"\1" + perms, xml, count=1)
-    if n == 0:
-        raise SystemExit(f"Could not patch permissions in {path}")
-    # flutter_secure_storage v10+ — Google Drive backup can break key unwrap.
-    xml, n2 = re.subn(
-        r'(<application)(\s[^>]*)?>',
-        r'\1\2 android:allowBackup="false">',
+    if CORE_PERMS_MARKER not in xml:
+        perms = (
+            f"    <!-- {CORE_PERMS_MARKER} -->\n"
+            '    <uses-permission android:name="android.permission.WAKE_LOCK"/>\n'
+            '    <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>\n'
+            '    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"/>\n'
+            '    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM"/>\n'
+            '    <uses-permission android:name="android.permission.USE_EXACT_ALARM"/>\n'
+            '    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>\n'
+            '    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>\n'
+        )
+        xml, n = re.subn(r"(<manifest[^>]*>\n)", r"\1" + perms, xml, count=1)
+        if n == 0:
+            raise SystemExit(f"Could not patch permissions in {path}")
+    xml = _normalize_manifest(xml)
+    path.write_text(xml, encoding="utf-8")
+    print(f"Patched {path}")
+
+
+def _strip_health_activity_alias(xml: str) -> str:
+    """Remove API-34-only permission alias (breaks some Android 11–12 devices)."""
+    return re.sub(
+        r"\s*<!-- ZS_HEALTH_CONNECT -->\s*"
+        r"<activity-alias\b[^>]*ViewPermissionUsageActivity\b[\s\S]*?</activity-alias>\s*",
+        "\n",
         xml,
         count=1,
     )
-    if n2 == 0:
-        raise SystemExit(f"Could not patch allowBackup in {path}")
-    path.write_text(xml, encoding="utf-8")
-    print(f"Patched {path}")
 
 
 def patch_health_connect() -> None:
     """Health Connect / step reads (health package)."""
     path = ROOT / "android/app/src/main/AndroidManifest.xml"
     xml = path.read_text(encoding="utf-8")
+    xml = _strip_health_activity_alias(xml)
     marker = "ZS_HEALTH_CONNECT"
     if marker in xml:
+        path.write_text(xml, encoding="utf-8")
         print(f"Health Connect manifest already patched in {path}")
         return
 
@@ -90,22 +114,10 @@ def patch_health_connect() -> None:
         if n == 0:
             raise SystemExit(f"Could not add Health Connect intent-filter in {path}")
 
-    alias = (
-        f"        <!-- {marker} -->\n"
-        '        <activity-alias\n'
-        '             android:name="ViewPermissionUsageActivity"\n'
-        '             android:exported="true"\n'
-        '             android:targetActivity=".MainActivity"\n'
-        '             android:permission="android.permission.START_VIEW_PERMISSION_USAGE">\n'
-        "            <intent-filter>\n"
-        '                <action android:name="android.intent.action.VIEW_PERMISSION_USAGE" />\n'
-        '                <category android:name="android.intent.category.HEALTH_PERMISSIONS" />\n'
-        "            </intent-filter>\n"
-        "        </activity-alias>\n"
-    )
-    xml, n = re.subn(r"(</application>)", alias + r"\1", xml, count=1)
-    if n == 0:
-        raise SystemExit(f"Could not add Health Connect activity-alias in {path}")
+    # Omit ViewPermissionUsageActivity / START_VIEW_PERMISSION_USAGE here — that
+    # permission is API 34+ and has caused startup issues on Android 11–12
+    # (e.g. Galaxy S20+). Health Connect still works via Play install + rationale
+    # intent on MainActivity; add the alias back when minSdk is 34 if needed.
 
     path.write_text(xml, encoding="utf-8")
     print(f"Patched Health Connect in {path}")
@@ -141,21 +153,56 @@ def patch_notification_receivers() -> None:
     print(f"Patched notification receivers in {path}")
 
 
-def patch_main_activity() -> None:
-    matches = glob.glob(str(ROOT / "android/app/src/main/kotlin/**/MainActivity.kt"), recursive=True)
-    if not matches:
-        raise SystemExit("Could not find MainActivity.kt")
-    path = Path(matches[0])
-    kt = path.read_text(encoding="utf-8")
-    kt = kt.replace(
-        "import io.flutter.embedding.android.FlutterActivity",
-        "import com.ryanheise.audioservice.AudioServiceActivity",
-    )
-    kt = kt.replace("class MainActivity: FlutterActivity()", "class MainActivity : AudioServiceActivity()")
-    kt = kt.replace("class MainActivity : FlutterActivity()", "class MainActivity : AudioServiceActivity()")
+def copy_android_overlay() -> None:
+    """Copy tracked Kotlin + widget resources (android/ is not in git)."""
+    kotlin_src = OVERLAY / "kotlin"
+    if not kotlin_src.is_dir():
+        raise SystemExit(f"Missing {kotlin_src}")
 
-    path.write_text(kt, encoding="utf-8")
-    print(f"Patched {path}")
+    dest_pkg = ROOT / "android/app/src/main/kotlin/com/zsmultitool/multi_tool_remote"
+    dest_pkg.mkdir(parents=True, exist_ok=True)
+    for name in ("MainActivity.kt", "StepsGlanceWidget.kt"):
+        shutil.copy2(kotlin_src / name, dest_pkg / name)
+        print(f"Installed {dest_pkg / name}")
+
+    for sub in ("layout", "xml"):
+        src_dir = OVERLAY / "res" / sub
+        if not src_dir.is_dir():
+            continue
+        dest_dir = ROOT / "android/app/src/main/res" / sub
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        for f in src_dir.iterdir():
+            if f.is_file():
+                shutil.copy2(f, dest_dir / f.name)
+                print(f"Installed {dest_dir / f.name}")
+
+
+def patch_steps_widget_manifest() -> None:
+    path = ROOT / "android/app/src/main/AndroidManifest.xml"
+    xml = path.read_text(encoding="utf-8")
+    marker = "ZS_STEPS_GLANCE_WIDGET"
+    if marker in xml:
+        print(f"Steps widget already in {path}")
+        return
+    block = (
+        f"        <!-- {marker} -->\n"
+        '        <receiver\n'
+        '            android:name=".StepsGlanceWidget"\n'
+        '            android:exported="true"\n'
+        '            android:label="Steps today">\n'
+        "            <intent-filter>\n"
+        '                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />\n'
+        "            </intent-filter>\n"
+        "            <meta-data\n"
+        '                android:name="android.appwidget.provider"\n'
+        '                android:resource="@xml/steps_glance_widget_info" />\n'
+        "        </receiver>\n"
+    )
+    xml, n = re.subn(r"(</application>)", block + r"\1", xml, count=1)
+    if n == 0:
+        raise SystemExit(f"Could not add steps widget receiver in {path}")
+    path.write_text(xml, encoding="utf-8")
+    print(f"Patched steps widget in {path}")
 
 
 def patch_min_sdk() -> None:
@@ -493,7 +540,8 @@ def main() -> None:
     patch_manifest()
     patch_notification_receivers()
     patch_health_connect()
-    patch_main_activity()
+    copy_android_overlay()
+    patch_steps_widget_manifest()
     patch_compile_sdk()
     patch_min_sdk()
     patch_plugin_compile_sdk()

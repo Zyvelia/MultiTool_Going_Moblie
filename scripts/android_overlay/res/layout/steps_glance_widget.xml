@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#1A0A12"
+    android:gravity="center_vertical"
+    android:orientation="vertical"
+    android:padding="12dp">
+
+    <TextView
+        android:id="@+id/steps_title"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Steps today"
+        android:textColor="#C9A3B4"
+        android:textSize="11sp" />
+
+    <TextView
+        android:id="@+id/steps_count"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="—"
+        android:textColor="#FF4DA8"
+        android:textSize="22sp" />
+</LinearLayout>
