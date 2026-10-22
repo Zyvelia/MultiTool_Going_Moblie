@@ -393,7 +393,10 @@ def patch_pub_android_plugins(compile_sdk: int = _ZS_COMPILE_SDK) -> None:
     if patched:
         print(f"Bumped compileSdk to {compile_sdk} in: {', '.join(patched)}")
     else:
-        print("Pub Android Gradle patch: no compileSdk bumps needed.")
+        print(
+            f"Pub Android Gradle patch: no compileSdk bumps needed "
+            f"(pub packages already at {compile_sdk}+, or no android/build.gradle files)."
+        )
 
 
 def patch_agp_kotlin_compat() -> None:
