@@ -29,6 +29,11 @@ echo "=== iOS unsigned build ==="
 
 python3 scripts/patch_ios_firebase.py
 python3 scripts/patch_ios_plist.py
+if [[ "${PATCH_IOS_HEALTHKIT:-0}" == "1" ]]; then
+  python3 scripts/patch_ios_healthkit.py
+else
+  echo "Skipping HealthKit patch (Steps on iOS uses motion only). Set PATCH_IOS_HEALTHKIT=1 if you have a paid Apple Developer HealthKit App ID."
+fi
 python3 scripts/patch_ios_appdelegate.py
 python3 scripts/patch_ios_unsigned.py
 
@@ -67,7 +72,7 @@ xcodebuild \
   CODE_SIGNING_ALLOWED=NO \
   CODE_SIGNING_REQUIRED=NO \
   CODE_SIGN_IDENTITY="-" \
-  CODE_SIGN_ENTITLEMENTS="" \
+  CODE_SIGN_ENTITLEMENTS="$ROOT/ios/Runner/Runner.entitlements" \
   DEVELOPMENT_TEAM="" \
   PROVISIONING_PROFILE_SPECIFIER="" \
   EXPANDED_CODE_SIGN_IDENTITY="-" \

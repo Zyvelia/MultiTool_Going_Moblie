@@ -33,6 +33,10 @@ dependencies:
   firebase_core: ^4.2.1
   firebase_messaging: ^16.0.4
   flutter_webrtc: ^0.12.12
+  health: ^13.3.2
+  intl: ^0.20.3
+  pedometer: ^4.2.0
+  permission_handler: ^12.0.1
 
 dev_dependencies:
   flutter_test:

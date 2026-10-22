@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- **Steps** tab: pedometer-first (Design D arc), Today/Week/Month, local history + optional Health, Android activity permission + manifest patches, goal notification, streak/goal celebration, Android home widget.
+
 ## 2.7.0+4 (2026-03-21)
 
 ### Added

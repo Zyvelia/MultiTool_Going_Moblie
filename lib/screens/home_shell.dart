@@ -10,6 +10,7 @@ import 'quick_send_screen.dart';
 import 'chat_screen.dart';
 import 'settings_screen.dart';
 import 'stream_service_screen.dart';
+import 'steps_screen.dart';
 import '../services/settings_service.dart';
 import '../services/app_navigation.dart';
 import '../services/home_tabs.dart';
@@ -144,6 +145,7 @@ class HomeShellState extends State<HomeShell> {
       const _KeepAlive(child: NotesScreen()),
       const _KeepAlive(child: RemindersScreen()),
       const _KeepAlive(child: ClockScreen()),
+      const _KeepAlive(child: StepsScreen()),
       const _KeepAlive(child: GamesScreen()),
       const _KeepAlive(child: YtScreen()),
       const _KeepAlive(child: QuickSendScreen()),
@@ -173,6 +175,10 @@ class HomeShellState extends State<HomeShell> {
           NavigationDestination(
             icon: Icon(Icons.access_time),
             label: 'Clock',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.directions_walk),
+            label: 'Steps',
           ),
           NavigationDestination(icon: Icon(Icons.sports_esports), label: 'Games'),
           NavigationDestination(icon: Icon(Icons.download), label: 'YT'),

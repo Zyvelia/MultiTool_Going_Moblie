@@ -44,6 +44,73 @@ def patch_manifest() -> None:
     print(f"Patched {path}")
 
 
+def patch_health_connect() -> None:
+    """Health Connect / step reads (health package)."""
+    path = ROOT / "android/app/src/main/AndroidManifest.xml"
+    xml = path.read_text(encoding="utf-8")
+    marker = "ZS_HEALTH_CONNECT"
+    if marker in xml:
+        print(f"Health Connect manifest already patched in {path}")
+        return
+
+    extra_perms = (
+        '    <uses-permission android:name="android.permission.ACTIVITY_RECOGNITION"/>\n'
+        '    <uses-permission android:name="android.permission.health.READ_STEPS"/>\n'
+    )
+    xml, n = re.subn(r"(<manifest[^>]*>\n)", r"\1" + extra_perms, xml, count=1)
+    if n == 0:
+        raise SystemExit(f"Could not add health permissions in {path}")
+
+    queries = (
+        f"    <!-- {marker} -->\n"
+        "    <queries>\n"
+        '        <package android:name="com.google.android.apps.healthdata" />\n'
+        "        <intent>\n"
+        '            <action android:name="androidx.health.ACTION_SHOW_PERMISSIONS_RATIONALE" />\n'
+        "        </intent>\n"
+        "    </queries>\n"
+    )
+    xml, n = re.subn(r"(<manifest[^>]*>\n)", r"\1" + queries, xml, count=1)
+    if n == 0:
+        raise SystemExit(f"Could not add Health Connect queries in {path}")
+
+    intent_filter = (
+        f"            <!-- {marker} -->\n"
+        "            <intent-filter>\n"
+        '                <action android:name="androidx.health.ACTION_SHOW_PERMISSIONS_RATIONALE" />\n'
+        "            </intent-filter>\n"
+    )
+    if "ACTION_SHOW_PERMISSIONS_RATIONALE" not in xml:
+        xml, n = re.subn(
+            r"(<activity[^>]*android:name=" r'"[^"]*MainActivity"[^>]*>)',
+            r"\1\n" + intent_filter,
+            xml,
+            count=1,
+        )
+        if n == 0:
+            raise SystemExit(f"Could not add Health Connect intent-filter in {path}")
+
+    alias = (
+        f"        <!-- {marker} -->\n"
+        '        <activity-alias\n'
+        '             android:name="ViewPermissionUsageActivity"\n'
+        '             android:exported="true"\n'
+        '             android:targetActivity=".MainActivity"\n'
+        '             android:permission="android.permission.START_VIEW_PERMISSION_USAGE">\n'
+        "            <intent-filter>\n"
+        '                <action android:name="android.intent.action.VIEW_PERMISSION_USAGE" />\n'
+        '                <category android:name="android.intent.category.HEALTH_PERMISSIONS" />\n'
+        "            </intent-filter>\n"
+        "        </activity-alias>\n"
+    )
+    xml, n = re.subn(r"(</application>)", alias + r"\1", xml, count=1)
+    if n == 0:
+        raise SystemExit(f"Could not add Health Connect activity-alias in {path}")
+
+    path.write_text(xml, encoding="utf-8")
+    print(f"Patched Health Connect in {path}")
+
+
 def patch_notification_receivers() -> None:
     """flutter_local_notifications needs boot + scheduled receivers or alarms
     never fire after reboot / package update."""
@@ -468,6 +535,7 @@ def main() -> None:
     patch_firebase()
     patch_manifest()
     patch_notification_receivers()
+    patch_health_connect()
     patch_main_activity()
     patch_compile_sdk()
     patch_plugin_compile_sdk()

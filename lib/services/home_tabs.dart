@@ -8,10 +8,11 @@ class HomeTabs {
   static const int notes = 2;
   static const int reminders = 3;
   static const int clock = 4;
-  static const int games = 5;
-  static const int yt = 6;
-  static const int send = 7;
-  static const int chat = 8;
-  static const int pc = 9;
-  static const int settings = 10;
+  static const int steps = 5;
+  static const int games = 6;
+  static const int yt = 7;
+  static const int send = 8;
+  static const int chat = 9;
+  static const int pc = 10;
+  static const int settings = 11;
 }

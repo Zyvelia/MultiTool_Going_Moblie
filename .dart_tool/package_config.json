@@ -122,6 +122,12 @@
       "languageVersion": "3.1"
     },
     {
+      "name": "carp_serializable",
+      "rootUri": "file:///C:/Users/ItsZyVelia/AppData/Local/Pub/Cache/hosted/pub.dev/carp_serializable-3.0.0",
+      "packageUri": "lib/",
+      "languageVersion": "3.3"
+    },
+    {
       "name": "characters",
       "rootUri": "file:///C:/Users/ItsZyVelia/AppData/Local/Pub/Cache/hosted/pub.dev/characters-1.4.1",
       "packageUri": "lib/",
@@ -192,6 +198,18 @@
       "rootUri": "file:///C:/Users/ItsZyVelia/AppData/Local/Pub/Cache/hosted/pub.dev/dbus-0.7.15",
       "packageUri": "lib/",
       "languageVersion": "2.17"
+    },
+    {
+      "name": "device_info_plus",
+      "rootUri": "file:///C:/Users/ItsZyVelia/AppData/Local/Pub/Cache/hosted/pub.dev/device_info_plus-13.3.0",
+      "packageUri": "lib/",
+      "languageVersion": "3.10"
+    },
+    {
+      "name": "device_info_plus_platform_interface",
+      "rootUri": "file:///C:/Users/ItsZyVelia/AppData/Local/Pub/Cache/hosted/pub.dev/device_info_plus_platform_interface-8.1.0",
+      "packageUri": "lib/",
+      "languageVersion": "3.10"
     },
     {
       "name": "fake_async",
@@ -410,6 +428,12 @@
       "languageVersion": "3.0"
     },
     {
+      "name": "health",
+      "rootUri": "file:///C:/Users/ItsZyVelia/AppData/Local/Pub/Cache/hosted/pub.dev/health-13.3.2",
+      "packageUri": "lib/",
+      "languageVersion": "3.8"
+    },
+    {
       "name": "html",
       "rootUri": "file:///C:/Users/ItsZyVelia/AppData/Local/Pub/Cache/hosted/pub.dev/html-0.15.7",
       "packageUri": "lib/",
@@ -432,6 +456,12 @@
       "rootUri": "file:///C:/Users/ItsZyVelia/AppData/Local/Pub/Cache/hosted/pub.dev/image-4.12.0",
       "packageUri": "lib/",
       "languageVersion": "3.0"
+    },
+    {
+      "name": "intl",
+      "rootUri": "file:///C:/Users/ItsZyVelia/AppData/Local/Pub/Cache/hosted/pub.dev/intl-0.20.3",
+      "packageUri": "lib/",
+      "languageVersion": "3.9"
     },
     {
       "name": "jni",
@@ -612,6 +642,12 @@
       "rootUri": "file:///C:/Users/ItsZyVelia/AppData/Local/Pub/Cache/hosted/pub.dev/pdf_widget_wrapper-1.0.4",
       "packageUri": "lib/",
       "languageVersion": "2.18"
+    },
+    {
+      "name": "pedometer",
+      "rootUri": "file:///C:/Users/ItsZyVelia/AppData/Local/Pub/Cache/hosted/pub.dev/pedometer-4.2.0",
+      "packageUri": "lib/",
+      "languageVersion": "3.8"
     },
     {
       "name": "petitparser",
@@ -874,6 +910,12 @@
     {
       "name": "win32",
       "rootUri": "file:///C:/Users/ItsZyVelia/AppData/Local/Pub/Cache/hosted/pub.dev/win32-6.4.0",
+      "packageUri": "lib/",
+      "languageVersion": "3.10"
+    },
+    {
+      "name": "win32_registry",
+      "rootUri": "file:///C:/Users/ItsZyVelia/AppData/Local/Pub/Cache/hosted/pub.dev/win32_registry-3.0.3",
       "packageUri": "lib/",
       "languageVersion": "3.10"
     },
