@@ -6,10 +6,13 @@ Run once after generating platform folders (CI does this automatically):
 """
 from __future__ import annotations
 
+import argparse
 import glob
+import json
 import re
 from pathlib import Path
 import shutil
+from urllib.parse import unquote, urlparse
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -220,7 +223,7 @@ def _set_gradle_property(props_path: Path, key: str, value: str) -> None:
     props_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
-def _strip_zs_compile_sdk_patch(text: str) -> str:
+def _strip_zs_compile_sdk_patch_settings(text: str) -> str:
     for marker in ("// ZS_PLUGIN_COMPILE_SDK_PATCH", "// ZS_PLUGIN_COMPILE_SDK_APPLY"):
         if marker in text:
             text = text[: text.index(marker)].rstrip() + "\n"
@@ -232,40 +235,73 @@ def _strip_zs_compile_sdk_patch(text: str) -> str:
     return "\n".join(lines).strip() + "\n"
 
 
-_ZS_PLUGIN_COMPILE_SDK_GRADLE = """\
+def _strip_zs_compile_sdk_patch_build(text: str) -> str:
+    marker = "// ZS_PLUGIN_COMPILE_SDK_PATCH"
+    while marker in text:
+        idx = text.index(marker)
+        header_start = text.rfind('@file:Suppress("DEPRECATION")', 0, idx)
+        start = header_start if header_start >= 0 and idx - header_start < 200 else idx
+        sub_idx = text.find("subprojects {", start)
+        if sub_idx == -1:
+            text = text[:start].rstrip() + "\n"
+            break
+        brace = text.find("{", sub_idx)
+        depth = 0
+        end = brace
+        for j in range(brace, len(text)):
+            ch = text[j]
+            if ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    end = j + 1
+                    break
+        else:
+            text = text[:start].rstrip() + "\n"
+            break
+        text = (text[:start] + text[end:]).lstrip("\n")
+    return text.rstrip() + "\n" if text.strip() else "\n"
+
+
+_ZS_COMPILE_SDK = 37
+
+_ZS_PLUGIN_COMPILE_SDK_GRADLE = f"""\
 // ZS_PLUGIN_COMPILE_SDK_PATCH — Groovy (settings.gradle.kts cannot use Kotlin beforeProject).
-gradle.beforeProject { project ->
-    if (project == project.rootProject) {
+gradle.beforeProject {{ project ->
+    if (project == project.rootProject) {{
         return
-    }
-    project.pluginManager.withPlugin("com.android.library") {
-        def android = project.extensions.findByName("android")
-        if (android != null) {
-            try {
-                android.compileSdk = 37
-            } catch (Throwable ignored) {
-                try {
-                    android.compileSdkVersion = 37
-                } catch (Throwable ignored2) {
-                }
-            }
-        }
-    }
-}
+    }}
+    project.pluginManager.withPlugin("com.android.library") {{
+        project.afterEvaluate {{
+            def android = project.extensions.findByName("android")
+            if (android != null) {{
+                try {{
+                    android.compileSdk = {_ZS_COMPILE_SDK}
+                }} catch (Throwable ignored) {{
+                    try {{
+                        android.compileSdkVersion = {_ZS_COMPILE_SDK}
+                    }} catch (Throwable ignored2) {{
+                    }}
+                }}
+            }}
+        }}
+    }}
+}}
 """
 
-_BUILD_GRADLE_HEADER = '''@file:Suppress("DEPRECATION")
+_BUILD_GRADLE_HEADER = f'''@file:Suppress("DEPRECATION")
 
 import com.android.build.gradle.LibraryExtension
 
 // ZS_PLUGIN_COMPILE_SDK_PATCH
-subprojects {
-    pluginManager.withPlugin("com.android.library") {
-        extensions.configure<LibraryExtension>("android") {
-            compileSdk = 37
-        }
-    }
-}
+subprojects {{
+    pluginManager.withPlugin("com.android.library") {{
+        afterEvaluate {{
+            extensions.findByType<LibraryExtension>()?.compileSdk = {_ZS_COMPILE_SDK}
+        }}
+    }}
+}}
 
 '''
 
@@ -278,7 +314,7 @@ def patch_plugin_compile_sdk() -> None:
     settings = ROOT / "android/settings.gradle.kts"
     if not settings.is_file():
         raise SystemExit(f"Missing {settings} — run flutter create first.")
-    st = _strip_zs_compile_sdk_patch(settings.read_text(encoding="utf-8"))
+    st = _strip_zs_compile_sdk_patch_settings(settings.read_text(encoding="utf-8"))
     if "// ZS_PLUGIN_COMPILE_SDK_APPLY" not in st:
         st = st.rstrip() + "\n\n// ZS_PLUGIN_COMPILE_SDK_APPLY\n"
         st += 'apply(from = "zs_plugin_compile_sdk.gradle")\n'
@@ -287,11 +323,77 @@ def patch_plugin_compile_sdk() -> None:
     build_gradle = ROOT / "android/build.gradle.kts"
     if not build_gradle.is_file():
         raise SystemExit(f"Missing {build_gradle} — run flutter create first.")
-    text = _strip_zs_compile_sdk_patch(build_gradle.read_text(encoding="utf-8"))
-    if "// ZS_PLUGIN_COMPILE_SDK_PATCH" not in text:
-        text = _BUILD_GRADLE_HEADER + text.lstrip()
+    text = _strip_zs_compile_sdk_patch_build(build_gradle.read_text(encoding="utf-8"))
+    text = _BUILD_GRADLE_HEADER + text.lstrip()
     build_gradle.write_text(text, encoding="utf-8")
     print("Patched plugin compileSdk (zs_plugin_compile_sdk.gradle + build.gradle.kts)")
+
+
+def _package_root_from_config_uri(root_uri: str) -> Path | None:
+    if not root_uri:
+        return None
+    if root_uri.startswith("file:"):
+        parsed = urlparse(root_uri)
+        path = unquote(parsed.path)
+        if re.match(r"^/[A-Za-z]:", path):
+            path = path[1:]
+        return Path(path)
+    return (ROOT / root_uri).resolve()
+
+
+def _bump_compile_sdk_in_gradle(text: str, sdk: int) -> tuple[str, int]:
+    changes = 0
+
+    def bump_version(match: re.Match[str]) -> str:
+        nonlocal changes
+        current = int(match.group(1))
+        if current >= sdk:
+            return match.group(0)
+        changes += 1
+        return f"compileSdkVersion {sdk}"
+
+    def bump_kts(match: re.Match[str]) -> str:
+        nonlocal changes
+        current = int(match.group(1))
+        if current >= sdk:
+            return match.group(0)
+        changes += 1
+        return f"compileSdk = {sdk}"
+
+    text = re.sub(r"compileSdkVersion\s+(\d+)", bump_version, text)
+    text = re.sub(r"compileSdk\s*=\s*(\d+)", bump_kts, text)
+    return text, changes
+
+
+def patch_pub_android_plugins(compile_sdk: int = _ZS_COMPILE_SDK) -> None:
+    """Bump compileSdk in pub packages' android/build.gradle (after flutter pub get)."""
+    config_path = ROOT / ".dart_tool/package_config.json"
+    if not config_path.is_file():
+        print("Skip pub Android Gradle patch (no .dart_tool/package_config.json — run pub get).")
+        return
+
+    patched: list[str] = []
+    for pkg in json.loads(config_path.read_text(encoding="utf-8")).get("packages", []):
+        root = _package_root_from_config_uri(pkg.get("rootUri", ""))
+        if root is None or not root.is_dir():
+            continue
+        android_dir = root / "android"
+        if not android_dir.is_dir():
+            continue
+        for gradle_name in ("build.gradle", "build.gradle.kts"):
+            path = android_dir / gradle_name
+            if not path.is_file():
+                continue
+            original = path.read_text(encoding="utf-8")
+            updated, n = _bump_compile_sdk_in_gradle(original, compile_sdk)
+            if n and updated != original:
+                path.write_text(updated, encoding="utf-8")
+                patched.append(f"{pkg.get('name', root.name)}/{gradle_name}")
+
+    if patched:
+        print(f"Bumped compileSdk to {compile_sdk} in: {', '.join(patched)}")
+    else:
+        print("Pub Android Gradle patch: no compileSdk bumps needed.")
 
 
 def patch_agp_kotlin_compat() -> None:
@@ -379,4 +481,14 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--pub-plugins-only",
+        action="store_true",
+        help="Only bump compileSdk in pub package android/ Gradle files (run after flutter pub get).",
+    )
+    args = parser.parse_args()
+    if args.pub_plugins_only:
+        patch_pub_android_plugins()
+    else:
+        main()

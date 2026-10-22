@@ -31,6 +31,9 @@ jobs:
 
       - run: flutter pub get
 
+      - name: Patch pub plugin Android Gradle
+        run: python3 scripts/patch_android.py --pub-plugins-only
+
       - name: Generate launcher icons
         run: dart run flutter_launcher_icons
 
