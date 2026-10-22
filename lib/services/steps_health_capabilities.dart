@@ -11,7 +11,7 @@ abstract final class StepsHealthCapabilities {
 
   static bool get isIosMotionOnly => Platform.isIOS;
 
-  static String iosMotionOnlyMessage =>
+  static String get iosMotionOnlyMessage =>
       'No paid Apple Developer account is needed for steps. '
       'This app uses the iPhone motion sensor (like StepsApp). '
       'Apple Health import needs HealthKit on a paid developer account — '

@@ -18,7 +18,27 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 IOS = ROOT / "ios"
+ENTITLEMENTS = IOS / "Runner/Runner.entitlements"
 IOS_DEPLOYMENT_TARGET = "15.0"
+
+_EMPTY_ENTITLEMENTS = """<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict/>
+</plist>
+"""
+
+
+def ensure_runner_entitlements() -> None:
+    """Unsigned builds skip HealthKit; xcodebuild still expects this file."""
+    if ENTITLEMENTS.is_file():
+        text = ENTITLEMENTS.read_text(encoding="utf-8")
+        if "com.apple.developer.healthkit" in text:
+            print(f"Leaving HealthKit entitlements at {ENTITLEMENTS}")
+        return
+    ENTITLEMENTS.parent.mkdir(parents=True, exist_ok=True)
+    ENTITLEMENTS.write_text(_EMPTY_ENTITLEMENTS, encoding="utf-8")
+    print(f"Wrote empty {ENTITLEMENTS}")
 
 
 def bump_pbxproj_deployment_target() -> None:
@@ -92,6 +112,7 @@ def strip_pbxproj_signing() -> None:
 
 
 def main() -> None:
+    ensure_runner_entitlements()
     bump_pbxproj_deployment_target()
     strip_pbxproj_signing()
     patch_pbxproj_code_signing()

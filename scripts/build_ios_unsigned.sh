@@ -36,10 +36,14 @@ else
 fi
 python3 scripts/patch_ios_appdelegate.py
 python3 scripts/patch_ios_unsigned.py
+python3 scripts/patch_ios_pub_plugins.py
 
 echo "--- Flutter config (no codesign / no team check) ---"
 flutter build ios --release --config-only --no-codesign
 python3 scripts/patch_ios_pub_plugins.py
+
+echo "--- Dart analysis (fail fast before xcodebuild Run Script) ---"
+flutter analyze --no-fatal-infos --no-fatal-warnings
 
 echo "--- Prepare Xcode dependency state ---"
 # A stale/corrupt SwiftPM Package.resolved can produce misleading JSON/
@@ -63,6 +67,8 @@ fi
 echo "--- Validate Xcode project ---"
 xcodebuild "${XC_TARGET[@]}" -scheme Runner -configuration Release -sdk iphoneos -showBuildSettings >/dev/null
 
+XC_LOG="$ROOT/build/ios-derived/xcodebuild.log"
+set +e
 xcodebuild \
   "${XC_TARGET[@]}" \
   -scheme Runner \
@@ -77,7 +83,16 @@ xcodebuild \
   DEVELOPMENT_TEAM="" \
   PROVISIONING_PROFILE_SPECIFIER="" \
   EXPANDED_CODE_SIGN_IDENTITY="-" \
-  build
+  build 2>&1 | tee "$XC_LOG"
+XC_STATUS=${PIPESTATUS[0]}
+set -e
+if [ "$XC_STATUS" -ne 0 ]; then
+  echo "=== xcodebuild failed (exit $XC_STATUS) — last 80 lines ===" >&2
+  tail -n 80 "$XC_LOG" >&2
+  echo "=== Flutter / Dart errors in log (if any) ===" >&2
+  grep -E "Error:|error:|FAILED|PhaseScriptExecution" "$XC_LOG" | tail -n 40 >&2 || true
+  exit "$XC_STATUS"
+fi
 
 if [ ! -d "$APP" ]; then
   echo "ERROR: xcodebuild did not produce $APP" >&2
