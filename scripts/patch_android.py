@@ -266,67 +266,30 @@ def _strip_zs_compile_sdk_patch_build(text: str) -> str:
 
 _ZS_COMPILE_SDK = 37
 
-_ZS_PLUGIN_COMPILE_SDK_GRADLE = f"""\
-// ZS_PLUGIN_COMPILE_SDK_PATCH — Groovy (settings.gradle.kts cannot use Kotlin beforeProject).
-gradle.beforeProject {{ project ->
-    if (project == project.rootProject) {{
-        return
-    }}
-    project.pluginManager.withPlugin("com.android.library") {{
-        project.afterEvaluate {{
-            def android = project.extensions.findByName("android")
-            if (android != null) {{
-                try {{
-                    android.compileSdk = {_ZS_COMPILE_SDK}
-                }} catch (Throwable ignored) {{
-                    try {{
-                        android.compileSdkVersion = {_ZS_COMPILE_SDK}
-                    }} catch (Throwable ignored2) {{
-                    }}
-                }}
-            }}
-        }}
-    }}
-}}
-"""
-
-_BUILD_GRADLE_HEADER = f'''@file:Suppress("DEPRECATION")
-
-import com.android.build.gradle.LibraryExtension
-
-// ZS_PLUGIN_COMPILE_SDK_PATCH
-subprojects {{
-    pluginManager.withPlugin("com.android.library") {{
-        afterEvaluate {{
-            extensions.findByType<LibraryExtension>()?.compileSdk = {_ZS_COMPILE_SDK}
-        }}
-    }}
-}}
-
-'''
-
 
 def patch_plugin_compile_sdk() -> None:
-    """Raise compileSdk for Android library plugins (flutter_webrtc still uses API 31)."""
+    """Strip legacy Gradle hooks that set compileSdk in afterEvaluate (breaks AGP 9).
+
+    Old plugins (e.g. flutter_webrtc) are patched in-place after pub get via
+    patch_pub_android_plugins().
+    """
     gradle_helper = ROOT / "android/zs_plugin_compile_sdk.gradle"
-    gradle_helper.write_text(_ZS_PLUGIN_COMPILE_SDK_GRADLE, encoding="utf-8")
+    if gradle_helper.is_file():
+        gradle_helper.unlink()
 
     settings = ROOT / "android/settings.gradle.kts"
-    if not settings.is_file():
-        raise SystemExit(f"Missing {settings} — run flutter create first.")
-    st = _strip_zs_compile_sdk_patch_settings(settings.read_text(encoding="utf-8"))
-    if "// ZS_PLUGIN_COMPILE_SDK_APPLY" not in st:
-        st = st.rstrip() + "\n\n// ZS_PLUGIN_COMPILE_SDK_APPLY\n"
-        st += 'apply(from = "zs_plugin_compile_sdk.gradle")\n'
-    settings.write_text(st, encoding="utf-8")
+    if settings.is_file():
+        st = _strip_zs_compile_sdk_patch_settings(settings.read_text(encoding="utf-8"))
+        settings.write_text(st, encoding="utf-8")
 
     build_gradle = ROOT / "android/build.gradle.kts"
-    if not build_gradle.is_file():
-        raise SystemExit(f"Missing {build_gradle} — run flutter create first.")
-    text = _strip_zs_compile_sdk_patch_build(build_gradle.read_text(encoding="utf-8"))
-    text = _BUILD_GRADLE_HEADER + text.lstrip()
-    build_gradle.write_text(text, encoding="utf-8")
-    print("Patched plugin compileSdk (zs_plugin_compile_sdk.gradle + build.gradle.kts)")
+    if build_gradle.is_file():
+        text = _strip_zs_compile_sdk_patch_build(build_gradle.read_text(encoding="utf-8"))
+        build_gradle.write_text(text, encoding="utf-8")
+
+    print(
+        "Cleared runtime compileSdk hooks; run patch_android.py --pub-plugins-only after pub get."
+    )
 
 
 def _package_root_from_config_uri(root_uri: str) -> Path | None:
