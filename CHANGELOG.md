@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+### Fixed
+- Android music playback. The media service was never registered, so tapping a song threw `LateInitializationError` on the audio handler.
+
 ### Removed
 - **Steps** tab, pedometer, Health Connect, and the Android steps widget. The Health Connect plugin crashed on launch on Android 11 (Galaxy S20).
 

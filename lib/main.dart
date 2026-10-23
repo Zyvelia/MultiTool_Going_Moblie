@@ -3,9 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
-import 'package:audio_service/audio_service.dart';
-import 'package:just_audio_background/just_audio_background.dart';
-import 'services/app_navigation.dart';
+import 'services/audio_background.dart';
 import 'screens/home_shell.dart';
 import 'services/local_notification_service.dart';
 import 'services/reminder_service.dart';
@@ -67,18 +65,11 @@ Future<void> main() async {
   // registered as background audio so iOS doesn't suspend it when the
   // app isn't in the foreground.
   WidgetsBinding.instance.addPostFrameCallback((_) async {
-    await JustAudioBackground.init(
-      androidNotificationChannelId: 'com.zsmultitool.multi_tool_remote.audio',
-      androidNotificationChannelName: 'Music playback',
-      androidNotificationOngoing: true,
-      androidNotificationClickStartsActivity: true,
-      androidResumeOnClick: true,
-    );
-    AudioService.notificationClicked.listen((clicked) {
-      if (clicked) {
-        AppNavigation.goToMusic(openNowPlaying: true);
-      }
-    });
+    try {
+      await ensureAudioBackground();
+    } catch (e, st) {
+      debugPrint('Audio background init failed: $e\n$st');
+    }
     LocalNotificationService.instance.requestPermission();
     await ReminderService.instance.init();
     await AlarmService.instance.init();

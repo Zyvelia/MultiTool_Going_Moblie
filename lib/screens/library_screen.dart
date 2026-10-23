@@ -8,6 +8,7 @@ import '../models/now_playing.dart';
 import '../models/server_profile.dart';
 import '../models/song.dart';
 import '../services/api_service.dart';
+import '../services/audio_background.dart';
 import '../services/connectivity_service.dart';
 import '../services/library_index_service.dart';
 import '../services/app_navigation.dart';
@@ -121,7 +122,21 @@ class LibraryScreenState extends State<LibraryScreen>
   AudioPlayer get _player => _audio!;
   bool get _hasPlayer => _audio != null;
 
-  Future<void> _ensurePlayer() async {
+  Future<void>? _playerReady;
+
+  Future<void> _ensurePlayer() {
+    final existing = _playerReady;
+    if (existing != null) return existing;
+    final created = _createPlayer();
+    _playerReady = created;
+    return created.catchError((Object e) {
+      if (identical(_playerReady, created)) _playerReady = null;
+      throw e;
+    });
+  }
+
+  Future<void> _createPlayer() async {
+    await ensureAudioBackground();
     if (_audio != null) return;
     final player = AudioPlayer();
     _audio = player;

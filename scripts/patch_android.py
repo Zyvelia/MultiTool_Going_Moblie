@@ -145,6 +145,40 @@ def patch_notification_receivers() -> None:
     print(f"Patched notification receivers in {path}")
 
 
+def patch_audio_service() -> None:
+    """Bind just_audio_background. Without this service, play throws
+    LateInitializationError on `_audioHandler`."""
+    path = ROOT / "android/app/src/main/AndroidManifest.xml"
+    xml = path.read_text(encoding="utf-8")
+    marker = "ZS_AUDIO_SERVICE"
+    if marker in xml:
+        print(f"Audio service already in {path}")
+        return
+    block = (
+        f"        <!-- {marker} -->\n"
+        "        <service\n"
+        '            android:name="com.ryanheise.audioservice.AudioService"\n'
+        '            android:exported="true"\n'
+        '            android:foregroundServiceType="mediaPlayback">\n'
+        "            <intent-filter>\n"
+        '                <action android:name="android.media.browse.MediaBrowserService" />\n'
+        "            </intent-filter>\n"
+        "        </service>\n"
+        "        <receiver\n"
+        '            android:name="com.ryanheise.audioservice.MediaButtonReceiver"\n'
+        '            android:exported="true">\n'
+        "            <intent-filter>\n"
+        '                <action android:name="android.intent.action.MEDIA_BUTTON" />\n'
+        "            </intent-filter>\n"
+        "        </receiver>\n"
+    )
+    xml, n = re.subn(r"(</application>)", block + r"\1", xml, count=1)
+    if n == 0:
+        raise SystemExit(f"Could not add audio service in {path}")
+    path.write_text(xml, encoding="utf-8")
+    print(f"Patched audio service in {path}")
+
+
 def copy_android_overlay() -> None:
     """Copy tracked Kotlin (android/ is not in git)."""
     kotlin_src = OVERLAY / "kotlin" / "MainActivity.kt"
@@ -470,6 +504,7 @@ def main() -> None:
     patch_firebase()
     patch_manifest()
     patch_notification_receivers()
+    patch_audio_service()
     copy_android_overlay()
     strip_steps_native()
     patch_compile_sdk()

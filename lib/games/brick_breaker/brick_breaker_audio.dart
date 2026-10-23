@@ -8,6 +8,7 @@ import 'package:flutter/services.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../services/audio_background.dart';
 import 'brick_breaker_music_config.dart';
 
 class BrickBreakerAudioSettings {
@@ -133,6 +134,7 @@ class BrickBreakerAudio {
   }
 
   Future<void> init() async {
+    await ensureAudioBackground();
     final prefs = await SharedPreferences.getInstance();
     final raw = prefs.getString(_prefsKey);
     if (raw != null) {
@@ -350,6 +352,7 @@ class BrickBreakerAudio {
 
   Future<void> _playAsset(String asset, {required bool restart}) async {
     if (!settings.music || !settings.useCustomMusic) return;
+    await ensureAudioBackground();
     if (_playingAsset == asset && _player.playing && !restart) return;
 
     if (_playingAsset != asset) {
