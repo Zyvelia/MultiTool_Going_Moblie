@@ -26,8 +26,6 @@ class AppNavigation {
 
   static void goToClock() => _goToTab(HomeTabs.clock);
 
-  static void goToSteps() => _goToTab(HomeTabs.steps);
-
   /// Music tab; optionally open the now-playing sheet (e.g. media notification tap).
   static void goToMusic({bool openNowPlaying = false}) {
     if (openNowPlaying) _pendingOpenNowPlaying = true;

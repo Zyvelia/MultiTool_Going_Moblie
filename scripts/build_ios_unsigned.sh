@@ -29,19 +29,19 @@ echo "=== iOS unsigned build ==="
 
 python3 scripts/patch_ios_firebase.py
 python3 scripts/patch_ios_plist.py
-if [[ "${PATCH_IOS_HEALTHKIT:-0}" == "1" ]]; then
-  python3 scripts/patch_ios_healthkit.py
-else
-  echo "Skipping HealthKit patch (Steps on iOS uses motion only). Set PATCH_IOS_HEALTHKIT=1 if you have a paid Apple Developer HealthKit App ID."
-fi
 python3 scripts/patch_ios_appdelegate.py
 python3 scripts/patch_ios_unsigned.py
 python3 scripts/patch_ios_pub_plugins.py
+python3 scripts/patch_ios_deployment.py
 
 echo "--- Flutter config (no codesign / no team check) ---"
 flutter build ios --release --config-only --no-codesign
 python3 scripts/patch_ios_pub_plugins.py
-python3 scripts/patch_ios_deployment.py
+python3 scripts/patch_ios_deployment.py --verify
+if [ -f "ios/Podfile" ]; then
+  echo "--- pod install (Podfile deployment target may have changed) ---"
+  (cd ios && pod install)
+fi
 
 echo "--- Dart analysis (fail fast before xcodebuild Run Script) ---"
 rm -rf _ci_test_android _gradle_probe

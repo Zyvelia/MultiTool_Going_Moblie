@@ -2,8 +2,8 @@
 
 ## Unreleased
 
-### Added
-- **Steps** tab: pedometer-first (Design D arc), Today/Week/Month, local history + optional Health, Android activity permission + manifest patches, goal notification, streak/goal celebration, Android home widget.
+### Removed
+- **Steps** tab, pedometer, Health Connect, and the Android steps widget. The Health Connect plugin crashed on launch on Android 11 (Galaxy S20).
 
 ## 2.7.0+4 (2026-03-21)
 

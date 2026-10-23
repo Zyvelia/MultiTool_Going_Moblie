@@ -50,16 +50,6 @@ def main() -> None:
         "\t<string>Pick photos to send to your PC via Quick Send.</string>\n",
     )
 
-    text = _insert_after_dict_open(
-        text,
-        "\t<key>NSMotionUsageDescription</key>\n"
-        "\t<string>Count your steps using the phone motion sensor (like StepsApp tracking).</string>\n",
-    )
-
-    # Apple Health strings + HealthKit entitlements: only if you enable
-    # PATCH_IOS_HEALTHKIT=1 and have a paid Apple Developer HealthKit App ID.
-    # Default iOS Steps = motion sensor only (no paid account required).
-
     PLIST.write_text(text, encoding="utf-8")
     print(f"Patched {PLIST}")
 

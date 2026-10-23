@@ -40,9 +40,10 @@ def load(name: str):
 def test_android() -> None:
     overlay = HERE / "android_overlay" / "kotlin" / "MainActivity.kt"
     kt = overlay.read_text(encoding="utf-8")
-    assert "AudioServiceActivity" in kt
+    assert "class MainActivity : AudioServiceActivity()" in kt
     assert "screen_security" not in kt
-    assert "StepsGlanceWidget" in kt
+    assert "StepsGlanceWidget" not in kt
+    assert "steps_widget" not in kt
     print("--- MainActivity.kt (overlay) ---")
     print(kt)
 

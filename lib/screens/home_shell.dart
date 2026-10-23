@@ -10,7 +10,6 @@ import 'quick_send_screen.dart';
 import 'chat_screen.dart';
 import 'settings_screen.dart';
 import 'stream_service_screen.dart';
-import 'steps_screen.dart';
 import '../services/settings_service.dart';
 import '../services/app_navigation.dart';
 import '../services/home_tabs.dart';
@@ -36,10 +35,6 @@ class HomeShellState extends State<HomeShell> {
   final _settings = SettingsService();
   String? _hostname;
   bool _checked = false;
-
-  /// Steps touches pedometer + Health Connect; defer until the tab is opened
-  /// so cold start stays safe on Android 11 / Samsung (Galaxy S20+).
-  bool _stepsTabBuilt = false;
 
   @override
   void initState() {
@@ -111,7 +106,6 @@ class HomeShellState extends State<HomeShell> {
   // Tapping a destination animates the PageView there — the swipe
   // gesture and the bottom nav stay in sync either way you navigate.
   void _onDestinationSelected(int i) {
-    if (i == HomeTabs.steps) _stepsTabBuilt = true;
     setState(() => _index = i);
     // Guards a narrow edge case unique to the notification deep-link
     // path: if a tap resolves before the PC hostname is set up, build()
@@ -131,10 +125,7 @@ class HomeShellState extends State<HomeShell> {
   // with the finger) and on settle, so the bottom nav's highlighted
   // tab tracks the swipe in real time instead of jumping at the end.
   void _onPageChanged(int i) {
-    setState(() {
-      _index = i;
-      if (i == HomeTabs.steps) _stepsTabBuilt = true;
-    });
+    setState(() => _index = i);
   }
 
   @override
@@ -153,11 +144,6 @@ class HomeShellState extends State<HomeShell> {
       const _KeepAlive(child: NotesScreen()),
       const _KeepAlive(child: RemindersScreen()),
       const _KeepAlive(child: ClockScreen()),
-      _KeepAlive(
-        child: _stepsTabBuilt
-            ? const StepsScreen()
-            : const SizedBox.shrink(),
-      ),
       const _KeepAlive(child: GamesScreen()),
       const _KeepAlive(child: YtScreen()),
       const _KeepAlive(child: QuickSendScreen()),
@@ -187,10 +173,6 @@ class HomeShellState extends State<HomeShell> {
           NavigationDestination(
             icon: Icon(Icons.access_time),
             label: 'Clock',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.directions_walk),
-            label: 'Steps',
           ),
           NavigationDestination(icon: Icon(Icons.sports_esports), label: 'Games'),
           NavigationDestination(icon: Icon(Icons.download), label: 'YT'),

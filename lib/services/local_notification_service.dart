@@ -119,10 +119,6 @@ class LocalNotificationService {
       _pendingAlarmId = id;
       onAlarmTapped?.call(id);
       AppNavigation.goToClock();
-      return;
-    }
-    if (payload == 'steps:goal') {
-      AppNavigation.goToSteps();
     }
   }
 

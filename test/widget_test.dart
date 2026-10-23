@@ -1,11 +1,23 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:multi_tool_remote/services/steps_day_history.dart';
+import 'package:multi_tool_remote/services/home_tabs.dart';
 
 void main() {
-  test('StepsDayHistory.dayKey formats ISO date', () {
+  test('bottom-nav indices stay contiguous', () {
     expect(
-      StepsDayHistory.dayKey(DateTime(2026, 3, 21)),
-      '2026-03-21',
+      [
+        HomeTabs.vault,
+        HomeTabs.music,
+        HomeTabs.notes,
+        HomeTabs.reminders,
+        HomeTabs.clock,
+        HomeTabs.games,
+        HomeTabs.yt,
+        HomeTabs.send,
+        HomeTabs.chat,
+        HomeTabs.pc,
+        HomeTabs.settings,
+      ],
+      List<int>.generate(11, (i) => i),
     );
   });
 }
