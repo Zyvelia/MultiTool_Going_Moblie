@@ -55,6 +55,37 @@ def patch_manifest() -> None:
     print(f"Patched {path}")
 
 
+def patch_localhost_cleartext() -> None:
+    """just_audio plays remote songs through an http://127.0.0.1 proxy.
+
+    Android blocks that cleartext hop, ExoPlayer reports a source error, and
+    the music tab shows it as a dropped PC stream even while Remote Hub is live.
+    """
+    src = OVERLAY / "res" / "xml" / "network_security_config.xml"
+    if not src.is_file():
+        raise SystemExit(f"Missing {src}")
+    dest = ROOT / "android/app/src/main/res/xml/network_security_config.xml"
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(src, dest)
+    print(f"Installed {dest}")
+
+    path = ROOT / "android/app/src/main/AndroidManifest.xml"
+    xml = path.read_text(encoding="utf-8")
+    if "android:networkSecurityConfig=" in xml:
+        print(f"networkSecurityConfig already set in {path}")
+        return
+    xml, n = re.subn(
+        r"(<application\b)",
+        r'\1 android:networkSecurityConfig="@xml/network_security_config"',
+        xml,
+        count=1,
+    )
+    if n == 0:
+        raise SystemExit(f"Could not set networkSecurityConfig in {path}")
+    path.write_text(xml, encoding="utf-8")
+    print(f"Patched networkSecurityConfig in {path}")
+
+
 def strip_steps_native() -> None:
     """Drop Steps / Health Connect manifest entries and widget files.
 
@@ -503,6 +534,7 @@ def patch_firebase() -> None:
 def main() -> None:
     patch_firebase()
     patch_manifest()
+    patch_localhost_cleartext()
     patch_notification_receivers()
     patch_audio_service()
     copy_android_overlay()
