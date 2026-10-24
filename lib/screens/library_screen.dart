@@ -23,6 +23,7 @@ import '../widgets/pc_mini_player.dart';
 import '../widgets/song_tile.dart';
 import 'downloads_screen.dart';
 import 'home_leading.dart';
+import 'settings_screen.dart';
 
 enum _PlaySource { phone, pc }
 
@@ -80,6 +81,7 @@ class LibraryScreenState extends State<LibraryScreen>
   int _batchTotal = 0;
   bool _fetchingBatchList = false;
   bool _offlineFallback = false;
+  bool _needsPairing = false;
 
   ConcatenatingAudioSource? _playlist;
   int _playGen = 0;
@@ -345,6 +347,7 @@ class LibraryScreenState extends State<LibraryScreen>
       _hasMore = hasMore;
       _loading = false;
       _offlineFallback = offlineFallback;
+      if (!offlineFallback) _needsPairing = false;
       _error = null;
       _reconnecting = false;
     });
@@ -746,6 +749,14 @@ class LibraryScreenState extends State<LibraryScreen>
     _cache.download(song, _api!);
   }
 
+  bool _isPairingFailure(String message) {
+    final lower = message.toLowerCase();
+    return lower.contains('pair') ||
+        lower.contains('revok') ||
+        lower.contains('signature') ||
+        lower.contains('unknown phone');
+  }
+
   Future<void> _loadSongs({bool reset = false}) async {
     if (_api == null || _fetching) return;
 
@@ -784,12 +795,16 @@ class LibraryScreenState extends State<LibraryScreen>
     } catch (e) {
       if (reset) {
         await _showCachedLibrary();
+        final message = explainError(e, doing: 'load the music library');
         if (mounted && _songs.isEmpty) {
           setState(() {
-            _error = explainError(e, doing: 'load the music library');
+            _needsPairing = _isPairingFailure(message);
+            _error = message;
             _loading = false;
             _reconnecting = false;
           });
+        } else if (mounted) {
+          setState(() => _needsPairing = _isPairingFailure(message));
         }
       } else if (mounted) {
         setState(() {
@@ -827,14 +842,15 @@ class LibraryScreenState extends State<LibraryScreen>
     );
   }
 
-  AudioSource _streamSource(Song song) {
+  AudioSource _streamSource(Song song, {bool transcode = false, bool force = false}) {
     final tag = _tagFor(song);
-    final uri = Uri.parse(_api!.streamUrl(song.id, transcode: Platform.isIOS));
+    final uri = Uri.parse(_api!.streamUrl(song.id, transcode: transcode, force: force));
     final dir = _remoteCacheDir;
     if (dir != null) {
+      final name = force ? '${song.id}.phone.m4a' : '${song.id}';
       return LockCachingAudioSource(
         uri,
-        cacheFile: File('${dir.path}/${song.id}'),
+        cacheFile: File('${dir.path}/$name'),
         tag: tag,
       );
     }
@@ -862,7 +878,7 @@ class LibraryScreenState extends State<LibraryScreen>
     if (_api == null) return;
     try {
       _playingLocal = false;
-      await _player.setAudioSource(_streamSource(song));
+      await _player.setAudioSource(_streamSource(song, transcode: true, force: true));
       unawaited(_applyPlaybackModes());
       await _player.play();
       unawaited(_cache.replaceForPhone(song, _api!));
@@ -1054,7 +1070,7 @@ class LibraryScreenState extends State<LibraryScreen>
     } catch (e) {
       if (local && _api != null && _phoneCouldNotOpenFile(e)) {
         try {
-          await _player.setAudioSource(_streamSource(song));
+          await _player.setAudioSource(_streamSource(song, transcode: true, force: true));
           if (gen != _playGen) return;
           _playlist = null;
           unawaited(_applyPlaybackModes());
@@ -1282,9 +1298,11 @@ class LibraryScreenState extends State<LibraryScreen>
             )
           else if (_offlineFallback)
             _StatusBanner(
-              message: _networkType == NetworkType.offline
-                  ? 'Offline — playing downloaded songs'
-                  : 'Desktop unreachable — showing downloaded songs only',
+              message: _needsPairing
+                  ? 'This phone is not paired — open Settings and pair it to load the PC library'
+                  : _networkType == NetworkType.offline
+                      ? 'Offline — playing downloaded songs'
+                      : 'Desktop unreachable — showing downloaded songs only',
               color: Colors.amber,
             )
           else if (_networkType == NetworkType.offline)
@@ -1486,10 +1504,27 @@ class LibraryScreenState extends State<LibraryScreen>
       return Center(
         child: Padding(
           padding: const EdgeInsets.all(24),
-          child: Text(
-            _error!,
-            style: const TextStyle(color: Colors.redAccent),
-            textAlign: TextAlign.center,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                _error!,
+                style: const TextStyle(color: Colors.redAccent),
+                textAlign: TextAlign.center,
+              ),
+              if (_needsPairing) ...[
+                const SizedBox(height: 16),
+                FilledButton(
+                  onPressed: () async {
+                    await Navigator.of(context).push(
+                      MaterialPageRoute(builder: (_) => const SettingsScreen()),
+                    );
+                    if (mounted) _loadSongs(reset: true);
+                  },
+                  child: const Text('Open Settings'),
+                ),
+              ],
+            ],
           ),
         ),
       );

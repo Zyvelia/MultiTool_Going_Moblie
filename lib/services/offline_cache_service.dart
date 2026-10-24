@@ -375,7 +375,7 @@ class OfflineCacheService {
         _manifest.remove(song.id);
         await _saveManifest();
       }
-      await download(song, api);
+      await download(song, api, forceTranscode: true);
       if (isCached(song.id)) {
         final current = localFile(song.id);
         if (old != null &&
@@ -414,7 +414,7 @@ class OfflineCacheService {
     return list;
   }
 
-  Future<void> download(Song song, ApiService api) async {
+  Future<void> download(Song song, ApiService api, {bool forceTranscode = false}) async {
     await ensureReady();
     if (_manifest.containsKey(song.id) || _downloading.contains(song.id)) {
       return;
@@ -427,11 +427,17 @@ class OfflineCacheService {
     _clients[song.id] = active;
     File? tmp;
     try {
-      var transcode = false;
+      var transcode = forceTranscode;
       var round = 0;
       while (round < 2) {
         round++;
-        final resp = await _openAudio(active, api, song.id, transcode: transcode);
+        final resp = await _openAudio(
+          active,
+          api,
+          song.id,
+          transcode: transcode,
+          force: forceTranscode,
+        );
         if (resp.statusCode != 200) {
           throw Exception(_downloadStatusMessage(resp.statusCode));
         }
@@ -547,10 +553,11 @@ class OfflineCacheService {
     ApiService api,
     int songId, {
     required bool transcode,
+    bool force = false,
   }) {
     final req = http.Request(
       'GET',
-      Uri.parse(api.streamUrl(songId, transcode: transcode)),
+      Uri.parse(api.streamUrl(songId, transcode: transcode, force: force && transcode)),
     );
     return client.send(req).timeout(
       transcode ? const Duration(minutes: 8) : const Duration(seconds: 20),

@@ -101,6 +101,15 @@ String _withDoing(String core, String? doing) {
 
 String? _fromServer(String server, String code) {
   if (code == 'device_untrusted' || server.contains('device_untrusted')) {
+    final lower = server.toLowerCase();
+    if (server.isNotEmpty &&
+        server.length < 220 &&
+        !server.contains('Exception')) {
+      if (lower.contains('clock')) {
+        return 'This phone’s clock is too far off the PC. Turn on automatic date & time, then pair again if it still fails.';
+      }
+      return server;
+    }
     return 'This phone is not paired, or it was revoked on the PC. Pair it in Settings. If the phone is stolen, tap Revoke on Remote Hub.';
   }
   if (server.isEmpty) return null;
