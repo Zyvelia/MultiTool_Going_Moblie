@@ -175,30 +175,46 @@ class _BrickBreakerScreenState extends State<BrickBreakerScreen>
     super.dispose();
   }
 
-  void _onPanStart(DragStartDetails _, BoxConstraints box) {
+  Offset? _pointerDown;
+  bool _aimDragged = false;
+
+  void _onPointerDown(PointerDownEvent event, Size size) {
+    _pointerDown = event.localPosition;
+    _aimDragged = false;
     if (_audioReady) _audio.startBgm();
+    _applyPointer(event.localPosition, size);
   }
 
-  void _onPanUpdate(DragUpdateDetails d, BoxConstraints box) {
-    if (!_audioReady) return;
-    final nx = (d.localPosition.dx / box.maxWidth).clamp(0.0, 1.0);
-    final ny = (d.localPosition.dy / box.maxHeight).clamp(0.0, 1.0);
+  void _onPointerMove(PointerMoveEvent event, Size size) {
+    final start = _pointerDown;
+    if (start != null && (event.localPosition - start).distance > 6) {
+      _aimDragged = true;
+    }
+    _applyPointer(event.localPosition, size);
+  }
+
+  void _onPointerUp(PointerUpEvent _, Size size) {
+    // configureMode() finishes with balls.clear(); a shot fired before boot
+    // completes is deleted mid-flight and looks like the ball vanished.
+    if (_audioReady && _aimDragged && _game.phase == BreakerPhase.aiming) {
+      _game.shoot();
+      setState(() {});
+    }
+    _pointerDown = null;
+    _aimDragged = false;
+  }
+
+  void _applyPointer(Offset local, Size size) {
+    if (!_audioReady || size.width <= 0 || size.height <= 0) return;
+    _game.resize(size.width, size.height);
+    final nx = (local.dx / size.width).clamp(0.0, 1.0);
+    final ny = (local.dy / size.height).clamp(0.0, 1.0);
     if (_game.isPongActive && _game.phase == BreakerPhase.flying) {
       _game.setPaddle(nx);
     } else if (_game.phase == BreakerPhase.aiming) {
       _game.setAimFromTouch(nx, ny);
     }
     setState(() {});
-  }
-
-  void _onPanEnd(DragEndDetails _) {
-    // configureMode() finishes with balls.clear(); a shot fired before boot
-    // completes is deleted mid-flight and looks like the ball vanished.
-    if (!_audioReady) return;
-    if (_game.phase == BreakerPhase.aiming) {
-      _game.shoot();
-      setState(() {});
-    }
   }
 
   void _onTap() {
@@ -882,20 +898,23 @@ class _BrickBreakerScreenState extends State<BrickBreakerScreen>
               Expanded(
                 child: Padding(
                   padding: const EdgeInsets.all(12),
-                  child: LayoutBuilder(
-                    builder: (context, box) {
-                      return Row(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          Center(child: _sidePanel()),
-                          Expanded(
-                            child: GestureDetector(
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Center(child: _sidePanel()),
+                      Expanded(
+                        child: LayoutBuilder(
+                          builder: (context, field) {
+                            final size = Size(field.maxWidth, field.maxHeight);
+                            return Listener(
                               behavior: HitTestBehavior.opaque,
-                              onPanStart: (d) => _onPanStart(d, box),
-                              onPanUpdate: (d) => _onPanUpdate(d, box),
-                              onPanEnd: _onPanEnd,
-                              onTap: _onTap,
-                              child: DecoratedBox(
+                              onPointerDown: (event) => _onPointerDown(event, size),
+                              onPointerMove: (event) => _onPointerMove(event, size),
+                              onPointerUp: (event) => _onPointerUp(event, size),
+                              child: GestureDetector(
+                                behavior: HitTestBehavior.opaque,
+                                onTap: _onTap,
+                                child: DecoratedBox(
                                 decoration: BoxDecoration(
                                   color: AppColors.card,
                                   borderRadius: BorderRadius.circular(12),
@@ -938,13 +957,14 @@ class _BrickBreakerScreenState extends State<BrickBreakerScreen>
                                 ),
                               ),
                             ),
-                          ),
-                        ],
-                      );
-                    },
-                  ),
+                          );
+                        },
+                      ),
+                    ),
+                  ],
                 ),
               ),
+            ),
               const Padding(
                 padding: EdgeInsets.fromLTRB(16, 0, 16, 12),
                 child: Text(

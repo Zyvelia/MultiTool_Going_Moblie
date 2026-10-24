@@ -1113,8 +1113,10 @@ class BrickBreakerGame {
   void setAimFromTouch(double nx, double ny) {
     if (phase != BreakerPhase.aiming) return;
     final dx = nx * width - launcherPx;
-    final dy = ny * height - launcherPy;
-    if (dy >= -6) return;
+    var dy = ny * height - launcherPy;
+    // A finger on the ball is level with the launcher, so dy is about 0.
+    // Keep that drag and aim upward from the horizontal offset.
+    if (dy > -28) dy = -28;
     aimAngle = math.atan2(dy, dx).clamp(-math.pi * 0.92, -math.pi * 0.08);
   }
 
