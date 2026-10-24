@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:just_audio/just_audio.dart';
 
 import '../models/song.dart';
+import '../services/phone_playback.dart';
 import '../theme/app_colors.dart';
 import 'song_tile.dart';
 
@@ -23,7 +24,7 @@ class NowPlayingSheet extends StatefulWidget {
     this.onShuffleAll,
   });
 
-  final AudioPlayer player;
+  final PhonePlayback player;
   final Song song;
   final VoidCallback onPrev;
   final VoidCallback onNext;
@@ -38,7 +39,7 @@ class NowPlayingSheet extends StatefulWidget {
 
   static Future<void> show(
     BuildContext context, {
-    required AudioPlayer player,
+    required PhonePlayback player,
     required Song song,
     required VoidCallback onPrev,
     required VoidCallback onNext,

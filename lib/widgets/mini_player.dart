@@ -1,11 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:just_audio/just_audio.dart';
+import '../services/phone_playback.dart';
 import '../theme/app_colors.dart';
 import '../models/song.dart';
 
 /// Compact bar — tap anywhere (except play) to open [NowPlayingSheet].
 class MiniPlayer extends StatelessWidget {
-  final AudioPlayer player;
+  final PhonePlayback player;
   final Song song;
   final VoidCallback onOpenExpanded;
   final VoidCallback onPrev;

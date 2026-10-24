@@ -8,6 +8,7 @@
       "version": "2.7.0+4",
       "dependencies": [
         "audio_service",
+        "audio_session",
         "audioplayers",
         "connectivity_plus",
         "crypto",
@@ -23,6 +24,8 @@
         "http",
         "just_audio",
         "just_audio_background",
+        "media_kit",
+        "media_kit_libs_android_audio",
         "path_provider",
         "pdf",
         "printing",
@@ -157,6 +160,20 @@
         "path_parsing",
         "vector_math",
         "xml"
+      ]
+    },
+    {
+      "name": "url_launcher",
+      "version": "6.3.3",
+      "dependencies": [
+        "flutter",
+        "url_launcher_android",
+        "url_launcher_ios",
+        "url_launcher_linux",
+        "url_launcher_macos",
+        "url_launcher_platform_interface",
+        "url_launcher_web",
+        "url_launcher_windows"
       ]
     },
     {
@@ -338,6 +355,41 @@
         "flutter_cache_manager",
         "flutter_web_plugins",
         "js",
+        "rxdart"
+      ]
+    },
+    {
+      "name": "media_kit_libs_android_audio",
+      "version": "1.3.8",
+      "dependencies": [
+        "flutter",
+        "plugin_platform_interface"
+      ]
+    },
+    {
+      "name": "media_kit",
+      "version": "1.2.6",
+      "dependencies": [
+        "collection",
+        "http",
+        "image",
+        "meta",
+        "path",
+        "safe_local_storage",
+        "synchronized",
+        "universal_platform",
+        "uri_parser",
+        "uuid",
+        "web"
+      ]
+    },
+    {
+      "name": "audio_session",
+      "version": "0.1.25",
+      "dependencies": [
+        "flutter",
+        "flutter_web_plugins",
+        "meta",
         "rxdart"
       ]
     },
@@ -678,6 +730,69 @@
       ]
     },
     {
+      "name": "url_launcher_windows",
+      "version": "3.1.6",
+      "dependencies": [
+        "flutter",
+        "meta",
+        "url_launcher_platform_interface"
+      ]
+    },
+    {
+      "name": "url_launcher_web",
+      "version": "2.4.3",
+      "dependencies": [
+        "flutter",
+        "flutter_web_plugins",
+        "url_launcher_platform_interface",
+        "web"
+      ]
+    },
+    {
+      "name": "url_launcher_platform_interface",
+      "version": "2.3.2",
+      "dependencies": [
+        "flutter",
+        "plugin_platform_interface"
+      ]
+    },
+    {
+      "name": "url_launcher_macos",
+      "version": "3.2.6",
+      "dependencies": [
+        "flutter",
+        "meta",
+        "url_launcher_platform_interface"
+      ]
+    },
+    {
+      "name": "url_launcher_linux",
+      "version": "3.2.3",
+      "dependencies": [
+        "flutter",
+        "meta",
+        "url_launcher_platform_interface"
+      ]
+    },
+    {
+      "name": "url_launcher_ios",
+      "version": "6.4.2",
+      "dependencies": [
+        "flutter",
+        "meta",
+        "url_launcher_platform_interface"
+      ]
+    },
+    {
+      "name": "url_launcher_android",
+      "version": "6.3.33",
+      "dependencies": [
+        "flutter",
+        "meta",
+        "url_launcher_platform_interface"
+      ]
+    },
+    {
       "name": "plugin_platform_interface",
       "version": "2.1.8",
       "dependencies": [
@@ -936,42 +1051,6 @@
       ]
     },
     {
-      "name": "url_launcher_platform_interface",
-      "version": "2.3.2",
-      "dependencies": [
-        "flutter",
-        "plugin_platform_interface"
-      ]
-    },
-    {
-      "name": "url_launcher_linux",
-      "version": "3.2.3",
-      "dependencies": [
-        "flutter",
-        "meta",
-        "url_launcher_platform_interface"
-      ]
-    },
-    {
-      "name": "url_launcher_windows",
-      "version": "3.1.6",
-      "dependencies": [
-        "flutter",
-        "meta",
-        "url_launcher_platform_interface"
-      ]
-    },
-    {
-      "name": "url_launcher_web",
-      "version": "2.4.3",
-      "dependencies": [
-        "flutter",
-        "flutter_web_plugins",
-        "url_launcher_platform_interface",
-        "web"
-      ]
-    },
-    {
       "name": "file",
       "version": "7.0.1",
       "dependencies": [
@@ -1068,16 +1147,6 @@
       "dependencies": []
     },
     {
-      "name": "audio_session",
-      "version": "0.1.25",
-      "dependencies": [
-        "flutter",
-        "flutter_web_plugins",
-        "meta",
-        "rxdart"
-      ]
-    },
-    {
       "name": "just_audio_platform_interface",
       "version": "4.6.0",
       "dependencies": [
@@ -1124,6 +1193,26 @@
         "flutter",
         "meta",
         "plugin_platform_interface"
+      ]
+    },
+    {
+      "name": "uri_parser",
+      "version": "3.0.2",
+      "dependencies": [
+        "path"
+      ]
+    },
+    {
+      "name": "universal_platform",
+      "version": "1.1.0",
+      "dependencies": []
+    },
+    {
+      "name": "safe_local_storage",
+      "version": "2.0.6",
+      "dependencies": [
+        "path",
+        "synchronized"
       ]
     },
     {
@@ -1434,47 +1523,6 @@
         "path",
         "sqflite_common",
         "sqflite_platform_interface"
-      ]
-    },
-    {
-      "name": "url_launcher",
-      "version": "6.3.3",
-      "dependencies": [
-        "flutter",
-        "url_launcher_android",
-        "url_launcher_ios",
-        "url_launcher_linux",
-        "url_launcher_macos",
-        "url_launcher_platform_interface",
-        "url_launcher_web",
-        "url_launcher_windows"
-      ]
-    },
-    {
-      "name": "url_launcher_macos",
-      "version": "3.2.6",
-      "dependencies": [
-        "flutter",
-        "meta",
-        "url_launcher_platform_interface"
-      ]
-    },
-    {
-      "name": "url_launcher_ios",
-      "version": "6.4.2",
-      "dependencies": [
-        "flutter",
-        "meta",
-        "url_launcher_platform_interface"
-      ]
-    },
-    {
-      "name": "url_launcher_android",
-      "version": "6.3.33",
-      "dependencies": [
-        "flutter",
-        "meta",
-        "url_launcher_platform_interface"
       ]
     }
   ],

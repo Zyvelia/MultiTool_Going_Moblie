@@ -15,6 +15,7 @@ import '../services/local_audio_source.dart';
 import '../services/app_navigation.dart';
 import '../services/music_auto_cache_service.dart';
 import '../services/offline_cache_service.dart';
+import '../services/phone_playback.dart';
 import '../services/settings_service.dart';
 import '../services/user_facing_error.dart';
 import '../theme/app_colors.dart';
@@ -44,6 +45,8 @@ class LibraryScreenState extends State<LibraryScreen>
   ApiService? _api;
   ResolvedServer? _server;
   AudioPlayer? _audio;
+  PhonePlayback? _playback;
+  File? _androidFile;
   StreamSubscription<int?>? _indexSub;
   StreamSubscription<NetworkType>? _connectivitySub;
   NetworkType _networkType = NetworkType.other;
@@ -144,6 +147,10 @@ class LibraryScreenState extends State<LibraryScreen>
     if (_audio != null) return;
     final player = AudioPlayer();
     _audio = player;
+    final playback = PhonePlayback(player);
+    playback.onAndroidEnded = _onAndroidFileEnded;
+    playback.onAndroidError = _onAndroidFileError;
+    _playback = playback;
     _indexSub = player.currentIndexStream.listen((index) {
       if (mounted && index != null && index != _currentIndex) {
         setState(() => _currentIndex = index);
@@ -567,7 +574,7 @@ class LibraryScreenState extends State<LibraryScreen>
     _cacheSub?.cancel();
     _indexSub?.cancel();
     _libraryIndexSub?.cancel();
-    _audio?.dispose();
+    _playback?.dispose();
     _searchController.dispose();
     super.dispose();
   }
@@ -872,10 +879,12 @@ class LibraryScreenState extends State<LibraryScreen>
   }
 
   AudioSource _sourceFor(Song song) {
+    _androidFile = null;
     if (_cache.isCached(song.id)) {
       final local = _cache.localPlayable(song.id) ?? _cache.localFile(song.id);
       if (local != null && local.existsSync() && local.lengthSync() >= 64) {
         _playingLocal = true;
+        if (Platform.isAndroid) _androidFile = local;
         return _localSource(local, song);
       }
     }
@@ -888,10 +897,43 @@ class LibraryScreenState extends State<LibraryScreen>
     return _streamSource(song);
   }
 
+  void _onAndroidFileEnded() {
+    unawaited(Future<void>(() async {
+      if (!mounted || _playback?.playingAndroidFile != true) return;
+      if (_loopMode == LoopMode.one) {
+        await _playback?.seek(Duration.zero);
+        await _playback?.play();
+        return;
+      }
+      if (_playlist != null) return;
+      if (_currentIndex < 0 || _currentIndex >= _songs.length) return;
+      final atEnd = _currentIndex + 1 >= _songs.length;
+      if (atEnd && _loopMode == LoopMode.off) return;
+      _playNext();
+    }));
+  }
+
+  void _onAndroidFileError(String message) {
+    if (!mounted) return;
+    final index = _currentIndex;
+    if (index < 0 || index >= _songs.length) return;
+    final song = _songs[index];
+    if (_api != null && _streamRetriedFor != song.id) {
+      _streamRetriedFor = song.id;
+      unawaited(_fallbackToStream(song));
+      return;
+    }
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(explainError(Exception(message), doing: 'play this song'))),
+    );
+  }
+
   Future<void> _fallbackToStream(Song song) async {
     if (_api == null) return;
     try {
       _playingLocal = false;
+      _androidFile = null;
+      await _playback?.stopAndroidFile();
       await _player.setAudioSource(_streamSource(song, transcode: true, force: true));
       unawaited(_applyPlaybackModes());
       await _player.play();
@@ -956,6 +998,7 @@ class LibraryScreenState extends State<LibraryScreen>
     setState(() => _source = source);
     if (source == _PlaySource.pc) {
       if (_hasPlayer) _player.pause();
+      unawaited(_playback?.stopAndroidFile());
       _startPolling();
     } else {
       _stopPolling();
@@ -1043,7 +1086,16 @@ class LibraryScreenState extends State<LibraryScreen>
     });
 
     Future<void> playSingle() async {
-      await _player.setAudioSource(_sourceFor(song));
+      final source = _sourceFor(song);
+      if (Platform.isAndroid && _androidFile != null) {
+        await _playback!.playAndroidFile(_androidFile!);
+        if (gen != _playGen) return;
+        _playlist = null;
+        _midStreamRetries = 0;
+        return;
+      }
+      await _playback?.stopAndroidFile();
+      await _player.setAudioSource(source);
       if (gen != _playGen) return;
       _playlist = null;
       unawaited(_applyPlaybackModes());
@@ -1052,6 +1104,7 @@ class LibraryScreenState extends State<LibraryScreen>
     }
 
     Future<void> playWindowed(int i) async {
+      await _playback?.stopAndroidFile();
       final source = _playlistWindow(queue, i);
       final initial = _playlistWindowInitialIndex(queue, i, 32);
       await _player.setAudioSource(
@@ -1066,7 +1119,9 @@ class LibraryScreenState extends State<LibraryScreen>
       _midStreamRetries = 0;
     }
 
-    final useWindowedPlaylist = _shuffleEnabled && queue.length > 1;
+    final useWindowedPlaylist = _shuffleEnabled &&
+        queue.length > 1 &&
+        !(Platform.isAndroid && local);
 
     Future<void> startPlayback() async {
       if (useWindowedPlaylist) {
@@ -1082,8 +1137,11 @@ class LibraryScreenState extends State<LibraryScreen>
         unawaited(_cache.replaceForPhone(song, _api!));
       }
     } catch (e) {
-      if (local && _api != null && _phoneCouldNotOpenFile(e)) {
+      if (local && _api != null && (_androidFile != null || _phoneCouldNotOpenFile(e))) {
         try {
+          _playingLocal = false;
+          _androidFile = null;
+          await _playback?.stopAndroidFile();
           await _player.setAudioSource(_streamSource(song, transcode: true, force: true));
           if (gen != _playGen) return;
           _playlist = null;
@@ -1214,7 +1272,7 @@ class LibraryScreenState extends State<LibraryScreen>
     }
     NowPlayingSheet.show(
       context,
-      player: _player,
+      player: _playback!,
       song: _songs[_currentIndex],
       onPrev: _playPrev,
       onNext: _playNext,
@@ -1482,7 +1540,7 @@ class LibraryScreenState extends State<LibraryScreen>
               _currentIndex >= 0 &&
               _currentIndex < _songs.length)
             MiniPlayer(
-              player: _player,
+              player: _playback!,
               song: _songs[_currentIndex],
               onOpenExpanded: _openNowPlaying,
               onPrev: _playPrev,

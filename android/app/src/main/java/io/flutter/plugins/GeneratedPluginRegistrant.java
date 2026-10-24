@@ -91,6 +91,11 @@ public final class GeneratedPluginRegistrant {
       Log.e(TAG, "Error registering plugin just_audio, com.ryanheise.just_audio.JustAudioPlugin", e);
     }
     try {
+      flutterEngine.getPlugins().add(new com.alexmercerind.media_kit_libs_android_audio.MediaKitLibsAndroidAudioPlugin());
+    } catch (Exception e) {
+      Log.e(TAG, "Error registering plugin media_kit_libs_android_audio, com.alexmercerind.media_kit_libs_android_audio.MediaKitLibsAndroidAudioPlugin", e);
+    }
+    try {
       flutterEngine.getPlugins().add(new net.nfet.flutter.printing.PrintingPlugin());
     } catch (Exception e) {
       Log.e(TAG, "Error registering plugin printing, net.nfet.flutter.printing.PrintingPlugin", e);
