@@ -160,7 +160,16 @@ class LibraryScreenState extends State<LibraryScreen>
       onError: (Object e, StackTrace st) {
         final index = player.currentIndex;
         if (index == null || index < 0 || index >= _songs.length) return;
-        if (_cache.isCached(_songs[index].id)) {
+        final song = _songs[index];
+        if (_cache.isCached(song.id)) {
+          if (_api != null &&
+              _playingLocal &&
+              _streamRetriedFor != song.id &&
+              _phoneCouldNotOpenFile(e)) {
+            _streamRetriedFor = song.id;
+            unawaited(_fallbackToStream(song));
+            return;
+          }
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(content: Text(explainError(e, doing: 'play this song'))),
@@ -834,24 +843,53 @@ class LibraryScreenState extends State<LibraryScreen>
 
   AudioSource _sourceFor(Song song) {
     if (_cache.isCached(song.id)) {
-      final local = _cache.localPlayable(song.id);
-      if (local != null) {
+      final local = _cache.localPlayable(song.id) ?? _cache.localFile(song.id);
+      if (local != null && local.existsSync() && local.lengthSync() >= 64) {
+        _playingLocal = true;
         return AudioSource.file(local.path, tag: _tagFor(song));
       }
     }
     if (_api == null) {
       final raw = _cache.localFile(song.id);
+      _playingLocal = true;
       return AudioSource.file(raw?.path ?? '', tag: _tagFor(song));
     }
+    _playingLocal = false;
     return _streamSource(song);
   }
+
+  Future<void> _fallbackToStream(Song song) async {
+    if (_api == null) return;
+    try {
+      _playingLocal = false;
+      await _player.setAudioSource(_streamSource(song));
+      unawaited(_applyPlaybackModes());
+      await _player.play();
+      unawaited(_cache.replaceForPhone(song, _api!));
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(explainError(e, doing: 'play this song'))),
+        );
+      }
+    }
+  }
+
+  bool _playingLocal = false;
+  int? _streamRetriedFor;
 
   bool _phoneCouldNotOpenFile(Object error) {
     final text = error.toString().toLowerCase();
     return text.contains('-11800') ||
         text.contains('operation could not be completed') ||
         text.contains('source error') ||
-        text.contains('failed to load');
+        text.contains('failed to load') ||
+        text.contains('cleartext') ||
+        text.contains('127.0.0.1') ||
+        text.contains('extractor') ||
+        text.contains('could not read') ||
+        text.contains('androidaudioerror') ||
+        text.contains('connection');
   }
 
   void _onSearchChanged(String value) {
@@ -956,6 +994,7 @@ class LibraryScreenState extends State<LibraryScreen>
     final gen = ++_playGen;
     final song = queue[startIndex];
     final local = _cache.isCached(song.id);
+    _streamRetriedFor = null;
     final needsConvert =
         local && _cache.localPlayable(song.id) == null && _api != null;
 

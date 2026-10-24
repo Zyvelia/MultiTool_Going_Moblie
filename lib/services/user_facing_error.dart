@@ -197,8 +197,14 @@ String _fromText(String raw) {
   }
 
   final early = text.toLowerCase();
-  if (early.contains('-11800') || early.contains('operation could not be completed')) {
-    return 'This phone could not open that downloaded file. Play it again while the PC is on Go Live so it can be converted. FLAC, OGG, and WMA need that.';
+  if (early.contains('-11800') ||
+      early.contains('operation could not be completed') ||
+      early.contains('cleartext') ||
+      early.contains('127.0.0.1') ||
+      early.contains('extractor') ||
+      early.contains('could not read the stream') ||
+      early.contains('androidaudioerror')) {
+    return 'This phone could not open that song. If it is already downloaded, play it again. Otherwise keep the PC on Go Live and try once more.';
   }
   if (early.contains('415') || early.contains('ffmpeg')) {
     return 'The PC could not convert this song for the phone. Install ffmpeg on the PC, then try again.';
@@ -241,8 +247,11 @@ String _fromText(String raw) {
     return 'This phone is out of storage. Free some space, then retry.';
   }
 
-  if (text.length > 180 || _looksNetwork(lower) || lower.contains('errno')) {
+  if (_looksNetwork(lower) || lower.contains('errno')) {
     return _networkBlurb(lower);
+  }
+  if (text.length > 180) {
+    return 'This phone could not open that song. If it is already downloaded, play it again. Otherwise keep the PC on Go Live and try once more.';
   }
   if (text.isEmpty) {
     return 'Something failed and the app did not get a reason. Retry, or Go Live on Remote Hub.';
