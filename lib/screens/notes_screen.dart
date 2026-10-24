@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../models/note.dart';
 import '../services/settings_service.dart';
 import '../services/notes_api_service.dart';
@@ -206,6 +207,101 @@ class _NotesScreenState extends State<NotesScreen> {
     }
   }
 
+  List<Widget> _noteRows() {
+    final pinned = _notes.where((note) => note.pinned).toList();
+    final recent = _notes.where((note) => !note.pinned).toList();
+    final rows = <Widget>[];
+    if (pinned.isNotEmpty) {
+      rows.add(_sectionLabel('Pinned'));
+      rows.addAll(pinned.map(_noteRow));
+    }
+    if (recent.isNotEmpty) {
+      rows.add(_sectionLabel('Recent'));
+      rows.addAll(recent.map(_noteRow));
+    }
+    return rows;
+  }
+
+  Widget _sectionLabel(String text) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+      child: Text(
+        text,
+        style: const TextStyle(
+          color: AppColors.muted,
+          fontSize: 12,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+    );
+  }
+
+  Widget _noteRow(Note note) {
+    final pending = _sync.isPending(note.id);
+    return InkWell(
+      onTap: () => _openEditor(note: note),
+      onLongPress: () => _togglePin(note),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    note.title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontWeight: FontWeight.w600),
+                  ),
+                  if (note.body.trim().isNotEmpty)
+                    Text(
+                      note.body.trim(),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(color: AppColors.muted, fontSize: 13),
+                    ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            if (pending)
+              const Padding(
+                padding: EdgeInsets.only(top: 2, right: 6),
+                child: Icon(Icons.cloud_off, size: 16, color: Colors.white38),
+              ),
+            Text(
+              _noteWhen(note.updatedAt),
+              style: const TextStyle(color: AppColors.muted, fontSize: 12),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  String _noteWhen(double updatedAt) {
+    if (updatedAt <= 0) return '';
+    final dt = DateTime.fromMillisecondsSinceEpoch((updatedAt * 1000).round());
+    final now = DateTime.now();
+    final day = DateTime(dt.year, dt.month, dt.day);
+    final today = DateTime(now.year, now.month, now.day);
+    if (day == today) {
+      final hour = dt.hour % 12 == 0 ? 12 : dt.hour % 12;
+      final minute = dt.minute.toString().padLeft(2, '0');
+      final suffix = dt.hour >= 12 ? 'PM' : 'AM';
+      return '$hour:$minute $suffix';
+    }
+    if (today.difference(day).inDays == 1) return 'Yesterday';
+    const months = [
+      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+    ];
+    return '${months[dt.month - 1]} ${dt.day}';
+  }
+
   void _showToast(String message) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
@@ -222,7 +318,7 @@ class _NotesScreenState extends State<NotesScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: Text(_notes.isNotEmpty ? '${_notes.length} notes' : 'Notes'),
+        title: const Text('Notes'),
         actions: [
           if (_sync.conflicts.isNotEmpty)
             IconButton(
@@ -322,35 +418,10 @@ class _NotesScreenState extends State<NotesScreen> {
                             ),
                           ],
                         )
-                      : ListView.builder(
+                      : ListView(
+                          physics: const AlwaysScrollableScrollPhysics(),
                           padding: const EdgeInsets.only(bottom: 80),
-                          itemCount: _notes.length,
-                          itemBuilder: (context, i) {
-                            final note = _notes[i];
-                            final isPending = _sync.isPending(note.id);
-                            return ListTile(
-                              leading: Icon(
-                                note.pinned ? Icons.push_pin : Icons.push_pin_outlined,
-                                color: note.pinned
-                                    ? AppColors.accent
-                                    : Colors.white38,
-                              ),
-                              title: Text(note.title,
-                                  maxLines: 1, overflow: TextOverflow.ellipsis),
-                              subtitle: Text(
-                                note.body,
-                                maxLines: 2,
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(color: Colors.white54),
-                              ),
-                              trailing: isPending
-                                  ? const Icon(Icons.cloud_off,
-                                      size: 18, color: Colors.white38)
-                                  : null,
-                              onTap: () => _openEditor(note: note),
-                              onLongPress: () => _togglePin(note),
-                            );
-                          },
+                          children: _noteRows(),
                         ),
             ),
           ],
@@ -373,6 +444,10 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
   final _sync = NotesSyncService.instance;
   late final TextEditingController _titleController;
   late final TextEditingController _bodyController;
+  late List<NoteLink> _links;
+  late bool _linksKnown;
+  bool _linksTouched = false;
+  bool _pinned = false;
   bool _saving = false;
   bool _deleting = false;
 
@@ -381,6 +456,9 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
     super.initState();
     _titleController = TextEditingController(text: widget.note?.title ?? '');
     _bodyController = TextEditingController(text: widget.note?.body ?? '');
+    _links = List<NoteLink>.from(widget.note?.links ?? const []);
+    _linksKnown = widget.note?.linksKnown ?? true;
+    _pinned = widget.note?.pinned ?? false;
   }
 
   @override
@@ -395,10 +473,16 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
     try {
       final title = _titleController.text.trim();
       final body = _bodyController.text;
+      final sendLinks = _linksKnown || _linksTouched ? _links : null;
       if (widget.note != null) {
-        await _sync.updateNote(widget.note!.id, title: title, body: body);
+        await _sync.updateNote(
+          widget.note!.id,
+          title: title,
+          body: body,
+          links: sendLinks,
+        );
       } else {
-        await _sync.createNote(title: title, body: body);
+        await _sync.createNote(title: title, body: body, links: _links);
       }
       if (mounted) Navigator.of(context).pop(true);
     } catch (e) {
@@ -432,6 +516,13 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
                 style: pw.TextStyle(fontSize: 20, fontWeight: pw.FontWeight.bold)),
           ),
           pw.Paragraph(text: body, style: const pw.TextStyle(fontSize: 12)),
+          if (_links.isNotEmpty)
+            pw.Paragraph(
+              text: _links
+                  .map((link) => link.label.isEmpty ? link.url : '${link.label}: ${link.url}')
+                  .join('\n'),
+              style: const pw.TextStyle(fontSize: 12),
+            ),
         ],
       ),
     );
@@ -482,6 +573,12 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
       appBar: AppBar(
         title: Text(widget.note != null ? 'Edit note' : 'New note'),
         actions: [
+          if (widget.note != null)
+            IconButton(
+              icon: Icon(_pinned ? Icons.push_pin : Icons.push_pin_outlined),
+              tooltip: _pinned ? 'Unpin' : 'Pin',
+              onPressed: busy ? null : _togglePin,
+            ),
           IconButton(
             icon: const Icon(Icons.print_outlined),
             tooltip: 'Print',
@@ -530,9 +627,109 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
                 ),
               ),
             ),
+            if (!_linksKnown)
+              const Padding(
+                padding: EdgeInsets.only(bottom: 8),
+                child: Text(
+                  'Links from the PC show up after this note syncs.',
+                  style: TextStyle(color: AppColors.muted, fontSize: 12),
+                ),
+              ),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                for (final link in _links)
+                  InputChip(
+                    label: Text(link.label.isEmpty ? link.url : link.label),
+                    onPressed: () => _openLink(link.url),
+                    onDeleted: () => setState(() {
+                      _links.remove(link);
+                      _linksTouched = true;
+                    }),
+                  ),
+                ActionChip(
+                  label: const Text('Add link'),
+                  onPressed: (_linksKnown || widget.note == null) ? _addLink : null,
+                ),
+              ],
+            ),
           ],
         ),
       ),
+    );
+  }
+
+  Future<void> _togglePin() async {
+    if (widget.note == null) return;
+    final base = await SettingsService().baseUrl('notes');
+    if (base == null) {
+      _toast('Connect to the desktop to pin this note');
+      return;
+    }
+    try {
+      final updated = await NotesApiService(base).togglePin(widget.note!.id);
+      await _sync.upsertFromServer(updated);
+      if (mounted) setState(() => _pinned = updated.pinned);
+    } catch (e) {
+      _toast(explainError(e));
+    }
+  }
+
+  Future<void> _addLink() async {
+    final labelController = TextEditingController();
+    final urlController = TextEditingController();
+    final added = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Add link'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: labelController,
+              decoration: const InputDecoration(labelText: 'Label'),
+            ),
+            TextField(
+              controller: urlController,
+              keyboardType: TextInputType.url,
+              decoration: const InputDecoration(labelText: 'URL'),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Add')),
+        ],
+      ),
+    );
+    final label = labelController.text.trim();
+    final url = urlController.text.trim();
+    labelController.dispose();
+    urlController.dispose();
+    if (added != true || url.isEmpty || !mounted) return;
+    setState(() {
+      _links.add(NoteLink(label: label, url: url));
+      _linksTouched = true;
+      _linksKnown = true;
+    });
+  }
+
+  Future<void> _openLink(String url) async {
+    var text = url.trim();
+    if (!text.startsWith('http://') && !text.startsWith('https://')) {
+      text = 'https://$text';
+    }
+    final uri = Uri.tryParse(text);
+    if (uri == null) return;
+    final opened = await launchUrl(uri, mode: LaunchMode.externalApplication);
+    if (!opened) _toast('Couldn\'t open that link');
+  }
+
+  void _toast(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message), duration: const Duration(seconds: 2)),
     );
   }
 }

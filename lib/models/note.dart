@@ -22,6 +22,10 @@ class Note {
   final double updatedAt;
   final bool pinned;
 
+  /// False when this copy was saved before links were synced, so a later
+  /// edit must not send an empty list and wipe the desktop's links.
+  final bool linksKnown;
+
   Note({
     required this.id,
     required this.title,
@@ -29,6 +33,7 @@ class Note {
     required this.links,
     required this.updatedAt,
     required this.pinned,
+    this.linksKnown = true,
   });
 
   factory Note.fromJson(Map<String, dynamic> json) {
@@ -41,6 +46,7 @@ class Note {
           .toList(),
       updatedAt: (json['updated_at'] as num?)?.toDouble() ?? 0,
       pinned: json['pinned'] as bool? ?? false,
+      linksKnown: true,
     );
   }
 }

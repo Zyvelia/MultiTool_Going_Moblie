@@ -806,8 +806,8 @@ class LibraryScreenState extends State<LibraryScreen>
     _openNowPlaying();
   }
 
-  AudioSource _sourceFor(Song song) {
-    final tag = MediaItem(
+  MediaItem _tagFor(Song song) {
+    return MediaItem(
       id: song.id.toString(),
       title: song.title,
       artist: song.artist,
@@ -815,15 +815,11 @@ class LibraryScreenState extends State<LibraryScreen>
       duration: song.duration > 0 ? Duration(seconds: song.duration) : null,
       artUri: _cache.artUriFor(song.id),
     );
+  }
 
-    final local = _cache.isCached(song.id) ? _cache.localFile(song.id) : null;
-    if (local != null && local.existsSync()) {
-      return AudioSource.file(local.path, tag: tag);
-    }
-    if (_api == null) {
-      return AudioSource.file(local?.path ?? '', tag: tag);
-    }
-    final uri = Uri.parse(_api!.streamUrl(song.id));
+  AudioSource _streamSource(Song song) {
+    final tag = _tagFor(song);
+    final uri = Uri.parse(_api!.streamUrl(song.id, transcode: Platform.isIOS));
     final dir = _remoteCacheDir;
     if (dir != null) {
       return LockCachingAudioSource(
@@ -833,6 +829,28 @@ class LibraryScreenState extends State<LibraryScreen>
       );
     }
     return LockCachingAudioSource(uri, tag: tag);
+  }
+
+  AudioSource _sourceFor(Song song) {
+    if (_cache.isCached(song.id)) {
+      final local = _cache.localPlayable(song.id);
+      if (local != null) {
+        return AudioSource.file(local.path, tag: _tagFor(song));
+      }
+    }
+    if (_api == null) {
+      final raw = _cache.localFile(song.id);
+      return AudioSource.file(raw?.path ?? '', tag: _tagFor(song));
+    }
+    return _streamSource(song);
+  }
+
+  bool _phoneCouldNotOpenFile(Object error) {
+    final text = error.toString().toLowerCase();
+    return text.contains('-11800') ||
+        text.contains('operation could not be completed') ||
+        text.contains('source error') ||
+        text.contains('failed to load');
   }
 
   void _onSearchChanged(String value) {
@@ -937,6 +955,8 @@ class LibraryScreenState extends State<LibraryScreen>
     final gen = ++_playGen;
     final song = queue[startIndex];
     final local = _cache.isCached(song.id);
+    final needsConvert =
+        local && _cache.localPlayable(song.id) == null && _api != null;
 
     unawaited(_ensureRemoteCacheDir());
     await _ensurePlayer();
@@ -988,20 +1008,37 @@ class LibraryScreenState extends State<LibraryScreen>
 
     try {
       await startPlayback();
+      if (needsConvert && _api != null) {
+        unawaited(_cache.replaceForPhone(song, _api!));
+      }
     } catch (e) {
-      if (local) {
+      if (local && _api != null && _phoneCouldNotOpenFile(e)) {
         try {
-          await playSingle();
+          await _player.setAudioSource(_streamSource(song));
+          if (gen != _playGen) return;
+          _playlist = null;
+          unawaited(_applyPlaybackModes());
+          await _player.play();
+          _midStreamRetries = 0;
+          unawaited(_cache.replaceForPhone(song, _api!));
+          return;
         } catch (e2) {
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(content: Text(explainError(e2, doing: 'play this song'))),
             );
           }
+          return;
+        }
+      }
+      if (local || _api == null) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(explainError(e, doing: 'play this song'))),
+          );
         }
         return;
       }
-      if (_api == null) return;
       for (var attempt = 1; attempt <= 3; attempt++) {
         if (gen != _playGen) return;
         try {

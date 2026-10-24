@@ -57,15 +57,22 @@ class VaultApiService {
         .toList();
   }
 
-  Future<List<TotpCode>> fetchTotpCodes(String token) async {
+  Future<TotpFeed> fetchTotpCodes(String token) async {
     final res = await trustedHttp.get(_uri('/api/totp'),
         headers: {'Authorization': 'Bearer $token'});
     if (res.statusCode != 200) {
       throw AppIssue.fromHttp(res.statusCode, res.body, doing: 'load authenticator codes');
     }
     final data = jsonDecode(res.body) as Map<String, dynamic>;
-    return (data['codes'] as List)
+    final codes = (data['codes'] as List)
         .map((c) => TotpCode.fromJson(c as Map<String, dynamic>))
         .toList();
+    final period = (data['period'] as num?)?.toInt() ?? 30;
+    final remaining = (data['seconds_remaining'] as num?)?.toInt() ?? period;
+    return TotpFeed(
+      codes: codes,
+      period: period <= 0 ? 30 : period,
+      secondsRemaining: remaining,
+    );
   }
 }

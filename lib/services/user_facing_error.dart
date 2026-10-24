@@ -196,6 +196,14 @@ String _fromText(String raw) {
     if (from != null) return from;
   }
 
+  final early = text.toLowerCase();
+  if (early.contains('-11800') || early.contains('operation could not be completed')) {
+    return 'This phone could not open that downloaded file. Play it again while the PC is on Go Live so it can be converted. FLAC, OGG, and WMA need that.';
+  }
+  if (early.contains('415') || early.contains('ffmpeg')) {
+    return 'The PC could not convert this song for the phone. Install ffmpeg on the PC, then try again.';
+  }
+
   final statusMatch = RegExp(r'\b(status\s*)?(\d{3})\b').firstMatch(text);
   if (statusMatch != null) {
     final status = int.tryParse(statusMatch.group(2)!);

@@ -16,13 +16,19 @@ import 'api_service.dart';
 /// modules/media_player/web_server.py, just inverted.
 const Map<String, String> _extForMime = {
   'audio/mpeg': 'mp3',
+  'audio/mp3': 'mp3',
+  'audio/x-mp3': 'mp3',
   'audio/flac': 'flac',
+  'audio/x-flac': 'flac',
   'audio/wav': 'wav',
   'audio/x-wav': 'wav',
   'audio/ogg': 'ogg',
+  'application/ogg': 'ogg',
   'audio/opus': 'opus',
   'audio/mp4': 'm4a',
+  'audio/x-m4a': 'm4a',
   'audio/aac': 'aac',
+  'audio/x-aiff': 'aiff',
   'audio/x-ms-wma': 'wma',
   'audio/aiff': 'aiff',
   'audio/x-matroska': 'mka',
@@ -34,6 +40,65 @@ const Map<String, String> _extForMime = {
   'image/png': 'png',
   'image/webp': 'webp',
 };
+
+/// iPhone AVPlayer opens these. FLAC, OGG, Opus, and WMA come back as
+/// error -11800 ("The operation could not be completed") even when the
+/// file extension is right.
+const Set<String> _iosPlayable = {
+  'mp3', 'm4a', 'aac', 'wav', 'aiff', 'aif', 'caf', 'mp4', 'm4b', '3gp', 'amr',
+};
+
+bool phoneCanDecode(String ext) {
+  if (!Platform.isIOS) return true;
+  return _iosPlayable.contains(ext.toLowerCase());
+}
+
+/// Extension implied by the first bytes, or null when they are not audio.
+String? sniffAudioExt(List<int> b) {
+  if (b.length < 4) return null;
+  if (b[0] == 0x49 && b[1] == 0x44 && b[2] == 0x33) return 'mp3';
+  if (b[0] == 0x66 && b[1] == 0x4C && b[2] == 0x61 && b[3] == 0x43) {
+    return 'flac';
+  }
+  if (b[0] == 0x4F && b[1] == 0x67 && b[2] == 0x67 && b[3] == 0x53) {
+    return 'ogg';
+  }
+  if (b[0] == 0x52 && b[1] == 0x49 && b[2] == 0x46 && b[3] == 0x46) {
+    if (b.length >= 12 &&
+        b[8] == 0x57 &&
+        b[9] == 0x41 &&
+        b[10] == 0x56 &&
+        b[11] == 0x45) {
+      return 'wav';
+    }
+    return null;
+  }
+  if (b[0] == 0x46 && b[1] == 0x4F && b[2] == 0x52 && b[3] == 0x4D) {
+    return 'aiff';
+  }
+  if (b.length >= 8 &&
+      b[4] == 0x66 &&
+      b[5] == 0x74 &&
+      b[6] == 0x79 &&
+      b[7] == 0x70) {
+    return 'm4a';
+  }
+  if (b[0] == 0x30 && b[1] == 0x26 && b[2] == 0xB2 && b[3] == 0x75) {
+    return 'wma';
+  }
+  if (b[0] == 0xFF && (b[1] & 0xE0) == 0xE0) {
+    final layer = (b[1] >> 1) & 0x03;
+    if (layer == 0) return 'aac';
+    return 'mp3';
+  }
+  return null;
+}
+
+bool _isJpegOrPng(List<int> b) {
+  if (b.length < 4) return false;
+  if (b[0] == 0xFF && b[1] == 0xD8 && b[2] == 0xFF) return true;
+  return b[0] == 0x89 && b[1] == 0x50 && b[2] == 0x4E && b[3] == 0x47;
+}
 
 enum CacheEventType {
   started,
@@ -102,6 +167,17 @@ class _ManifestEntry {
                 DateTime.now(),
       );
 
+  _ManifestEntry copyWith({String? ext}) => _ManifestEntry(
+        title: title,
+        artist: artist,
+        album: album,
+        duration: duration,
+        size: size,
+        ext: ext ?? this.ext,
+        artExt: artExt,
+        downloadedAt: downloadedAt,
+      );
+
   Map<String, dynamic> toJson() => {
         'title': title,
         'artist': artist,
@@ -145,6 +221,7 @@ class OfflineCacheService {
   Directory? _dir;
   final Map<int, _ManifestEntry> _manifest = {};
   final Set<int> _downloading = {};
+  final Set<int> _replacing = {};
   final Set<int> _cancelled = {};
   final Map<int, http.Client> _clients = {};
   bool _initialized = false;
@@ -195,6 +272,11 @@ class OfflineCacheService {
     await _manifestFile.writeAsString(jsonEncode(map));
   }
 
+  void _saveManifestSync() {
+    final map = _manifest.map((id, e) => MapEntry('$id', e.toJson()));
+    _manifestFile.writeAsStringSync(jsonEncode(map));
+  }
+
   bool get isReady => _initialized;
   bool isCached(int songId) => _manifest.containsKey(songId);
   bool isDownloading(int songId) => _downloading.contains(songId);
@@ -220,7 +302,97 @@ class OfflineCacheService {
   Uri? artUriFor(int songId) {
     final f = localArtFile(songId);
     if (f == null) return null;
+    try {
+      final raf = f.openSync();
+      final List<int> head;
+      try {
+        head = raf.readSync(16);
+      } finally {
+        raf.closeSync();
+      }
+      // A cover the phone cannot decode has taken down the whole item
+      // on iOS. Only jpeg and png are handed to the player.
+      if (!_isJpegOrPng(head)) return null;
+    } catch (_) {
+      return null;
+    }
     return Uri.file(f.path);
+  }
+
+  /// Local file when this phone can actually decode it. Renames the file
+  /// when the bytes disagree with the saved extension (AVPlayer trusts
+  /// the extension and returns -11800 when they disagree). Returns null
+  /// for a missing, tiny, or unsupported file so the caller can stream
+  /// a converted copy instead.
+  File? localPlayable(int songId) {
+    final entry = _manifest[songId];
+    final file = localFile(songId);
+    if (entry == null || file == null || !file.existsSync()) return null;
+    if (file.lengthSync() < 64) return null;
+
+    var ext = entry.ext;
+    File play = file;
+    try {
+      final raf = file.openSync();
+      final List<int> head;
+      try {
+        head = raf.readSync(16);
+      } finally {
+        raf.closeSync();
+      }
+      final sniffed = sniffAudioExt(head);
+      if (sniffed != null && sniffed != entry.ext && _dir != null) {
+        final renamed = File('${_dir!.path}/files/$songId.$sniffed');
+        if (renamed.path != file.path) {
+          if (renamed.existsSync()) renamed.deleteSync();
+          file.renameSync(renamed.path);
+        }
+        _manifest[songId] = entry.copyWith(ext: sniffed);
+        _saveManifestSync();
+        ext = sniffed;
+        play = renamed;
+      } else if (sniffed != null) {
+        ext = sniffed;
+      }
+    } catch (_) {
+      ext = entry.ext;
+      play = file;
+    }
+    if (!phoneCanDecode(ext)) return null;
+    return play.existsSync() ? play : null;
+  }
+
+  /// Replaces a download this phone cannot play. The old file stays until
+  /// the new one has been saved, so a failed conversion does not wipe it.
+  Future<void> replaceForPhone(Song song, ApiService api) async {
+    await ensureReady();
+    if (_replacing.contains(song.id) || _downloading.contains(song.id)) return;
+    _replacing.add(song.id);
+    final old = localFile(song.id);
+    final oldEntry = _manifest[song.id];
+    try {
+      if (oldEntry != null) {
+        _manifest.remove(song.id);
+        await _saveManifest();
+      }
+      await download(song, api);
+      if (isCached(song.id)) {
+        final current = localFile(song.id);
+        if (old != null &&
+            current != null &&
+            old.path != current.path &&
+            await old.exists()) {
+          try {
+            await old.delete();
+          } catch (_) {}
+        }
+      } else if (oldEntry != null && old != null && await old.exists()) {
+        _manifest[song.id] = oldEntry;
+        await _saveManifest();
+      }
+    } finally {
+      _replacing.remove(song.id);
+    }
   }
 
   /// All explicitly-downloaded songs, sorted by title — used both by the
@@ -250,79 +422,80 @@ class OfflineCacheService {
     _downloading.add(song.id);
     _events.add(CacheEvent(CacheEventType.started, songId: song.id));
 
-    final client = http.Client();
-    _clients[song.id] = client;
+    final opened = <http.Client>[http.Client()];
+    var active = opened.first;
+    _clients[song.id] = active;
     File? tmp;
     try {
-      final req = http.Request('GET', Uri.parse(api.streamUrl(song.id)));
-      final resp = await client.send(req).timeout(const Duration(seconds: 15));
-      if (resp.statusCode != 200) {
-        throw Exception('server returned ${resp.statusCode}');
-      }
-      final contentType =
-          resp.headers['content-type']?.split(';').first.trim().toLowerCase();
-      final ext = _extForMime[contentType] ?? 'mp3';
-      final total = resp.contentLength ?? song.size;
-
-      tmp = File('${_dir!.path}/files/.tmp_${song.id}');
-      final sink = tmp.openWrite();
-      var received = 0;
-      try {
-        await for (final chunk in resp.stream) {
-          if (_cancelled.contains(song.id)) break;
-          sink.add(chunk);
-          received += chunk.length;
-          _events.add(CacheEvent(
-            CacheEventType.progress,
-            songId: song.id,
-            progress: total > 0 ? (received / total).clamp(0, 1) : -1,
-          ));
+      var transcode = false;
+      var round = 0;
+      while (round < 2) {
+        round++;
+        final resp = await _openAudio(active, api, song.id, transcode: transcode);
+        if (resp.statusCode != 200) {
+          throw Exception(_downloadStatusMessage(resp.statusCode));
         }
-      } finally {
-        await sink.close();
-      }
+        final mimeExt = transcode ? 'm4a' : _mimeExtOf(resp);
+        if (!transcode &&
+            Platform.isIOS &&
+            mimeExt != null &&
+            !phoneCanDecode(mimeExt)) {
+          // Stop the original body so a FLAC is not saved, then ask the
+          // PC for an m4a instead.
+          try {
+            await resp.stream
+                .listen((_) {}, onError: (_) {}, cancelOnError: true)
+                .cancel();
+          } catch (_) {}
+          active = _swapClient(opened, song.id);
+          transcode = true;
+          continue;
+        }
 
-      if (_cancelled.remove(song.id)) {
-        if (await tmp.exists()) await tmp.delete();
+        final saved = await _writeAudio(
+          song,
+          resp,
+          total: transcode ? 0 : (resp.contentLength ?? song.size),
+        );
+        if (saved == null) return;
+        tmp = saved.tmp;
+
+        final ext = saved.sniffed ?? mimeExt;
+        final phoneRejected = Platform.isIOS && (ext == null || !phoneCanDecode(ext));
+        if (!transcode && phoneRejected) {
+          if (await saved.tmp.exists()) await saved.tmp.delete();
+          tmp = null;
+          active = _swapClient(opened, song.id);
+          transcode = true;
+          continue;
+        }
+        if (ext == null) {
+          throw Exception('The PC did not send an audio file for that song.');
+        }
+        if (phoneRejected) {
+          throw Exception(
+            'This phone cannot play that song until the PC converts it. Install ffmpeg on the PC, then download it again.',
+          );
+        }
+        if (transcode &&
+            saved.received < (song.duration > 0 ? song.duration * 8000 : 4096)) {
+          throw Exception(
+            'The converted download was cut off. Try it again while the PC is on Go Live.',
+          );
+        }
+        if (!transcode &&
+            saved.expected != null &&
+            saved.expected! > 0 &&
+            saved.received != saved.expected) {
+          throw Exception(
+            'The download was cut off before the song finished. Try it again while the PC is on Go Live.',
+          );
+        }
+
+        await _commitDownload(song, api, saved.tmp, saved.received, ext, active);
         return;
       }
-
-      final finalFile = File('${_dir!.path}/files/${song.id}.$ext');
-      if (await finalFile.exists()) await finalFile.delete();
-      await tmp.rename(finalFile.path);
-
-      String? artExt;
-      try {
-        final artReq = http.Request('GET', Uri.parse(api.coverArtUrl(song.id)));
-        final artResp = await client.send(artReq).timeout(const Duration(seconds: 8));
-        if (artResp.statusCode == 200) {
-          final artMime =
-              artResp.headers['content-type']?.split(';').first.trim().toLowerCase();
-          artExt = _extForMime[artMime] ?? 'jpg';
-          final artTmp = File('${_dir!.path}/files/.tmp_${song.id}.cover');
-          final artSink = artTmp.openWrite();
-          await artResp.stream.pipe(artSink);
-          await artSink.close();
-          final artFinal = File('${_dir!.path}/files/${song.id}.cover.$artExt');
-          if (await artFinal.exists()) await artFinal.delete();
-          await artTmp.rename(artFinal.path);
-        }
-      } catch (_) {
-        artExt = null;
-      }
-
-      _manifest[song.id] = _ManifestEntry(
-        title: song.title,
-        artist: song.artist,
-        album: song.album,
-        duration: song.duration,
-        size: received,
-        ext: ext,
-        artExt: artExt,
-        downloadedAt: DateTime.now(),
-      );
-      await _saveManifest();
-      _events.add(CacheEvent(CacheEventType.completed, songId: song.id));
+      throw Exception('The PC did not send an audio file for that song.');
     } catch (e) {
       try {
         if (tmp != null && await tmp.exists()) await tmp.delete();
@@ -336,8 +509,137 @@ class OfflineCacheService {
     } finally {
       _downloading.remove(song.id);
       _clients.remove(song.id);
-      client.close();
+      for (final c in opened) {
+        _closeQuiet(c);
+      }
     }
+  }
+
+  http.Client _swapClient(List<http.Client> opened, int songId) {
+    _closeQuiet(opened.last);
+    final next = http.Client();
+    opened.add(next);
+    _clients[songId] = next;
+    return next;
+  }
+
+  void _closeQuiet(http.Client client) {
+    try {
+      client.close();
+    } catch (_) {}
+  }
+
+  String? _mimeExtOf(http.StreamedResponse resp) {
+    final contentType =
+        resp.headers['content-type']?.split(';').first.trim().toLowerCase();
+    return _extForMime[contentType];
+  }
+
+  String _downloadStatusMessage(int status) {
+    if (status == 415) {
+      return 'The PC could not convert this song for the phone. Install ffmpeg on the PC, then try the download again.';
+    }
+    return 'server returned $status';
+  }
+
+  Future<http.StreamedResponse> _openAudio(
+    http.Client client,
+    ApiService api,
+    int songId, {
+    required bool transcode,
+  }) {
+    final req = http.Request(
+      'GET',
+      Uri.parse(api.streamUrl(songId, transcode: transcode)),
+    );
+    return client.send(req).timeout(
+      transcode ? const Duration(minutes: 8) : const Duration(seconds: 20),
+    );
+  }
+
+  Future<_SavedAudio?> _writeAudio(
+    Song song,
+    http.StreamedResponse resp, {
+    required int total,
+  }) async {
+    final tmp = File('${_dir!.path}/files/.tmp_${song.id}');
+    final sink = tmp.openWrite();
+    var received = 0;
+    List<int>? head;
+    try {
+      await for (final chunk in resp.stream) {
+        if (_cancelled.contains(song.id)) break;
+        head ??= chunk.length > 16 ? chunk.sublist(0, 16) : List<int>.from(chunk);
+        sink.add(chunk);
+        received += chunk.length;
+        _events.add(CacheEvent(
+          CacheEventType.progress,
+          songId: song.id,
+          progress: total > 0 ? (received / total).clamp(0, 1) : -1,
+        ));
+      }
+    } finally {
+      await sink.close();
+    }
+    if (_cancelled.remove(song.id)) {
+      if (await tmp.exists()) await tmp.delete();
+      return null;
+    }
+    return _SavedAudio(
+      tmp: tmp,
+      received: received,
+      expected: resp.contentLength,
+      sniffed: sniffAudioExt(head ?? const []),
+    );
+  }
+
+  Future<void> _commitDownload(
+    Song song,
+    ApiService api,
+    File tmp,
+    int received,
+    String ext,
+    http.Client client,
+  ) async {
+    final finalFile = File('${_dir!.path}/files/${song.id}.$ext');
+    if (await finalFile.exists()) await finalFile.delete();
+    await tmp.rename(finalFile.path);
+
+    String? artExt;
+    try {
+      final artReq = http.Request('GET', Uri.parse(api.coverArtUrl(song.id)));
+      final artResp = await client.send(artReq).timeout(const Duration(seconds: 8));
+      if (artResp.statusCode == 200) {
+        final artMime = artResp.headers['content-type']
+            ?.split(';')
+            .first
+            .trim()
+            .toLowerCase();
+        artExt = _extForMime[artMime] ?? 'jpg';
+        final artTmp = File('${_dir!.path}/files/.tmp_${song.id}.cover');
+        final artSink = artTmp.openWrite();
+        await artResp.stream.pipe(artSink);
+        await artSink.close();
+        final artFinal = File('${_dir!.path}/files/${song.id}.cover.$artExt');
+        if (await artFinal.exists()) await artFinal.delete();
+        await artTmp.rename(artFinal.path);
+      }
+    } catch (_) {
+      artExt = null;
+    }
+
+    _manifest[song.id] = _ManifestEntry(
+      title: song.title,
+      artist: song.artist,
+      album: song.album,
+      duration: song.duration,
+      size: received,
+      ext: ext,
+      artExt: artExt,
+      downloadedAt: DateTime.now(),
+    );
+    await _saveManifest();
+    _events.add(CacheEvent(CacheEventType.completed, songId: song.id));
   }
 
   bool _batchRunning = false;
@@ -443,6 +745,19 @@ class OfflineCacheService {
     } catch (_) {}
     _events.add(const CacheEvent(CacheEventType.cleared));
   }
+}
+
+class _SavedAudio {
+  final File tmp;
+  final int received;
+  final int? expected;
+  final String? sniffed;
+  const _SavedAudio({
+    required this.tmp,
+    required this.received,
+    required this.expected,
+    required this.sniffed,
+  });
 }
 
 String formatBytes(int bytes) {

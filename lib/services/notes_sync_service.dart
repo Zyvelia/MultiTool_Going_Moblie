@@ -22,6 +22,10 @@ class LocalNote {
   double updatedAt;
   NoteSyncState syncState;
 
+  /// Null means this cached note was saved before links were stored.
+  /// Sync omits the field so the desktop keeps the links it already has.
+  List<NoteLink>? links;
+
   LocalNote({
     required this.id,
     required this.title,
@@ -29,6 +33,7 @@ class LocalNote {
     required this.pinned,
     required this.updatedAt,
     this.syncState = NoteSyncState.synced,
+    this.links,
   });
 
   factory LocalNote.fromNote(Note n, {NoteSyncState syncState = NoteSyncState.synced}) =>
@@ -39,6 +44,7 @@ class LocalNote {
         pinned: n.pinned,
         updatedAt: n.updatedAt,
         syncState: syncState,
+        links: n.linksKnown ? List<NoteLink>.from(n.links) : null,
       );
 
   factory LocalNote.fromJson(Map<String, dynamic> j) => LocalNote(
@@ -51,6 +57,11 @@ class LocalNote {
           (s) => s.name == (j['syncState'] as String? ?? 'synced'),
           orElse: () => NoteSyncState.synced,
         ),
+        links: j.containsKey('links')
+            ? (j['links'] as List? ?? [])
+                .map((link) => NoteLink.fromJson(link as Map<String, dynamic>))
+                .toList()
+            : null,
       );
 
   Map<String, dynamic> toJson() => {
@@ -60,18 +71,17 @@ class LocalNote {
         'pinned': pinned,
         'updatedAt': updatedAt,
         'syncState': syncState.name,
+        if (links != null) 'links': links!.map((link) => link.toJson()).toList(),
       };
 
-  // Notes only ever have real links from the desktop side; nothing here
-  // creates or edits them, so the round trip through LocalNote drops
-  // them rather than trying to preserve/re-serialize.
   Note toNote() => Note(
         id: id,
         title: title,
         body: body,
-        links: const [],
+        links: links ?? const [],
         updatedAt: updatedAt,
         pinned: pinned,
+        linksKnown: links != null,
       );
 
   bool get isLocalOnly => id.startsWith('local_');
@@ -170,7 +180,10 @@ class NotesSyncService {
       list = list
           .where((n) =>
               n.title.toLowerCase().contains(q) ||
-              n.body.toLowerCase().contains(q))
+              n.body.toLowerCase().contains(q) ||
+              (n.links ?? const <NoteLink>[]).any((link) =>
+                  link.label.toLowerCase().contains(q) ||
+                  link.url.toLowerCase().contains(q)))
           .toList();
     }
     list.sort((a, b) {
@@ -207,7 +220,11 @@ class NotesSyncService {
         continue;
       }
       if (n.updatedAt <= local.updatedAt) continue;
-      if (n.title == local.title && n.body == local.body) continue;
+      if (n.title == local.title &&
+          n.body == local.body &&
+          _sameLinks(local.links, n.links)) {
+        continue;
+      }
       if (_conflicts.any((c) => c.noteId == n.id)) continue;
       _conflicts.add(NoteConflict(
         noteId: n.id,
@@ -218,6 +235,7 @@ class NotesSyncService {
           pinned: local.pinned,
           updatedAt: local.updatedAt,
           syncState: local.syncState,
+          links: local.links == null ? null : List<NoteLink>.from(local.links!),
         ),
         server: n,
       ));
@@ -268,6 +286,7 @@ class NotesSyncService {
       pinned: false,
       updatedAt: conflict.server.updatedAt,
       syncState: NoteSyncState.pendingCreate,
+      links: List<NoteLink>.from(conflict.server.links),
     );
     _conflicts.removeWhere((c) => c.noteId == noteId);
     await _save();
@@ -282,7 +301,11 @@ class NotesSyncService {
     await _save();
   }
 
-  Future<Note> createNote({required String title, required String body}) async {
+  Future<Note> createNote({
+    required String title,
+    required String body,
+    List<NoteLink> links = const [],
+  }) async {
     await ensureReady();
     final id = 'local_${DateTime.now().microsecondsSinceEpoch}';
     final note = LocalNote(
@@ -292,18 +315,25 @@ class NotesSyncService {
       pinned: false,
       updatedAt: DateTime.now().millisecondsSinceEpoch / 1000,
       syncState: NoteSyncState.pendingCreate,
+      links: List<NoteLink>.from(links),
     );
     _notes[id] = note;
     await _save();
     return note.toNote();
   }
 
-  Future<Note> updateNote(String id, {required String title, required String body}) async {
+  Future<Note> updateNote(
+    String id, {
+    required String title,
+    required String body,
+    List<NoteLink>? links,
+  }) async {
     await ensureReady();
     final existing = _notes[id];
     if (existing == null) throw Exception('Note not found locally');
     existing.title = title;
     existing.body = body;
+    if (links != null) existing.links = List<NoteLink>.from(links);
     existing.updatedAt = DateTime.now().millisecondsSinceEpoch / 1000;
     // A note still waiting on its initial create just carries the newer
     // content into that same pending create — no separate update op to
@@ -351,12 +381,21 @@ class NotesSyncService {
       try {
         switch (n.syncState) {
           case NoteSyncState.pendingCreate:
-            final created = await api.createNote(title: n.title, body: n.body);
+            final created = await api.createNote(
+              title: n.title,
+              body: n.body,
+              links: n.links ?? const [],
+            );
             _notes.remove(n.id);
             _notes[created.id] = LocalNote.fromNote(created);
             break;
           case NoteSyncState.pendingUpdate:
-            final updated = await api.updateNote(n.id, title: n.title, body: n.body);
+            final updated = await api.updateNote(
+              n.id,
+              title: n.title,
+              body: n.body,
+              links: n.links,
+            );
             _notes[n.id] = LocalNote.fromNote(updated);
             break;
           case NoteSyncState.pendingDelete:
@@ -382,4 +421,15 @@ class NotesSyncService {
       failed: failed,
     ));
   }
+}
+
+bool _sameLinks(List<NoteLink>? local, List<NoteLink> server) {
+  if (local == null) return true;
+  if (local.length != server.length) return false;
+  for (var i = 0; i < local.length; i++) {
+    if (local[i].label != server[i].label || local[i].url != server[i].url) {
+      return false;
+    }
+  }
+  return true;
 }

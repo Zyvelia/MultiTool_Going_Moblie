@@ -25,18 +25,35 @@ class NotesApiService {
         .toList();
   }
 
-  Future<Note> createNote({required String title, required String body}) async {
+  Future<Note> createNote({
+    required String title,
+    required String body,
+    List<NoteLink> links = const [],
+  }) async {
     final res = await trustedHttp.post(_uri('/api/notes'),
-        headers: _headers, body: jsonEncode({'title': title, 'body': body}));
+        headers: _headers,
+        body: jsonEncode({
+          'title': title,
+          'body': body,
+          'links': links.map((link) => link.toJson()).toList(),
+        }));
     ensureOk(res, doing: 'create that note', requireOk: true);
     final data = jsonDecode(res.body) as Map<String, dynamic>;
     return Note.fromJson(data['note'] as Map<String, dynamic>);
   }
 
-  Future<Note> updateNote(String id,
-      {required String title, required String body}) async {
+  Future<Note> updateNote(
+    String id, {
+    required String title,
+    required String body,
+    List<NoteLink>? links,
+  }) async {
+    final payload = <String, dynamic>{'title': title, 'body': body};
+    if (links != null) {
+      payload['links'] = links.map((link) => link.toJson()).toList();
+    }
     final res = await trustedHttp.post(_uri('/api/notes/$id/update'),
-        headers: _headers, body: jsonEncode({'title': title, 'body': body}));
+        headers: _headers, body: jsonEncode(payload));
     ensureOk(res, doing: 'save that note', requireOk: true);
     final data = jsonDecode(res.body) as Map<String, dynamic>;
     return Note.fromJson(data['note'] as Map<String, dynamic>);

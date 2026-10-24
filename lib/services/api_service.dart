@@ -74,7 +74,11 @@ class ApiService {
 
   /// URL to stream a given song's audio bytes (Range requests supported
   /// server-side, so seeking works fine with just_audio).
-  String streamUrl(int songId) => '$baseUrl/api/stream/$songId';
+  String streamUrl(int songId, {bool transcode = false}) {
+    final url = '$baseUrl/api/stream/$songId';
+    if (!transcode) return url;
+    return '$url?transcode=m4a';
+  }
 
   /// Optional desktop artwork endpoint; 404 is normal when tags have no art.
   String coverArtUrl(int songId) => '$baseUrl/api/artwork/$songId';

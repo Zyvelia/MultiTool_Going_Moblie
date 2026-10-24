@@ -5,6 +5,7 @@ class VaultEntry {
   final String password;
   final String category;
   final bool favorite;
+  final String totpLinkId;
 
   VaultEntry({
     required this.id,
@@ -13,6 +14,7 @@ class VaultEntry {
     required this.password,
     required this.category,
     required this.favorite,
+    this.totpLinkId = '',
   });
 
   factory VaultEntry.fromJson(Map<String, dynamic> json) {
@@ -23,6 +25,7 @@ class VaultEntry {
       password: json['password'] as String? ?? '',
       category: json['category'] as String? ?? '',
       favorite: json['favorite'] as bool? ?? false,
+      totpLinkId: json['totp_link_id'] as String? ?? '',
     );
   }
 }
@@ -48,4 +51,16 @@ class TotpCode {
       code: json['code'] as String? ?? '',
     );
   }
+}
+
+class TotpFeed {
+  final List<TotpCode> codes;
+  final int period;
+  final int secondsRemaining;
+
+  const TotpFeed({
+    required this.codes,
+    required this.period,
+    required this.secondsRemaining,
+  });
 }

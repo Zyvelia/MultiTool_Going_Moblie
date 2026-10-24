@@ -14,24 +14,28 @@ class VaultScreen extends StatefulWidget {
   State<VaultScreen> createState() => _VaultScreenState();
 }
 
-class _VaultScreenState extends State<VaultScreen>
-    with SingleTickerProviderStateMixin, WidgetsBindingObserver {
+class _VaultScreenState extends State<VaultScreen> with WidgetsBindingObserver {
   final _settings = SettingsService();
   final _passwordController = TextEditingController();
+  final _searchController = TextEditingController();
   VaultApiService? _api;
   String? _token;
   String? _error;
   bool _loading = false;
+  String _query = '';
+
+  /// One open row. Null means every login is collapsed.
+  String? _openKey;
 
   List<VaultEntry> _entries = [];
   List<TotpCode> _codes = [];
   Timer? _totpTimer;
   int _secondsRemaining = 30;
+  int _period = 30;
 
   /// Codes stay masked until explicitly revealed, so the list is safe to have
-  /// open in public. Keyed by entry id and dropped again on a timer.
-  final Set<String> _revealedIds = {};
-  final Map<String, Timer> _revealTimers = {};
+  /// open in public. The value is when the reveal ends.
+  final Map<String, DateTime> _revealUntil = {};
   static const _revealDuration = Duration(seconds: 15);
 
   Timer? _idleTimer;
@@ -44,12 +48,9 @@ class _VaultScreenState extends State<VaultScreen>
   static const _idleLockAfter = Duration(minutes: 3);
   static const _clipboardClearAfter = Duration(seconds: 30);
 
-  late TabController _tabController;
-
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 2, vsync: this);
     WidgetsBinding.instance.addObserver(this);
     _init();
   }
@@ -77,7 +78,7 @@ class _VaultScreenState extends State<VaultScreen>
         _backgroundedAt ??= DateTime.now();
         _totpTimer?.cancel();
         _idleTimer?.cancel();
-        if (_revealedIds.isNotEmpty && mounted) {
+        if (_revealUntil.isNotEmpty && mounted) {
           setState(_hideAllCodes);
         } else {
           _hideAllCodes();
@@ -114,8 +115,8 @@ class _VaultScreenState extends State<VaultScreen>
     _idleTimer?.cancel();
     _clipboardTimer?.cancel();
     _hideAllCodes();
-    _tabController.dispose();
     _passwordController.dispose();
+    _searchController.dispose();
     super.dispose();
   }
 
@@ -130,11 +131,11 @@ class _VaultScreenState extends State<VaultScreen>
     try {
       final token = await _api!.login(password);
       final entries = await _api!.fetchEntries(token);
-      final codes = await _api!.fetchTotpCodes(token);
+      final feed = await _api!.fetchTotpCodes(token);
       setState(() {
         _token = token;
         _entries = entries;
-        _codes = codes;
+        _applyFeed(feed);
         _loading = false;
         _passwordController.clear();
       });
@@ -148,20 +149,28 @@ class _VaultScreenState extends State<VaultScreen>
     }
   }
 
+  void _applyFeed(TotpFeed feed) {
+    _codes = feed.codes;
+    _period = feed.period;
+    _secondsRemaining = feed.secondsRemaining.clamp(0, feed.period);
+  }
+
   void _startTotpRefresh() {
     _totpTimer?.cancel();
     _totpTimer = Timer.periodic(const Duration(seconds: 1), (_) async {
-      if (_token == null || _api == null) return;
+      if (_token == null || _api == null || !mounted) return;
+      final now = DateTime.now();
+      final remaining = _secondsRemaining - 1;
       setState(() {
-        _secondsRemaining = _secondsRemaining <= 0 ? 30 : _secondsRemaining - 1;
+        _revealUntil.removeWhere((_, until) => !now.isBefore(until));
+        _secondsRemaining = remaining < 0 ? 0 : remaining;
       });
-      if (_secondsRemaining <= 1) {
-        try {
-          final codes = await _api!.fetchTotpCodes(_token!);
-          if (mounted) setState(() => _codes = codes);
-        } catch (_) {
-          // transient network hiccup — keep showing the last known codes
-        }
+      if (remaining > 0) return;
+      try {
+        final feed = await _api!.fetchTotpCodes(_token!);
+        if (mounted) setState(() => _applyFeed(feed));
+      } catch (_) {
+        // transient network hiccup — keep showing the last known codes
       }
     });
   }
@@ -175,32 +184,37 @@ class _VaultScreenState extends State<VaultScreen>
       _token = null;
       _entries = [];
       _codes = [];
+      _openKey = null;
+      _query = '';
+      _searchController.clear();
       _hideAllCodes();
     });
   }
 
   void _toggleReveal(String id) {
     setState(() {
-      if (_revealedIds.remove(id)) {
-        _revealTimers.remove(id)?.cancel();
+      if (_revealUntil.containsKey(id)) {
+        _revealUntil.remove(id);
         return;
       }
-      _revealedIds.add(id);
-    });
-    _revealTimers[id]?.cancel();
-    _revealTimers[id] = Timer(_revealDuration, () {
-      if (!mounted) return;
-      setState(() => _revealedIds.remove(id));
-      _revealTimers.remove(id);
+      _revealUntil[id] = DateTime.now().add(_revealDuration);
     });
   }
 
+  bool _isRevealed(String id) {
+    final until = _revealUntil[id];
+    return until != null && DateTime.now().isBefore(until);
+  }
+
+  int _revealSecondsLeft(String id) {
+    final until = _revealUntil[id];
+    if (until == null) return 0;
+    final left = until.difference(DateTime.now()).inSeconds;
+    return left < 0 ? 0 : left;
+  }
+
   void _hideAllCodes() {
-    for (final t in _revealTimers.values) {
-      t.cancel();
-    }
-    _revealTimers.clear();
-    _revealedIds.clear();
+    _revealUntil.clear();
   }
 
   void _copyToClipboard(String text, {bool autoClear = false}) {
@@ -282,16 +296,10 @@ class _VaultScreenState extends State<VaultScreen>
       );
     }
 
+    final rows = _visibleRows();
     return Scaffold(
       appBar: AppBar(
         title: const Text('Security Vault'),
-        bottom: TabBar(
-          controller: _tabController,
-          tabs: const [
-            Tab(text: 'Passwords'),
-            Tab(text: 'Authenticator'),
-          ],
-        ),
         actions: [
           IconButton(icon: const Icon(Icons.lock_open), onPressed: _logout),
         ],
@@ -303,76 +311,170 @@ class _VaultScreenState extends State<VaultScreen>
         onPointerDown: (_) => _resetIdleTimer(),
         child: Column(
           children: [
-            Expanded(
-              child: TabBarView(
-                controller: _tabController,
-                children: [
-                  _buildEntries(),
-                  _buildTotp(),
-                ],
+            Padding(
+              padding: const EdgeInsets.fromLTRB(14, 12, 14, 8),
+              child: TextField(
+                controller: _searchController,
+                onChanged: (value) => setState(() => _query = value),
+                decoration: InputDecoration(
+                  hintText: 'Search sites',
+                  prefixIcon: const Icon(Icons.search, color: Colors.white38),
+                  suffixIcon: _query.isEmpty
+                      ? null
+                      : IconButton(
+                          icon: const Icon(Icons.clear, color: Colors.white38, size: 18),
+                          onPressed: () {
+                            _searchController.clear();
+                            setState(() => _query = '');
+                          },
+                        ),
+                  filled: true,
+                  fillColor: AppColors.card,
+                  isDense: true,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide.none,
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: const BorderSide(color: AppColors.border),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: const BorderSide(color: AppColors.accent, width: 1.5),
+                  ),
+                ),
               ),
             ),
+            Expanded(child: _buildRows(rows)),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildEntries() {
-    if (_entries.isEmpty) {
+  Widget _buildRows(List<_VaultRow> rows) {
+    if (_entries.isEmpty && _codes.isEmpty) {
       return const Center(
-        child: Text('No entries.', style: TextStyle(color: Colors.white54)),
-      );
-    }
-    return ListView.builder(
-      itemCount: _entries.length,
-      itemBuilder: (context, i) {
-        final e = _entries[i];
-        return ListTile(
-          leading: Icon(
-            e.favorite ? Icons.star : Icons.language,
-            color: e.favorite ? Colors.amber : Colors.white38,
-          ),
-          title: Text(e.site),
-          subtitle: Text(e.username),
-          trailing: IconButton(
-            icon: const Icon(Icons.copy, size: 18),
-            tooltip: 'Copy password',
-            onPressed: () => _copyToClipboard(e.password, autoClear: true),
-          ),
-        );
-      },
-    );
-  }
-
-  Widget _buildTotp() {
-    if (_codes.isEmpty) {
-      return const Center(
-        child: Text('No authenticator codes.',
+        child: Text('Nothing in the vault yet.',
             style: TextStyle(color: Colors.white54)),
       );
     }
+    if (rows.isEmpty) {
+      return const Center(
+        child: Text('No matches.', style: TextStyle(color: Colors.white54)),
+      );
+    }
     return ListView.builder(
-      itemCount: _codes.length,
-      itemBuilder: (context, i) {
-        final c = _codes[i];
-        final revealed = _revealedIds.contains(c.id);
-        return ListTile(
-          leading: const Icon(Icons.shield_outlined, color: Colors.white38),
-          title: Text(c.issuer.isNotEmpty ? c.issuer : c.name),
-          subtitle: Text(c.name),
-          trailing: Row(
-            mainAxisSize: MainAxisSize.min,
+      padding: const EdgeInsets.fromLTRB(14, 4, 14, 16),
+      itemCount: rows.length,
+      itemBuilder: (context, i) => _buildRow(rows[i]),
+    );
+  }
+
+  Widget _buildRow(_VaultRow row) {
+    final open = _openKey == row.key;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Material(
+        color: open ? AppColors.accentMuted : AppColors.card,
+        borderRadius: BorderRadius.circular(12),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(12),
+          onTap: () => setState(() => _openKey = open ? null : row.key),
+          child: Container(
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: open ? AppColors.accent : AppColors.border),
+            ),
+            padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    _letter(row.title),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Flexible(
+                                child: Text(
+                                  row.title,
+                                  style: const TextStyle(fontWeight: FontWeight.w600),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                              if (row.favorite) ...[
+                                const SizedBox(width: 6),
+                                const Icon(Icons.star, size: 14, color: Colors.amber),
+                              ],
+                            ],
+                          ),
+                          if (row.subtitle.isNotEmpty)
+                            Text(
+                              row.subtitle,
+                              style: const TextStyle(color: AppColors.muted, fontSize: 13),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                if (open) ...[
+                  if (row.entry != null && row.entry!.password.isNotEmpty) ...[
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        const Text('••••••••', style: TextStyle(color: AppColors.muted, letterSpacing: 1)),
+                        const Spacer(),
+                        TextButton(
+                          onPressed: () => _copyToClipboard(row.entry!.password, autoClear: true),
+                          child: const Text('Copy'),
+                        ),
+                      ],
+                    ),
+                  ],
+                  if (row.code != null) _codeBlock(row.code!),
+                ],
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _codeBlock(TotpCode code) {
+    final revealed = _isRevealed(code.id);
+    final shown = revealed
+        ? code.code
+        : '•' * (code.code.isEmpty ? 6 : code.code.length);
+    final fraction = _period == 0 ? 0.0 : (_secondsRemaining / _period).clamp(0.0, 1.0);
+    return Padding(
+      padding: const EdgeInsets.only(top: 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
             children: [
-              Text(
-                // Mask to the real length so a glance never leaks the digits.
-                revealed ? c.code : '•' * (c.code.isEmpty ? 6 : c.code.length),
-                style: TextStyle(
-                  fontFamily: 'monospace',
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                  letterSpacing: revealed ? 0 : 2,
-                  color: revealed ? AppColors.accent : Colors.white38,
+              Expanded(
+                child: GestureDetector(
+                  onTap: () => _copyToClipboard(code.code, autoClear: true),
+                  child: Text(
+                    shown,
+                    style: TextStyle(
+                      fontFamily: 'monospace',
+                      fontSize: 26,
+                      fontWeight: FontWeight.w600,
+                      letterSpacing: revealed ? 3 : 2,
+                      color: revealed ? AppColors.accent : Colors.white38,
+                    ),
+                  ),
                 ),
               ),
               IconButton(
@@ -382,13 +484,124 @@ class _VaultScreenState extends State<VaultScreen>
                   color: Colors.white54,
                 ),
                 tooltip: revealed ? 'Hide code' : 'Show code',
-                onPressed: () => _toggleReveal(c.id),
+                onPressed: () => _toggleReveal(code.id),
               ),
             ],
           ),
-          onTap: () => _copyToClipboard(c.code, autoClear: true),
-        );
-      },
+          const SizedBox(height: 4),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(2),
+            child: LinearProgressIndicator(
+              value: fraction,
+              minHeight: 3,
+              backgroundColor: AppColors.border,
+              color: AppColors.accent,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            revealed
+                ? 'Hides in ${_revealSecondsLeft(code.id)}s · ${_secondsRemaining}s left'
+                : '${_secondsRemaining}s left',
+            style: const TextStyle(color: AppColors.muted, fontSize: 12),
+          ),
+        ],
+      ),
     );
   }
+
+  Widget _letter(String title) {
+    final letter = title.trim().isEmpty ? '?' : title.trim()[0].toUpperCase();
+    return Container(
+      width: 28,
+      height: 28,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        color: AppColors.wine,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Text(letter, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+    );
+  }
+
+  List<_VaultRow> _visibleRows() {
+    final needle = _query.trim().toLowerCase();
+    final rows = _rows().where((row) {
+      if (needle.isEmpty) return true;
+      return row.title.toLowerCase().contains(needle) ||
+          row.subtitle.toLowerCase().contains(needle);
+    }).toList();
+    return rows;
+  }
+
+  List<_VaultRow> _rows() {
+    final used = <String>{};
+    final rows = <_VaultRow>[];
+    for (final entry in _entries) {
+      final code = _codeFor(entry, used);
+      if (code != null) used.add(code.id);
+      rows.add(_VaultRow(
+        key: 'entry:${entry.id}',
+        title: entry.site.isEmpty ? 'Untitled' : entry.site,
+        subtitle: entry.username,
+        favorite: entry.favorite,
+        entry: entry,
+        code: code,
+      ));
+    }
+    for (final code in _codes) {
+      if (used.contains(code.id)) continue;
+      final title = code.issuer.isNotEmpty ? code.issuer : code.name;
+      final subtitle = code.issuer.isNotEmpty && code.name.isNotEmpty && code.name != code.issuer
+          ? code.name
+          : '';
+      rows.add(_VaultRow(
+        key: 'totp:${code.id}',
+        title: title.isEmpty ? 'Authenticator' : title,
+        subtitle: subtitle,
+        favorite: false,
+        code: code,
+      ));
+    }
+    rows.sort((a, b) {
+      if (a.favorite != b.favorite) return a.favorite ? -1 : 1;
+      return a.title.toLowerCase().compareTo(b.title.toLowerCase());
+    });
+    return rows;
+  }
+
+  TotpCode? _codeFor(VaultEntry entry, Set<String> used) {
+    if (entry.totpLinkId.isNotEmpty) {
+      for (final code in _codes) {
+        if (code.id == entry.totpLinkId && !used.contains(code.id)) return code;
+      }
+    }
+    final site = entry.site.trim().toLowerCase();
+    if (site.isEmpty) return null;
+    for (final code in _codes) {
+      if (used.contains(code.id)) continue;
+      final issuer = code.issuer.trim().toLowerCase();
+      final name = code.name.trim().toLowerCase();
+      if (issuer == site || name == site) return code;
+    }
+    return null;
+  }
+}
+
+class _VaultRow {
+  final String key;
+  final String title;
+  final String subtitle;
+  final bool favorite;
+  final VaultEntry? entry;
+  final TotpCode? code;
+
+  const _VaultRow({
+    required this.key,
+    required this.title,
+    required this.subtitle,
+    required this.favorite,
+    this.entry,
+    this.code,
+  });
 }
