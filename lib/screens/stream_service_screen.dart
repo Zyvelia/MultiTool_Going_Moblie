@@ -6,6 +6,7 @@ import '../services/user_facing_error.dart';
 import '../services/wol_service.dart';
 import '../services/wol_relay_service.dart';
 import '../theme/app_colors.dart';
+import 'home_leading.dart';
 import 'remote_desktop_screen.dart';
 
 class StreamServiceScreen extends StatefulWidget {
@@ -474,6 +475,7 @@ class _StreamServiceScreenState extends State<StreamServiceScreen> {
     final keyboardOpen = MediaQuery.viewInsetsOf(context).bottom > 0;
     return Scaffold(
       appBar: AppBar(
+        leading: homeBackLeading(context),
         title: const Text('PC control'),
         actions: [
           if (keyboardOpen)

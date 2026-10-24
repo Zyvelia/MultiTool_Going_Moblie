@@ -4,6 +4,7 @@ import '../services/device_trust_service.dart';
 import '../services/settings_service.dart';
 import '../services/user_facing_error.dart';
 import 'connection_test_screen.dart';
+import 'home_leading.dart';
 import 'speed_test_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
@@ -201,10 +202,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
   @override
   Widget build(BuildContext context) {
     if (!_loaded) {
-      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+      return Scaffold(
+        appBar: AppBar(
+          leading: homeBackLeading(context),
+          title: const Text('Settings'),
+        ),
+        body: const Center(child: CircularProgressIndicator()),
+      );
     }
     return Scaffold(
-      appBar: AppBar(title: const Text('Settings')),
+      appBar: AppBar(
+        leading: homeBackLeading(context),
+        title: const Text('Settings'),
+      ),
       body: ListView(
         padding: const EdgeInsets.all(20),
         children: [

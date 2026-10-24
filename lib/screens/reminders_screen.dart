@@ -4,6 +4,7 @@ import '../models/reminder.dart';
 import '../services/reminder_service.dart';
 import '../theme/app_colors.dart';
 import '../widgets/scheduling_help_dialog.dart';
+import 'home_leading.dart';
 
 class RemindersScreen extends StatefulWidget {
   const RemindersScreen({super.key});
@@ -19,6 +20,7 @@ class _RemindersScreenState extends State<RemindersScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
+        leading: homeBackLeading(context),
         title: const Text('Reminders'),
         actions: [
           IconButton(

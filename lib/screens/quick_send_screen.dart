@@ -11,6 +11,7 @@ import '../services/quick_send_outbox_service.dart';
 import '../services/user_facing_error.dart';
 import '../services/settings_service.dart';
 import '../theme/app_colors.dart';
+import 'home_leading.dart';
 
 class QuickSendScreen extends StatefulWidget {
   const QuickSendScreen({super.key});
@@ -213,6 +214,7 @@ class _QuickSendScreenState extends State<QuickSendScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
+        leading: homeBackLeading(context),
         title: const Text('Quick Send'),
         actions: [
           if (_queued.isNotEmpty)

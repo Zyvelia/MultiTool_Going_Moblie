@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../theme/app_colors.dart';
+import 'home_leading.dart';
 import '../models/vault_entry.dart';
 import '../services/settings_service.dart';
 import '../services/user_facing_error.dart';
@@ -248,8 +249,12 @@ class _VaultScreenState extends State<VaultScreen> with WidgetsBindingObserver {
   @override
   Widget build(BuildContext context) {
     if (_api == null) {
-      return const Scaffold(
-        body: Center(
+      return Scaffold(
+        appBar: AppBar(
+          leading: homeBackLeading(context),
+          title: const Text('Security Vault'),
+        ),
+        body: const Center(
           child: Text('Set your PC hostname in Settings first.',
               style: TextStyle(color: Colors.white54)),
         ),
@@ -258,7 +263,10 @@ class _VaultScreenState extends State<VaultScreen> with WidgetsBindingObserver {
 
     if (_token == null) {
       return Scaffold(
-        appBar: AppBar(title: const Text('Security Vault')),
+        appBar: AppBar(
+          leading: homeBackLeading(context),
+          title: const Text('Security Vault'),
+        ),
         body: Padding(
           padding: const EdgeInsets.all(24),
           child: Column(
@@ -299,6 +307,7 @@ class _VaultScreenState extends State<VaultScreen> with WidgetsBindingObserver {
     final rows = _visibleRows();
     return Scaffold(
       appBar: AppBar(
+        leading: homeBackLeading(context),
         title: const Text('Security Vault'),
         actions: [
           IconButton(icon: const Icon(Icons.lock_open), onPressed: _logout),

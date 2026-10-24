@@ -1,5 +1,5 @@
-/// Bottom-nav / PageView indices for [HomeShell]. Keep in sync with
-/// [screens] and [destinations] in home_shell.dart.
+/// Tool indices for [HomeShell]. Keep in sync with the screen list there.
+/// Settings is opened from the gear on Home, not from a card.
 class HomeTabs {
   HomeTabs._();
 

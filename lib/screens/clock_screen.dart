@@ -8,6 +8,7 @@ import '../services/alarm_sound_catalog.dart';
 import '../services/alarm_sound_player.dart';
 import '../theme/app_colors.dart';
 import '../widgets/scheduling_help_dialog.dart';
+import 'home_leading.dart';
 
 class ClockScreen extends StatefulWidget {
   const ClockScreen({super.key});
@@ -42,6 +43,7 @@ class _ClockScreenState extends State<ClockScreen> {
     final date = MaterialLocalizations.of(context).formatFullDate(_now);
     return Scaffold(
       appBar: AppBar(
+        leading: homeBackLeading(context),
         title: const Text('Clock'),
         actions: [
           IconButton(

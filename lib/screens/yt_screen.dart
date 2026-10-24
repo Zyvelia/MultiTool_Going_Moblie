@@ -6,6 +6,7 @@ import '../models/download_job.dart';
 import '../services/settings_service.dart';
 import '../services/user_facing_error.dart';
 import '../services/yt_api_service.dart';
+import 'home_leading.dart';
 
 class YtScreen extends StatefulWidget {
   const YtScreen({super.key});
@@ -155,8 +156,12 @@ class _YtScreenState extends State<YtScreen> {
   @override
   Widget build(BuildContext context) {
     if (_api == null) {
-      return const Scaffold(
-        body: Center(
+      return Scaffold(
+        appBar: AppBar(
+          leading: homeBackLeading(context),
+          title: const Text('YouTube Downloader'),
+        ),
+        body: const Center(
           child: Text('Set your PC hostname in Settings first.',
               style: TextStyle(color: Colors.white54)),
         ),
@@ -164,7 +169,10 @@ class _YtScreenState extends State<YtScreen> {
     }
 
     return Scaffold(
-      appBar: AppBar(title: const Text('YouTube Downloader')),
+      appBar: AppBar(
+        leading: homeBackLeading(context),
+        title: const Text('YouTube Downloader'),
+      ),
       body: Column(
         children: [
           Padding(

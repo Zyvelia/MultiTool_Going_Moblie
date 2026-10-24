@@ -22,6 +22,7 @@ import '../widgets/now_playing_sheet.dart';
 import '../widgets/pc_mini_player.dart';
 import '../widgets/song_tile.dart';
 import 'downloads_screen.dart';
+import 'home_leading.dart';
 
 enum _PlaySource { phone, pc }
 
@@ -1173,8 +1174,12 @@ class LibraryScreenState extends State<LibraryScreen>
   @override
   Widget build(BuildContext context) {
     if (_api == null && _songs.isEmpty && !_offlineFallback) {
-      return const Scaffold(
-        body: Center(
+      return Scaffold(
+        appBar: AppBar(
+          leading: homeBackLeading(context),
+          title: const Text('Library'),
+        ),
+        body: const Center(
           child: Text(
             'Set your Tailscale hostname or public music server URL in '
             'Settings first.',
@@ -1191,6 +1196,7 @@ class LibraryScreenState extends State<LibraryScreen>
 
     return Scaffold(
       appBar: AppBar(
+        leading: homeBackLeading(context),
         title: Text(_total > 0 ? '$_total songs' : 'Library'),
         bottom: TabBar(
           controller: _tabController,

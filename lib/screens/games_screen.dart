@@ -8,6 +8,7 @@ import '../services/settings_service.dart';
 import '../services/games_api_service.dart';
 import '../services/gsm_api_service.dart';
 import '../services/user_facing_error.dart';
+import 'home_leading.dart';
 import 'night_screen.dart';
 
 class GamesScreen extends StatefulWidget {
@@ -424,6 +425,7 @@ class _GamesScreenState extends State<GamesScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
+        leading: homeBackLeading(context),
         title: const Text('Games'),
         actions: [
           if (_api != null || _gsm != null)

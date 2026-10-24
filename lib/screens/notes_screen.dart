@@ -10,6 +10,7 @@ import '../services/notes_sync_service.dart';
 import '../services/connectivity_service.dart';
 import '../services/user_facing_error.dart';
 import '../theme/app_colors.dart';
+import 'home_leading.dart';
 
 class NotesScreen extends StatefulWidget {
   const NotesScreen({super.key});
@@ -318,6 +319,7 @@ class _NotesScreenState extends State<NotesScreen> {
 
     return Scaffold(
       appBar: AppBar(
+        leading: homeBackLeading(context),
         title: const Text('Notes'),
         actions: [
           if (_sync.conflicts.isNotEmpty)

@@ -6,6 +6,7 @@ import '../services/settings_service.dart';
 import '../services/user_facing_error.dart';
 import '../theme/app_colors.dart';
 import 'ai_approvals_screen.dart';
+import 'home_leading.dart';
 
 class ChatScreen extends StatefulWidget {
   const ChatScreen({super.key});
@@ -345,6 +346,7 @@ class _ChatScreenState extends State<ChatScreen> {
 
     return Scaffold(
       appBar: AppBar(
+        leading: homeBackLeading(context),
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
