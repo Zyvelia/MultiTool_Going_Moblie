@@ -11,6 +11,7 @@ import '../services/api_service.dart';
 import '../services/audio_background.dart';
 import '../services/connectivity_service.dart';
 import '../services/library_index_service.dart';
+import '../services/local_audio_source.dart';
 import '../services/app_navigation.dart';
 import '../services/music_auto_cache_service.dart';
 import '../services/offline_cache_service.dart';
@@ -845,6 +846,11 @@ class LibraryScreenState extends State<LibraryScreen>
   AudioSource _streamSource(Song song, {bool transcode = false, bool force = false}) {
     final tag = _tagFor(song);
     final uri = Uri.parse(_api!.streamUrl(song.id, transcode: transcode, force: force));
+    // Android plays the same HTTPS URL the phone browser uses. The local
+    // proxy is what was failing on Android 11.
+    if (!Platform.isIOS) {
+      return AudioSource.uri(uri, tag: tag);
+    }
     final dir = _remoteCacheDir;
     if (dir != null) {
       final name = force ? '${song.id}.phone.m4a' : '${song.id}';
@@ -857,18 +863,26 @@ class LibraryScreenState extends State<LibraryScreen>
     return LockCachingAudioSource(uri, tag: tag);
   }
 
+  AudioSource _localSource(File file, Song song) {
+    if (!Platform.isAndroid) {
+      return AudioSource.file(file.path, tag: _tagFor(song));
+    }
+    final ext = file.path.contains('.') ? file.path.split('.').last : 'mp3';
+    return LocalFileAudioSource(file, mimeForAudioExt(ext), tag: _tagFor(song));
+  }
+
   AudioSource _sourceFor(Song song) {
     if (_cache.isCached(song.id)) {
       final local = _cache.localPlayable(song.id) ?? _cache.localFile(song.id);
       if (local != null && local.existsSync() && local.lengthSync() >= 64) {
         _playingLocal = true;
-        return AudioSource.file(local.path, tag: _tagFor(song));
+        return _localSource(local, song);
       }
     }
     if (_api == null) {
       final raw = _cache.localFile(song.id);
       _playingLocal = true;
-      return AudioSource.file(raw?.path ?? '', tag: _tagFor(song));
+      return _localSource(raw ?? File(''), song);
     }
     _playingLocal = false;
     return _streamSource(song);

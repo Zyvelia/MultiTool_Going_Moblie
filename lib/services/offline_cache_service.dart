@@ -86,6 +86,9 @@ String? sniffAudioExt(List<int> b) {
   if (b[0] == 0x30 && b[1] == 0x26 && b[2] == 0xB2 && b[3] == 0x75) {
     return 'wma';
   }
+  if (b[0] == 0x1A && b[1] == 0x45 && b[2] == 0xDF && b[3] == 0xA3) {
+    return 'webm';
+  }
   if (b[0] == 0xFF && (b[1] & 0xE0) == 0xE0) {
     final layer = (b[1] >> 1) & 0x03;
     if (layer == 0) return 'aac';
