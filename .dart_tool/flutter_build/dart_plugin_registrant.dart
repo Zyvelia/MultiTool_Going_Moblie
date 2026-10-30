@@ -11,11 +11,13 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart' as
 import 'package:path_provider_android/path_provider_android.dart' as path_provider_android;
 import 'package:shared_preferences_android/shared_preferences_android.dart' as shared_preferences_android;
 import 'package:sqflite_android/sqflite_android.dart' as sqflite_android;
+import 'package:url_launcher_android/url_launcher_android.dart' as url_launcher_android;
 import 'package:file_picker_darwin/file_picker_darwin.dart' as file_picker_darwin;
 import 'package:flutter_local_notifications/flutter_local_notifications.dart' as flutter_local_notifications;
 import 'package:path_provider_foundation/path_provider_foundation.dart' as path_provider_foundation;
 import 'package:shared_preferences_foundation/shared_preferences_foundation.dart' as shared_preferences_foundation;
 import 'package:sqflite_darwin/sqflite_darwin.dart' as sqflite_darwin;
+import 'package:url_launcher_ios/url_launcher_ios.dart' as url_launcher_ios;
 import 'package:connectivity_plus/connectivity_plus.dart' as connectivity_plus;
 import 'package:file_picker_linux/file_picker_linux.dart' as file_picker_linux;
 import 'package:flutter_local_notifications_linux/flutter_local_notifications_linux.dart' as flutter_local_notifications_linux;
@@ -28,6 +30,7 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart' as
 import 'package:path_provider_foundation/path_provider_foundation.dart' as path_provider_foundation;
 import 'package:shared_preferences_foundation/shared_preferences_foundation.dart' as shared_preferences_foundation;
 import 'package:sqflite_darwin/sqflite_darwin.dart' as sqflite_darwin;
+import 'package:url_launcher_macos/url_launcher_macos.dart' as url_launcher_macos;
 import 'package:flutter_local_notifications_windows/flutter_local_notifications_windows.dart' as flutter_local_notifications_windows;
 import 'package:flutter_secure_storage_windows/flutter_secure_storage_windows.dart' as flutter_secure_storage_windows;
 import 'package:path_provider_windows/path_provider_windows.dart' as path_provider_windows;
@@ -87,6 +90,15 @@ class _PluginRegistrant {
         );
       }
 
+      try {
+        url_launcher_android.UrlLauncherAndroid.registerWith();
+      } catch (err) {
+        print(
+          '`url_launcher_android` threw an error: $err. '
+          'The app may not function as expected until you remove this plugin from pubspec.yaml'
+        );
+      }
+
     } else if (Platform.isIOS) {
       try {
         file_picker_darwin.FilePickerDarwin.registerWith();
@@ -129,6 +141,15 @@ class _PluginRegistrant {
       } catch (err) {
         print(
           '`sqflite_darwin` threw an error: $err. '
+          'The app may not function as expected until you remove this plugin from pubspec.yaml'
+        );
+      }
+
+      try {
+        url_launcher_ios.UrlLauncherIOS.registerWith();
+      } catch (err) {
+        print(
+          '`url_launcher_ios` threw an error: $err. '
           'The app may not function as expected until you remove this plugin from pubspec.yaml'
         );
       }
@@ -239,6 +260,15 @@ class _PluginRegistrant {
       } catch (err) {
         print(
           '`sqflite_darwin` threw an error: $err. '
+          'The app may not function as expected until you remove this plugin from pubspec.yaml'
+        );
+      }
+
+      try {
+        url_launcher_macos.UrlLauncherMacOS.registerWith();
+      } catch (err) {
+        print(
+          '`url_launcher_macos` threw an error: $err. '
           'The app may not function as expected until you remove this plugin from pubspec.yaml'
         );
       }

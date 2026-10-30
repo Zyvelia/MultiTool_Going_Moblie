@@ -16,6 +16,7 @@ import '../services/app_navigation.dart';
 import '../services/music_auto_cache_service.dart';
 import '../services/offline_cache_service.dart';
 import '../services/phone_playback.dart';
+import '../services/playback_order.dart';
 import '../services/settings_service.dart';
 import '../services/user_facing_error.dart';
 import '../theme/app_colors.dart';
@@ -63,8 +64,6 @@ class LibraryScreenState extends State<LibraryScreen>
   String? _error;
   String _query = '';
 
-  int _currentIndex = -1;
-
   _PlaySource _source = _PlaySource.phone;
   Timer? _pollTimer;
   NowPlaying? _nowPlaying;
@@ -92,6 +91,19 @@ class LibraryScreenState extends State<LibraryScreen>
   Directory? _remoteCacheDir;
   bool _shuffleEnabled = false;
   LoopMode _loopMode = LoopMode.off;
+
+  /// Songs in the order they will actually play. This stays aligned with the
+  /// player: just_audio shuffle is left off because its index does not match
+  /// the audible item on iOS.
+  final List<Song> _queue = [];
+  int _queueIndex = -1;
+  List<Song> _linearQueue = [];
+  int _windowStart = 0;
+  int _windowCount = 0;
+  bool _followPlayerIndex = false;
+  int? _expectedPlayerIndex;
+  bool _skipping = false;
+  final _nowPlayingSnapshot = ValueNotifier<NowPlayingSnapshot?>(null);
 
   // Browse tab state
   _BrowseTab _browseTab = _BrowseTab.songs;
@@ -152,25 +164,39 @@ class LibraryScreenState extends State<LibraryScreen>
     playback.onAndroidError = _onAndroidFileError;
     _playback = playback;
     _indexSub = player.currentIndexStream.listen((index) {
-      if (mounted && index != null && index != _currentIndex) {
-        setState(() => _currentIndex = index);
+      if (index == null || !_followPlayerIndex || _playlist == null) return;
+      if (_expectedPlayerIndex != null && index != _expectedPlayerIndex) return;
+      _expectedPlayerIndex = null;
+      final queueIndex = _windowStart + index;
+      if (queueIndex < 0 || queueIndex >= _queue.length) return;
+      final expected = _queue[queueIndex];
+      final tag = player.sequenceState?.currentSource?.tag;
+      if (tag is MediaItem) {
+        final id = int.tryParse(tag.id);
+        if (id != null && id != expected.id) return;
       }
+      _rememberQueueIndex(queueIndex);
     });
     player.processingStateStream.listen((state) {
-      if (state != ProcessingState.completed) return;
-      if (_playlist != null) return;
+      if (state != ProcessingState.completed || _skipping) return;
       if (_loopMode == LoopMode.one) return;
-      if (_currentIndex < 0 || _currentIndex >= _songs.length) return;
-      final atEnd = _currentIndex + 1 >= _songs.length;
+      if (_playback?.playingAndroidFile == true) return;
+      if (_playlist != null) {
+        final index = player.currentIndex ?? 0;
+        if (index + 1 < _windowCount && player.hasNext) return;
+        final mapped = _windowStart + index;
+        if (mapped >= 0 && mapped < _queue.length) _queueIndex = mapped;
+      }
+      if (_queueIndex < 0 || _queue.isEmpty) return;
+      final atEnd = _queueIndex + 1 >= _queue.length;
       if (atEnd && _loopMode == LoopMode.off) return;
       _playNext();
     });
     player.playbackEventStream.listen(
       (_) {},
       onError: (Object e, StackTrace st) {
-        final index = player.currentIndex;
-        if (index == null || index < 0 || index >= _songs.length) return;
-        final song = _songs[index];
+        final song = _songForRecovery(player.currentIndex ?? -1);
+        if (song == null) return;
         if (_cache.isCached(song.id)) {
           if (_api != null &&
               _playingLocal &&
@@ -200,15 +226,13 @@ class LibraryScreenState extends State<LibraryScreen>
         final resumeAt = player.position;
         Future.delayed(Duration(milliseconds: 500 * _midStreamRetries), () async {
           if (!mounted) return;
-          await _recoverTrack(index, resumeAt);
+          await _recoverTrack(song, resumeAt);
         });
       },
     );
   }
 
-  Future<void> _recoverTrack(int index, Duration resumeAt) async {
-    if (index < 0 || index >= _songs.length) return;
-    final song = _songs[index];
+  Future<void> _recoverTrack(Song song, Duration resumeAt) async {
     if (_cache.isCached(song.id)) {
       try {
         await _player.setAudioSource(
@@ -218,7 +242,7 @@ class LibraryScreenState extends State<LibraryScreen>
         await _applyPlaybackModes();
         await _player.play();
         _midStreamRetries = 0;
-        _playlist = null;
+        _detachPlaylist();
       } catch (e) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -235,7 +259,7 @@ class LibraryScreenState extends State<LibraryScreen>
       );
       await _player.play();
       _midStreamRetries = 0;
-      _playlist = null;
+      _detachPlaylist();
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -454,17 +478,62 @@ class LibraryScreenState extends State<LibraryScreen>
 
   Future<void> _applyPlaybackModes() async {
     if (!_hasPlayer) return;
-    await _player.setShuffleModeEnabled(_shuffleEnabled);
-    await _player.setLoopMode(_loopMode);
+    // Shuffle stays off inside just_audio. On iOS its current index does not
+    // match the item that is actually playing, so the queue is ordered here.
+    if (_player.shuffleModeEnabled) {
+      await _player.setShuffleModeEnabled(false);
+    }
+    final mode = _loopMode == LoopMode.one ? LoopMode.one : LoopMode.off;
+    await _player.setLoopMode(mode);
   }
 
   void _toggleShuffle() {
-    if (!_hasPlayer) {
-      setState(() => _shuffleEnabled = !_shuffleEnabled);
-      return;
+    final enable = !_shuffleEnabled;
+    setState(() => _shuffleEnabled = enable);
+    _publishNowPlaying();
+    if (_queue.length < 2 || _queueIndex < 0) return;
+    unawaited(_applyShuffleOrder(enable));
+  }
+
+  Future<void> _applyShuffleOrder(bool enable) async {
+    if (_queue.isEmpty || _queueIndex < 0 || _queueIndex >= _queue.length) return;
+    final currentId = _queue[_queueIndex].id;
+    if (enable) {
+      final linear = _linearQueue.isNotEmpty
+          ? List<Song>.from(_linearQueue)
+          : List<Song>.from(_queue);
+      _linearQueue = linear;
+      final start = linear.indexWhere((s) => s.id == currentId);
+      final arrangement = arrangePlayback(
+        songs: linear,
+        startIndex: start < 0 ? 0 : start,
+        shuffleUpcoming: true,
+      );
+      _queue
+        ..clear()
+        ..addAll(arrangement.order);
+      _queueIndex = arrangement.startIndex;
+    } else {
+      final linear = _linearQueue.isNotEmpty
+          ? List<Song>.from(_linearQueue)
+          : List<Song>.from(_queue);
+      _linearQueue = [];
+      _queue
+        ..clear()
+        ..addAll(linear);
+      final idx = _queue.indexWhere((s) => s.id == currentId);
+      _queueIndex = idx < 0 ? 0 : idx;
     }
-    setState(() => _shuffleEnabled = !_shuffleEnabled);
-    _player.setShuffleModeEnabled(_shuffleEnabled);
+    _rememberQueueIndex(_queueIndex);
+    final android = _playback?.playingAndroidFile ?? false;
+    if (!android && _playlist != null && _hasPlayer) {
+      await _playQueue(
+        const [],
+        startIndex: _queueIndex,
+        arrange: false,
+        resumeAt: _playback!.position,
+      );
+    }
   }
 
   void _toggleRepeat() {
@@ -475,7 +544,8 @@ class LibraryScreenState extends State<LibraryScreen>
         LoopMode.one => LoopMode.off,
       };
     });
-    if (_hasPlayer) _player.setLoopMode(_loopMode);
+    if (_hasPlayer) unawaited(_applyPlaybackModes());
+    _publishNowPlaying();
   }
 
   Future<void> _applySongList(
@@ -492,7 +562,7 @@ class LibraryScreenState extends State<LibraryScreen>
       hasMore: hasMore,
       offlineFallback: offlineFallback,
     );
-    if (reset) _playlist = null;
+    if (reset) _detachPlaylist();
     if (_api != null && !offlineFallback && songs.isNotEmpty) {
       unawaited(
         MusicAutoCacheService.instance.runIfAllowed(
@@ -506,28 +576,30 @@ class LibraryScreenState extends State<LibraryScreen>
   Future<void> _showCachedLibrary() async {
     await _cache.ensureReady();
     _paintCachedLibrary();
-    _playlist = null;
+    _detachPlaylist();
   }
 
-  /// Small window around the tapped track — building hundreds of
-  /// [LockCachingAudioSource]s before the first byte was the main tap delay.
+  /// Up to 32 songs, starting at the one that should play now. Building the
+  /// whole library as [LockCachingAudioSource]s before the first byte was
+  /// the main tap delay. The chosen song is item 0 so iOS, which can ignore
+  /// `initialIndex`, still starts on the right track.
   ConcatenatingAudioSource _playlistWindow(
     List<Song> songs,
     int focusIndex, {
     int maxItems = 32,
   }) {
-    final start = focusIndex > 0 ? focusIndex - 1 : 0;
+    final start = playbackWindowStart(focusIndex, songs.length);
     final end = (start + maxItems).clamp(0, songs.length);
+    _windowStart = start;
+    _windowCount = end - start;
     final slice = songs.sublist(start, end);
     return ConcatenatingAudioSource(
       useLazyPreparation: true,
-      children: [for (final s in slice) _sourceFor(s)],
+      children: [
+        for (var i = 0; i < slice.length; i++)
+          _sourceFor(slice[i], claim: i == 0),
+      ],
     );
-  }
-
-  int _playlistWindowInitialIndex(List<Song> songs, int focusIndex, int maxItems) {
-    final start = focusIndex > 0 ? focusIndex - 1 : 0;
-    return focusIndex - start;
   }
 
   void _initConnectivity() {
@@ -575,6 +647,7 @@ class LibraryScreenState extends State<LibraryScreen>
     _indexSub?.cancel();
     _libraryIndexSub?.cancel();
     _playback?.dispose();
+    _nowPlayingSnapshot.dispose();
     _searchController.dispose();
     super.dispose();
   }
@@ -830,11 +903,7 @@ class LibraryScreenState extends State<LibraryScreen>
   void _handleExternalOpen() {
     if (!AppNavigation.pendingOpenNowPlaying) return;
     if (!mounted) return;
-    if (!_hasPlayer ||
-        _currentIndex < 0 ||
-        _currentIndex >= _songs.length) {
-      return;
-    }
+    if (!_hasPlayer || _playingSong == null) return;
     AppNavigation.clearPendingOpenNowPlaying();
     _openNowPlaying();
   }
@@ -878,36 +947,47 @@ class LibraryScreenState extends State<LibraryScreen>
     return LocalFileAudioSource(file, mimeForAudioExt(ext), tag: _tagFor(song));
   }
 
-  AudioSource _sourceFor(Song song) {
-    _androidFile = null;
+  AudioSource _sourceFor(Song song, {bool claim = true}) {
+    File? androidFile;
+    var playingLocal = false;
+    AudioSource source;
     if (_cache.isCached(song.id)) {
       final local = _cache.localPlayable(song.id) ?? _cache.localFile(song.id);
       if (local != null && local.existsSync() && local.lengthSync() >= 64) {
-        _playingLocal = true;
-        if (Platform.isAndroid) _androidFile = local;
-        return _localSource(local, song);
+        playingLocal = true;
+        if (Platform.isAndroid) androidFile = local;
+        source = _localSource(local, song);
+      } else if (_api == null) {
+        final raw = _cache.localFile(song.id);
+        playingLocal = true;
+        source = _localSource(raw ?? File(''), song);
+      } else {
+        source = _streamSource(song);
       }
-    }
-    if (_api == null) {
+    } else if (_api == null) {
       final raw = _cache.localFile(song.id);
-      _playingLocal = true;
-      return _localSource(raw ?? File(''), song);
+      playingLocal = true;
+      source = _localSource(raw ?? File(''), song);
+    } else {
+      source = _streamSource(song);
     }
-    _playingLocal = false;
-    return _streamSource(song);
+    if (claim) {
+      _androidFile = androidFile;
+      _playingLocal = playingLocal;
+    }
+    return source;
   }
 
   void _onAndroidFileEnded() {
     unawaited(Future<void>(() async {
-      if (!mounted || _playback?.playingAndroidFile != true) return;
+      if (!mounted || _playback?.playingAndroidFile != true || _skipping) return;
       if (_loopMode == LoopMode.one) {
         await _playback?.seek(Duration.zero);
         await _playback?.play();
         return;
       }
-      if (_playlist != null) return;
-      if (_currentIndex < 0 || _currentIndex >= _songs.length) return;
-      final atEnd = _currentIndex + 1 >= _songs.length;
+      if (_queueIndex < 0 || _queue.isEmpty) return;
+      final atEnd = _queueIndex + 1 >= _queue.length;
       if (atEnd && _loopMode == LoopMode.off) return;
       _playNext();
     }));
@@ -915,9 +995,8 @@ class LibraryScreenState extends State<LibraryScreen>
 
   void _onAndroidFileError(String message) {
     if (!mounted) return;
-    final index = _currentIndex;
-    if (index < 0 || index >= _songs.length) return;
-    final song = _songs[index];
+    final song = _playingSong;
+    if (song == null) return;
     if (_api != null && _streamRetriedFor != song.id) {
       _streamRetriedFor = song.id;
       unawaited(_fallbackToStream(song));
@@ -933,6 +1012,7 @@ class LibraryScreenState extends State<LibraryScreen>
     try {
       _playingLocal = false;
       _androidFile = null;
+      _detachPlaylist();
       await _playback?.stopAndroidFile();
       await _player.setAudioSource(_streamSource(song, transcode: true, force: true));
       unawaited(_applyPlaybackModes());
@@ -1050,6 +1130,76 @@ class LibraryScreenState extends State<LibraryScreen>
     }
   }
 
+  Song? get _playingSong {
+    if (_queueIndex < 0 || _queueIndex >= _queue.length) return null;
+    return _queue[_queueIndex];
+  }
+
+  bool _isCurrentSong(Song song) => _playingSong?.id == song.id;
+
+  void _detachPlaylist() {
+    _playlist = null;
+    _followPlayerIndex = false;
+    _windowCount = 0;
+    _expectedPlayerIndex = null;
+  }
+
+  void _rememberQueueIndex(int queueIndex) {
+    if (queueIndex < 0 || queueIndex >= _queue.length) return;
+    final changed = queueIndex != _queueIndex;
+    _queueIndex = queueIndex;
+    _publishNowPlaying();
+    if (changed && mounted) setState(() {});
+  }
+
+  void _publishNowPlaying() {
+    final song = _playingSong;
+    if (song == null) {
+      if (_nowPlayingSnapshot.value != null) _nowPlayingSnapshot.value = null;
+      return;
+    }
+    final next = NowPlayingSnapshot(
+      song: song,
+      hasPrev: _queueIndex > 0 || _loopMode != LoopMode.off,
+      hasNext: _queueIndex + 1 < _queue.length || _loopMode != LoopMode.off,
+      shuffleOn: _shuffleEnabled,
+      loopMode: _loopMode,
+    );
+    final prev = _nowPlayingSnapshot.value;
+    if (prev != null &&
+        prev.song.id == next.song.id &&
+        prev.song.title == next.song.title &&
+        prev.song.artist == next.song.artist &&
+        prev.song.album == next.song.album &&
+        prev.hasPrev == next.hasPrev &&
+        prev.hasNext == next.hasNext &&
+        prev.shuffleOn == next.shuffleOn &&
+        prev.loopMode == next.loopMode) {
+      return;
+    }
+    _nowPlayingSnapshot.value = next;
+  }
+
+  Song? _songForRecovery(int playerIndex) {
+    if (_playlist != null && playerIndex >= 0) {
+      final queueIndex = _windowStart + playerIndex;
+      if (queueIndex >= 0 && queueIndex < _queue.length) {
+        final expected = _queue[queueIndex];
+        final tag = _hasPlayer ? _player.sequenceState?.currentSource?.tag : null;
+        if (tag is MediaItem) {
+          final id = int.tryParse(tag.id);
+          if (id != null && id != expected.id) {
+            for (final song in _queue) {
+              if (song.id == id) return song;
+            }
+          }
+        }
+        return expected;
+      }
+    }
+    return _playingSong;
+  }
+
   Future<void> _playIndex(int index) async {
     if (index < 0 || index >= _songs.length) return;
     await _playQueue(List<Song>.from(_songs), startIndex: index);
@@ -1059,13 +1209,42 @@ class LibraryScreenState extends State<LibraryScreen>
     List<Song> queue, {
     int startIndex = 0,
     bool? shuffle,
+    bool arrange = true,
+    Duration resumeAt = Duration.zero,
   }) async {
-    if (queue.isEmpty || startIndex < 0 || startIndex >= queue.length) return;
-    if (shuffle != null) {
-      setState(() => _shuffleEnabled = shuffle);
+    if (arrange) {
+      if (queue.isEmpty || startIndex < 0 || startIndex >= queue.length) return;
+      if (shuffle != null) _shuffleEnabled = shuffle;
+      final shuffleAll = shuffle == true;
+      final shuffleUpcoming =
+          shuffle == null && _shuffleEnabled && queue.length > 1;
+      if (shuffleAll || shuffleUpcoming) {
+        _linearQueue = List<Song>.from(queue);
+      } else if (shuffle == false) {
+        _linearQueue = [];
+      }
+      final arrangement = arrangePlayback(
+        songs: queue,
+        startIndex: startIndex,
+        shuffleAll: shuffleAll,
+        shuffleUpcoming: shuffleUpcoming,
+      );
+      _queue
+        ..clear()
+        ..addAll(arrangement.order);
+      _queueIndex = arrangement.startIndex;
+    } else if (startIndex < 0 || startIndex >= _queue.length) {
+      return;
+    } else {
+      _queueIndex = startIndex;
     }
+
     final gen = ++_playGen;
-    final song = queue[startIndex];
+    final ordered = _queue;
+    final begin = _queueIndex;
+    if (begin < 0 || begin >= ordered.length) return;
+    final song = ordered[begin];
+    _rememberQueueIndex(begin);
     final local = _cache.isCached(song.id);
     _streamRetriedFor = null;
     final needsConvert =
@@ -1075,29 +1254,20 @@ class LibraryScreenState extends State<LibraryScreen>
     await _ensurePlayer();
     if (gen != _playGen || !mounted) return;
 
-    setState(() {
-      _songs
-        ..clear()
-        ..addAll(queue);
-      _currentIndex = startIndex;
-      _offset = queue.length;
-      _total = queue.length;
-      _hasMore = false;
-    });
-
     Future<void> playSingle() async {
+      _followPlayerIndex = false;
       final source = _sourceFor(song);
       if (Platform.isAndroid && _androidFile != null) {
         await _playback!.playAndroidFile(_androidFile!);
         if (gen != _playGen) return;
-        _playlist = null;
+        _detachPlaylist();
         _midStreamRetries = 0;
         return;
       }
       await _playback?.stopAndroidFile();
-      await _player.setAudioSource(source);
+      _detachPlaylist();
+      await _player.setAudioSource(source, initialPosition: resumeAt);
       if (gen != _playGen) return;
-      _playlist = null;
       unawaited(_applyPlaybackModes());
       await _player.play();
       _midStreamRetries = 0;
@@ -1105,27 +1275,28 @@ class LibraryScreenState extends State<LibraryScreen>
 
     Future<void> playWindowed(int i) async {
       await _playback?.stopAndroidFile();
-      final source = _playlistWindow(queue, i);
-      final initial = _playlistWindowInitialIndex(queue, i, 32);
+      _followPlayerIndex = false;
+      final source = _playlistWindow(ordered, i);
       await _player.setAudioSource(
         source,
-        initialIndex: initial,
-        initialPosition: Duration.zero,
+        initialIndex: 0,
+        initialPosition: resumeAt,
       );
       if (gen != _playGen) return;
       _playlist = source;
+      _expectedPlayerIndex = null;
+      _followPlayerIndex = true;
       unawaited(_applyPlaybackModes());
       await _player.play();
       _midStreamRetries = 0;
     }
 
-    final useWindowedPlaylist = _shuffleEnabled &&
-        queue.length > 1 &&
-        !(Platform.isAndroid && local);
+    final useWindowedPlaylist =
+        ordered.length > 1 && !(Platform.isAndroid && local);
 
     Future<void> startPlayback() async {
       if (useWindowedPlaylist) {
-        await playWindowed(startIndex);
+        await playWindowed(begin);
       } else {
         await playSingle();
       }
@@ -1142,9 +1313,12 @@ class LibraryScreenState extends State<LibraryScreen>
           _playingLocal = false;
           _androidFile = null;
           await _playback?.stopAndroidFile();
-          await _player.setAudioSource(_streamSource(song, transcode: true, force: true));
+          _detachPlaylist();
+          await _player.setAudioSource(
+            _streamSource(song, transcode: true, force: true),
+            initialPosition: resumeAt,
+          );
           if (gen != _playGen) return;
-          _playlist = null;
           unawaited(_applyPlaybackModes());
           await _player.play();
           _midStreamRetries = 0;
@@ -1232,28 +1406,53 @@ class LibraryScreenState extends State<LibraryScreen>
     await _playQueue([song], startIndex: 0);
   }
 
-  void _playNext() {
-    if (_hasPlayer && _playlist != null) {
-      if (_player.hasNext || _loopMode != LoopMode.off) {
-        _player.seekToNext();
-        return;
-      }
-    }
-    if (_currentIndex + 1 < _songs.length) {
-      _playIndex(_currentIndex + 1);
-    }
-  }
+  void _playNext() => _advanceQueue(1);
 
-  void _playPrev() {
-    if (_hasPlayer && _playlist != null) {
-      if (_player.hasPrevious || _loopMode != LoopMode.off) {
-        _player.seekToPrevious();
+  void _playPrev() => _advanceQueue(-1);
+
+  void _advanceQueue(int delta) {
+    if (_skipping || _queue.isEmpty || _queueIndex < 0) return;
+    var next = _queueIndex + delta;
+    if (next < 0 || next >= _queue.length) {
+      if (_loopMode == LoopMode.all && _queue.isNotEmpty) {
+        next %= _queue.length;
+        if (next < 0) next += _queue.length;
+      } else if (_loopMode == LoopMode.one && _playback != null) {
+        unawaited(_playback!.seek(Duration.zero));
+        unawaited(_playback!.play());
+        return;
+      } else {
         return;
       }
     }
-    if (_currentIndex > 0) {
-      _playIndex(_currentIndex - 1);
+    final playerIndex = next - _windowStart;
+    final inWindow = _playlist != null &&
+        _hasPlayer &&
+        playerIndex >= 0 &&
+        playerIndex < _windowCount &&
+        !(_playback?.playingAndroidFile ?? false);
+    if (inWindow) {
+      _expectedPlayerIndex = playerIndex;
+      _rememberQueueIndex(next);
+      _skipping = true;
+      _player.seek(Duration.zero, index: playerIndex).whenComplete(() {
+        if (!mounted) {
+          _skipping = false;
+          return;
+        }
+        if (_hasPlayer && _player.currentIndex == playerIndex) {
+          _expectedPlayerIndex = null;
+        }
+        _skipping = false;
+      });
+      return;
     }
+    _skipping = true;
+    _playQueue(
+      const [],
+      startIndex: next,
+      arrange: false,
+    ).whenComplete(() => _skipping = false);
   }
 
   void _onSongTap(int index) {
@@ -1265,25 +1464,16 @@ class LibraryScreenState extends State<LibraryScreen>
   }
 
   void _openNowPlaying() {
-    if (!_hasPlayer ||
-        _currentIndex < 0 ||
-        _currentIndex >= _songs.length) {
-      return;
-    }
+    final song = _playingSong;
+    if (!_hasPlayer || song == null) return;
+    _publishNowPlaying();
     NowPlayingSheet.show(
       context,
       player: _playback!,
-      song: _songs[_currentIndex],
+      snapshot: _nowPlayingSnapshot,
       onPrev: _playPrev,
       onNext: _playNext,
-      hasPrev: _currentIndex > 0 || _loopMode != LoopMode.off,
-      hasNext:
-          _currentIndex + 1 < _songs.length || _loopMode != LoopMode.off,
-      shuffleOn: _shuffleEnabled,
-      loopMode: _loopMode,
-      onToggleShuffle: () {
-        _toggleShuffle();
-      },
+      onToggleShuffle: _toggleShuffle,
       onToggleRepeat: _toggleRepeat,
       onPlayAll: () {
         Navigator.pop(context);
@@ -1535,19 +1725,15 @@ class LibraryScreenState extends State<LibraryScreen>
             ),
 
           // ── Mini players ─────────────────────────────────────────────────
-          if (_source == _PlaySource.phone &&
-              _hasPlayer &&
-              _currentIndex >= 0 &&
-              _currentIndex < _songs.length)
+          if (_source == _PlaySource.phone && _playingSong != null)
             MiniPlayer(
               player: _playback!,
-              song: _songs[_currentIndex],
+              song: _playingSong!,
               onOpenExpanded: _openNowPlaying,
               onPrev: _playPrev,
               onNext: _playNext,
-              hasPrev: _currentIndex > 0 || _loopMode != LoopMode.off,
-              hasNext:
-                  _currentIndex + 1 < _songs.length || _loopMode != LoopMode.off,
+              hasPrev: _queueIndex > 0 || _loopMode != LoopMode.off,
+              hasNext: _queueIndex + 1 < _queue.length || _loopMode != LoopMode.off,
             ),
           if (_source == _PlaySource.pc && (_nowPlaying?.attached ?? false))
             PcMiniPlayer(
@@ -1621,7 +1807,7 @@ class LibraryScreenState extends State<LibraryScreen>
           }
           final song = _songs[index];
           final active = _source == _PlaySource.phone
-              ? index == _currentIndex
+              ? _isCurrentSong(song)
               : song.id == activeSongId;
           return SongTile(
             song: song,
@@ -1810,11 +1996,7 @@ class LibraryScreenState extends State<LibraryScreen>
             // Expanded songs
             if (isExpanded)
               ...songs.map((song) {
-                final active = _source == _PlaySource.phone &&
-                    _songs.isNotEmpty &&
-                    _currentIndex >= 0 &&
-                    _currentIndex < _songs.length &&
-                    _songs[_currentIndex].id == song.id;
+                final active = _source == _PlaySource.phone && _isCurrentSong(song);
                 return Container(
                   decoration: const BoxDecoration(
                     color: AppColors.accentMuted,
@@ -1917,15 +2099,14 @@ class LibraryScreenState extends State<LibraryScreen>
                   itemCount: songs.length,
                   itemBuilder: (context, index) {
                     final song = songs[index];
-                    final idx = _songs.indexWhere((s) => s.id == song.id);
                     return SongTile(
                       song: song,
-                      active: idx == _currentIndex,
+                      active: _source == _PlaySource.phone && _isCurrentSong(song),
                       onTap: () {
-                        if (idx >= 0) {
-                          _onSongTap(idx);
+                        if (_source == _PlaySource.pc && !_offlineFallback) {
+                          _sendControl('play_song', songId: song.id);
                         } else {
-                          _playQueue([song], startIndex: 0);
+                          _playQueue(List<Song>.from(songs), startIndex: index);
                         }
                       },
                       cacheState: SongCacheState.cached,

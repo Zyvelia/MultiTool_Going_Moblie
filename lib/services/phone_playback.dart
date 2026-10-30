@@ -87,6 +87,8 @@ class PhonePlayback {
 
   Duration? get duration => _androidFile ? _androidDuration : justAudio.duration;
 
+  Duration get position => _lastPosition;
+
   double get volume => _volume;
 
   Future<void> playAndroidFile(File file) async {
