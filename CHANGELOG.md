@@ -2,12 +2,16 @@
 
 ## Unreleased
 
-### Fixed
-- Android music playback. The media service was never registered, so tapping a song threw `LateInitializationError` on the audio handler.
-- Android “This phone” playback. The player fetches the PC stream through `http://127.0.0.1`, which Android was blocking, so a live Remote Hub still showed a dropped stream.
+### Added
+- New **mobile dashboard home** with a hero panel, search, category filters, quick-access pins, recent tools, and an adaptive tool grid for phones and tablets.
+- Home customization mode that keeps the existing reorder behavior while adding pin / unpin support for favorite tools.
 
-### Removed
-- **Steps** tab, pedometer, Health Connect, and the Android steps widget. The Health Connect plugin crashed on launch on Android 11 (Galaxy S20).
+### Changed
+- Refined the global dark theme with larger touch targets, rounded inputs, floating snack bars, adaptive page transitions, and improved chip / button styling for iOS and Android.
+- Improved app-level scroll and system UI behavior to better match a polished mobile experience on both platforms.
+
+### Fixed
+- None in this source-only update; runtime verification is still required on real iOS and Android devices.
 
 ## 2.7.0+4 (2026-03-21)
 

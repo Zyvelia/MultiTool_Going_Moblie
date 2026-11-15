@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'services/audio_background.dart';
@@ -114,6 +115,20 @@ class _MultiToolRemoteAppState extends State<MultiToolRemoteApp>
       title: "Zs Multi Tool Remote",
       debugShowCheckedModeBanner: false,
       theme: AppTheme.dark(),
+      scrollBehavior: const MaterialScrollBehavior().copyWith(
+        physics: const BouncingScrollPhysics(),
+      ),
+      builder: (context, child) {
+        return AnnotatedRegion<SystemUiOverlayStyle>(
+          value: const SystemUiOverlayStyle(
+            statusBarColor: Colors.transparent,
+            statusBarIconBrightness: Brightness.light,
+            systemNavigationBarColor: Color(0xFF10060C),
+            systemNavigationBarIconBrightness: Brightness.light,
+          ),
+          child: child ?? const SizedBox.shrink(),
+        );
+      },
       home: HomeShell(key: homeShellKey),
     );
   }
