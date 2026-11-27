@@ -14,11 +14,24 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
       - uses: subosito/flutter-action@v2
         with:
           flutter-version: '3.47.6'
           channel: 'stable'
           cache: true
+
+      - name: Select and verify Android JDK
+        run: |
+          flutter config --jdk-dir "$JAVA_HOME"
+          java -version
+
+      - name: Test Android JVM patch
+        run: python3 scripts/test_android_jvm.py
 
       - name: Scaffold platform folders
         run: flutter create --platforms=android,ios --org com.zsmultitool --no-pub .
