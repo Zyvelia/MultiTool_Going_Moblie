@@ -474,12 +474,20 @@ def patch_agp_kotlin_compat() -> None:
 
     app_gradle = ROOT / "android/app/build.gradle.kts"
     text = app_gradle.read_text(encoding="utf-8")
-    # Remove legacy built-in-Kotlin block if a previous patch run added it.
+    # Replace the old compilerOptions block with a fixed JVM target.
     text = re.sub(
         r"\nkotlin\s*\{\s*compilerOptions\s*\{[^}]*\}\s*\}\s*",
         "\n",
         text,
         flags=re.DOTALL,
+    )
+    # Match Java's target; do not inherit the runner JDK's version.
+    text = text.rstrip() + (
+        "\n\nkotlin {\n"
+        "    compilerOptions {\n"
+        "        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)\n"
+        "    }\n"
+        "}\n"
     )
     app_gradle.write_text(text, encoding="utf-8")
 
