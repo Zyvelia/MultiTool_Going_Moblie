@@ -3,7 +3,7 @@ import '../models/song.dart';
 import '../theme/app_colors.dart';
 
 String formatDuration(int seconds) {
-  if (seconds <= 0) return '';
+  if (seconds <= 0) return '0:00';
   final m = seconds ~/ 60;
   final s = seconds % 60;
   return '$m:${s.toString().padLeft(2, '0')}';
@@ -45,12 +45,27 @@ class SongTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ListTile(
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 3, 12, 3),
+      child: Material(
+        color: active ? AppColors.accentMuted : AppColors.card,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(14),
+          side: BorderSide(color: active ? AppColors.accent : AppColors.border),
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: ListTile(
+      dense: true,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
       onTap: onTap,
-      tileColor: active ? AppColors.accent.withValues(alpha: 0.08) : null,
-      leading: Icon(
-        active ? Icons.graphic_eq : Icons.music_note,
-        color: active ? AppColors.accent : Colors.white38,
+      leading: Container(
+        width: 40, height: 40,
+        decoration: BoxDecoration(
+          gradient: const LinearGradient(colors: [AppColors.wine, AppColors.accentMuted]),
+          borderRadius: BorderRadius.circular(11),
+        ),
+        child: Icon(active ? Icons.graphic_eq : Icons.music_note,
+          color: active ? AppColors.accentGlow : AppColors.muted),
       ),
       title: Text(
         song.title,
@@ -65,14 +80,14 @@ class SongTile extends StatelessWidget {
         _metadataLine(song),
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
-        style: const TextStyle(color: Colors.white54),
+        style: const TextStyle(color: AppColors.muted),
       ),
       trailing: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
           Text(
             formatDuration(song.duration),
-            style: const TextStyle(color: Colors.white38, fontSize: 12),
+            style: const TextStyle(color: AppColors.muted, fontSize: 12),
           ),
           if (onCacheTap != null) ...[
             const SizedBox(width: 4),
@@ -83,6 +98,8 @@ class SongTile extends StatelessWidget {
             ),
           ],
         ],
+      ),
+    ),
       ),
     );
   }
@@ -123,7 +140,7 @@ class _CacheIcon extends StatelessWidget {
                 height: 20,
                 child: CircularProgressIndicator(
                   strokeWidth: 2,
-                  value: (p != null && p >= 0) ? p : null,
+                  value: (p != null && p.isFinite && p >= 0) ? p.clamp(0.0, 1.0) : null,
                   color: AppColors.accent,
                   backgroundColor: Colors.white12,
                 ),
@@ -132,7 +149,7 @@ class _CacheIcon extends StatelessWidget {
                 icon: const Icon(Icons.close, size: 12),
                 padding: EdgeInsets.zero,
                 constraints: const BoxConstraints(),
-                color: Colors.white38,
+                color: AppColors.muted,
                 tooltip: 'Cancel download',
                 onPressed: onTap,
               ),
@@ -141,7 +158,7 @@ class _CacheIcon extends StatelessWidget {
         );
       case SongCacheState.none:
         return IconButton(
-          icon: const Icon(Icons.download_outlined, color: Colors.white38),
+          icon: const Icon(Icons.download_outlined, color: AppColors.muted),
           iconSize: 20,
           visualDensity: VisualDensity.compact,
           tooltip: 'Download for offline',

@@ -7,7 +7,7 @@ import 'song_tile.dart';
 /// last reported over /api/now-playing. Position/duration/isPlaying are
 /// pushed in from LibraryScreen's poll loop rather than read from a
 /// player stream.
-class PcMiniPlayer extends StatelessWidget {
+class PcMiniPlayer extends StatefulWidget {
   final String title;
   final String artist;
   final bool isPlaying;
@@ -36,15 +36,26 @@ class PcMiniPlayer extends StatelessWidget {
   });
 
   @override
+  State<PcMiniPlayer> createState() => _PcMiniPlayerState();
+}
+
+class _PcMiniPlayerState extends State<PcMiniPlayer> {
+  double? _drag;
+
+  @override
   Widget build(BuildContext context) {
-    final max = duration > 0 ? duration : 1.0;
-    final value = position.clamp(0.0, max);
+    final duration = widget.duration;
+    final position = widget.position;
+    final max = duration.isFinite && duration > 0 ? duration : 1.0;
+    final value = (_drag ?? (position.isFinite ? position : 0.0)).clamp(0.0, max);
 
     return Container(
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+      margin: const EdgeInsets.fromLTRB(10, 3, 10, 6),
+      padding: const EdgeInsets.fromLTRB(12, 6, 12, 8),
       decoration: BoxDecoration(
-        color: AppColors.surface,
-        border: const Border(top: BorderSide(color: AppColors.border)),
+        gradient: const LinearGradient(colors: [AppColors.wine, AppColors.surface]),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: AppColors.border),
       ),
       child: SafeArea(
         top: false,
@@ -63,7 +74,7 @@ class PcMiniPlayer extends StatelessWidget {
             Row(
               children: [
                 Text(
-                  formatDuration(position.toInt()),
+                  formatDuration(value.toInt()),
                   style: const TextStyle(color: Colors.white54, fontSize: 11),
                 ),
                 Expanded(
@@ -78,12 +89,16 @@ class PcMiniPlayer extends StatelessWidget {
                       max: max,
                       activeColor: AppColors.accent,
                       inactiveColor: Colors.white24,
-                      onChanged: onSeek,
+                      onChanged: duration > 0 ? (v) => setState(() => _drag = v) : null,
+                      onChangeEnd: (v) {
+                        setState(() => _drag = null);
+                        widget.onSeek(v);
+                      },
                     ),
                   ),
                 ),
                 Text(
-                  formatDuration(duration.toInt()),
+                  formatDuration(duration.isFinite ? duration.toInt() : 0),
                   style: const TextStyle(color: Colors.white54, fontSize: 11),
                 ),
               ],
@@ -95,14 +110,14 @@ class PcMiniPlayer extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        title,
+                        widget.title,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
                             color: Colors.white, fontWeight: FontWeight.w600),
                       ),
                       Text(
-                        artist,
+                        widget.artist,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style:
@@ -113,21 +128,21 @@ class PcMiniPlayer extends StatelessWidget {
                 ),
                 IconButton(
                   icon: const Icon(Icons.skip_previous),
-                  color: hasPrev ? Colors.white : Colors.white24,
-                  onPressed: hasPrev ? onPrev : null,
+                  color: widget.hasPrev ? Colors.white : Colors.white24,
+                  onPressed: widget.hasPrev ? widget.onPrev : null,
                 ),
                 IconButton(
                   iconSize: 40,
-                  icon: Icon(isPlaying
+                  icon: Icon(widget.isPlaying
                       ? Icons.pause_circle_filled
                       : Icons.play_circle_filled),
                   color: AppColors.accent,
-                  onPressed: onPlayPause,
+                  onPressed: widget.onPlayPause,
                 ),
                 IconButton(
                   icon: const Icon(Icons.skip_next),
-                  color: hasNext ? Colors.white : Colors.white24,
-                  onPressed: hasNext ? onNext : null,
+                  color: widget.hasNext ? Colors.white : Colors.white24,
+                  onPressed: widget.hasNext ? widget.onNext : null,
                 ),
               ],
             ),

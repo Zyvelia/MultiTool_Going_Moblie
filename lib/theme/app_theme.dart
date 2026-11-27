@@ -18,7 +18,7 @@ class AppTheme {
       onSecondary: Color(0xFF1A0010),
       secondaryContainer: AppColors.accentMuted,
       onSecondaryContainer: AppColors.accentGlow,
-      tertiary: Color(0xFFFF6BB5),
+      tertiary: Color(0xFFF38BDB),
       onTertiary: Color(0xFF1A0010),
       error: Color(0xFFFF4D6D),
       onError: Color(0xFFFFFFFF),
@@ -26,12 +26,12 @@ class AppTheme {
       onSurface: AppColors.onSurface,
       onSurfaceVariant: AppColors.muted,
       outline: AppColors.border,
-      outlineVariant: Color(0xFF2A1018),
+      outlineVariant: Color(0xFF2A1C3A),
       shadow: Color(0xFF000000),
       scrim: Color(0xFF000000),
       inverseSurface: AppColors.onSurface,
       onInverseSurface: AppColors.bg,
-      inversePrimary: Color(0xFFB00050),
+      inversePrimary: Color(0xFF6528A1),
       surfaceTint: AppColors.accent,
     );
 
@@ -52,14 +52,15 @@ class AppTheme {
       scaffoldBackgroundColor: AppColors.bg,
       canvasColor: AppColors.bg,
       dividerColor: AppColors.border,
-      splashColor: const Color(0x33FF2D95),
-      highlightColor: const Color(0x22FF2D95),
+      splashColor: const Color(0x33B96BFF),
+      highlightColor: const Color(0x22B96BFF),
       iconTheme: const IconThemeData(color: AppColors.onSurface),
       appBarTheme: const AppBarTheme(
         backgroundColor: AppColors.surface,
         foregroundColor: AppColors.onSurface,
         elevation: 0,
         centerTitle: false,
+        titleTextStyle: TextStyle(color: AppColors.onSurface, fontSize: 21, fontWeight: FontWeight.w700),
         surfaceTintColor: Colors.transparent,
         systemOverlayStyle: SystemUiOverlayStyle(
           statusBarColor: Colors.transparent,
@@ -72,6 +73,10 @@ class AppTheme {
         color: AppColors.card,
         elevation: 0,
         surfaceTintColor: Colors.transparent,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.all(Radius.circular(16)),
+          side: BorderSide(color: AppColors.border),
+        ),
       ),
       dialogTheme: const DialogThemeData(
         backgroundColor: AppColors.card,
@@ -144,13 +149,20 @@ class AppTheme {
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         ),
       ),
+      listTileTheme: const ListTileThemeData(
+        iconColor: AppColors.accentGlow,
+        textColor: AppColors.onSurface,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.all(Radius.circular(12)),
+        ),
+      ),
       progressIndicatorTheme: const ProgressIndicatorThemeData(
         color: AppColors.accent,
       ),
       sliderTheme: const SliderThemeData(
         activeTrackColor: AppColors.accent,
         thumbColor: AppColors.accent,
-        inactiveTrackColor: Color(0x44FF2D95),
+        inactiveTrackColor: Color(0x44B96BFF),
       ),
       switchTheme: SwitchThemeData(
         thumbColor: WidgetStateProperty.resolveWith((states) {
@@ -189,7 +201,7 @@ class AppTheme {
       ),
       dividerTheme: const DividerThemeData(color: AppColors.border),
       scrollbarTheme: ScrollbarThemeData(
-        thumbColor: WidgetStateProperty.all(const Color(0x88FF2D95)),
+        thumbColor: WidgetStateProperty.all(const Color(0x88B96BFF)),
         radius: const Radius.circular(999),
       ),
     );

@@ -49,6 +49,9 @@ jobs:
           rm -rf _ci_test_android _gradle_probe
           flutter analyze lib test --no-fatal-infos --no-fatal-warnings
 
+      - name: Test mobile catalog
+        run: flutter test test/home_catalog_test.dart test/playback_order_test.dart test/music_widgets_test.dart
+
       - name: Patch pub plugin Android Gradle
         run: python3 scripts/patch_android.py --pub-plugins-only
 

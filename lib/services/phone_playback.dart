@@ -127,7 +127,7 @@ class PhonePlayback {
       await player.setVideoTrack(VideoTrack.no());
     } catch (_) {}
     await player.setVolume(_volume * 100);
-    _localPlaying(true);
+    _localPlaying(player.state.playing);
   }
 
   Future<void> stopAndroidFile() async {
@@ -142,8 +142,15 @@ class PhonePlayback {
 
   Future<void> play() async {
     if (_androidFile) {
+      if (_endSent) {
+        _endSent = false;
+        await _mpv?.seek(Duration.zero);
+      }
       await _mpv?.play();
       return;
+    }
+    if (justAudio.processingState == ProcessingState.completed) {
+      await justAudio.seek(Duration.zero);
     }
     await justAudio.play();
   }
@@ -199,6 +206,8 @@ class PhonePlayback {
           (duration == null || duration > const Duration(seconds: 2));
       if (tooEarly) return;
       _endSent = true;
+      _lastState = PlayerState(false, ProcessingState.completed);
+      if (!_states.isClosed) _states.add(_lastState);
       onAndroidEnded?.call();
     });
     _mpvError = player.stream.error.listen((message) {
