@@ -49,6 +49,9 @@ class LibraryScreenState extends State<LibraryScreen>
   PhonePlayback? _playback;
   File? _androidFile;
   StreamSubscription<int?>? _indexSub;
+  StreamSubscription<ProcessingState>? _processingSub;
+  StreamSubscription<PlaybackEvent>? _eventSub;
+  bool _pollingNowPlaying = false;
   StreamSubscription<NetworkType>? _connectivitySub;
   NetworkType _networkType = NetworkType.other;
   bool _reconnecting = false;
@@ -156,7 +159,7 @@ class LibraryScreenState extends State<LibraryScreen>
 
   Future<void> _createPlayer() async {
     await ensureAudioBackground();
-    if (_audio != null) return;
+    if (!mounted || _audio != null) return;
     final player = AudioPlayer();
     _audio = player;
     final playback = PhonePlayback(player);
@@ -177,8 +180,8 @@ class LibraryScreenState extends State<LibraryScreen>
       }
       _rememberQueueIndex(queueIndex);
     });
-    player.processingStateStream.listen((state) {
-      if (state != ProcessingState.completed || _skipping) return;
+    _processingSub = player.processingStateStream.listen((state) {
+      if (!mounted || _source != _PlaySource.phone || state != ProcessingState.completed || _skipping) return;
       if (_loopMode == LoopMode.one) return;
       if (_playback?.playingAndroidFile == true) return;
       if (_playlist != null) {
@@ -192,9 +195,10 @@ class LibraryScreenState extends State<LibraryScreen>
       if (atEnd && _loopMode == LoopMode.off) return;
       _playNext();
     });
-    player.playbackEventStream.listen(
+    _eventSub = player.playbackEventStream.listen(
       (_) {},
       onError: (Object e, StackTrace st) {
+        if (!mounted || _source != _PlaySource.phone || _playback?.playingAndroidFile == true) return;
         final song = _songForRecovery(player.currentIndex ?? -1);
         if (song == null) return;
         if (_cache.isCached(song.id)) {
@@ -224,23 +228,36 @@ class LibraryScreenState extends State<LibraryScreen>
         }
         _midStreamRetries++;
         final resumeAt = player.position;
+        final recoveryGen = _playGen;
         Future.delayed(Duration(milliseconds: 500 * _midStreamRetries), () async {
-          if (!mounted) return;
+          if (!mounted || recoveryGen != _playGen || !_isCurrentSong(song) || _source != _PlaySource.phone) return;
           await _recoverTrack(song, resumeAt);
         });
       },
     );
   }
 
+  // just_audio.play() completes on pause or completion, not when audio starts.
+  // Never hold a queue-transition lock until the entire track has played.
+  void _startAudio() {
+    unawaited(_player.play().catchError((Object error, StackTrace stack) {
+      debugPrint('Music playback: $error');
+    }));
+  }
+
   Future<void> _recoverTrack(Song song, Duration resumeAt) async {
+    final gen = _playGen;
+    if (!mounted || !_isCurrentSong(song)) return;
     if (_cache.isCached(song.id)) {
       try {
         await _player.setAudioSource(
           _sourceFor(song),
           initialPosition: resumeAt,
         );
+        if (!mounted || gen != _playGen) return;
         await _applyPlaybackModes();
-        await _player.play();
+        if (!mounted || gen != _playGen) return;
+        _startAudio();
         _midStreamRetries = 0;
         _detachPlaylist();
       } catch (e) {
@@ -257,7 +274,8 @@ class LibraryScreenState extends State<LibraryScreen>
         _sourceFor(song),
         initialPosition: resumeAt,
       );
-      await _player.play();
+      if (!mounted || gen != _playGen) return;
+      _startAudio();
       _midStreamRetries = 0;
       _detachPlaylist();
     } catch (e) {
@@ -645,6 +663,9 @@ class LibraryScreenState extends State<LibraryScreen>
     _connectivitySub?.cancel();
     _cacheSub?.cancel();
     _indexSub?.cancel();
+    _processingSub?.cancel();
+    _eventSub?.cancel();
+    _playGen++;
     _libraryIndexSub?.cancel();
     _playback?.dispose();
     _nowPlayingSnapshot.dispose();
@@ -1008,16 +1029,19 @@ class LibraryScreenState extends State<LibraryScreen>
   }
 
   Future<void> _fallbackToStream(Song song) async {
-    if (_api == null) return;
+    final gen = _playGen;
+    final api = _api;
+    if (api == null || !_isCurrentSong(song) || _source != _PlaySource.phone) return;
     try {
       _playingLocal = false;
       _androidFile = null;
       _detachPlaylist();
       await _playback?.stopAndroidFile();
       await _player.setAudioSource(_streamSource(song, transcode: true, force: true));
-      unawaited(_applyPlaybackModes());
-      await _player.play();
-      unawaited(_cache.replaceForPhone(song, _api!));
+      await _applyPlaybackModes();
+      if (!mounted || gen != _playGen) return;
+      _startAudio();
+      unawaited(_cache.replaceForPhone(song, api));
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -1077,8 +1101,8 @@ class LibraryScreenState extends State<LibraryScreen>
     if (source == _source) return;
     setState(() => _source = source);
     if (source == _PlaySource.pc) {
-      if (_hasPlayer) _player.pause();
-      unawaited(_playback?.stopAndroidFile());
+      _playGen++;
+      if (_hasPlayer) unawaited(_playback?.pause());
       _startPolling();
     } else {
       _stopPolling();
@@ -1098,11 +1122,15 @@ class LibraryScreenState extends State<LibraryScreen>
   }
 
   Future<void> _pollNowPlaying() async {
-    if (_api == null) return;
+    final api = _api;
+    if (api == null || _pollingNowPlaying || _source != _PlaySource.pc) return;
+    _pollingNowPlaying = true;
     try {
-      final np = await _api!.nowPlaying();
-      if (mounted) setState(() => _nowPlaying = np);
-    } catch (_) {}
+      final np = await api.nowPlaying();
+      if (mounted && identical(api, _api) && _source == _PlaySource.pc) setState(() => _nowPlaying = np);
+    } catch (_) {} finally {
+      _pollingNowPlaying = false;
+    }
   }
 
   Future<void> _sendControl(String action, {int? songId, double? value}) async {
@@ -1240,7 +1268,7 @@ class LibraryScreenState extends State<LibraryScreen>
     }
 
     final gen = ++_playGen;
-    final ordered = _queue;
+    final ordered = List<Song>.of(_queue);
     final begin = _queueIndex;
     if (begin < 0 || begin >= ordered.length) return;
     final song = ordered[begin];
@@ -1251,15 +1279,24 @@ class LibraryScreenState extends State<LibraryScreen>
         local && _cache.localPlayable(song.id) == null && _api != null;
 
     unawaited(_ensureRemoteCacheDir());
-    await _ensurePlayer();
-    if (gen != _playGen || !mounted) return;
+    try {
+      await _ensurePlayer();
+    } catch (e) {
+      if (mounted && gen == _playGen) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(explainError(e, doing: 'start the music player'))));
+      }
+      return;
+    }
+    if (gen != _playGen || !mounted || !_hasPlayer) return;
+    setState(() {});
 
     Future<void> playSingle() async {
       _followPlayerIndex = false;
       final source = _sourceFor(song);
       if (Platform.isAndroid && _androidFile != null) {
         await _playback!.playAndroidFile(_androidFile!);
-        if (gen != _playGen) return;
+        if (gen != _playGen || !mounted) return;
+        if (resumeAt > Duration.zero) await _playback!.seek(resumeAt);
         _detachPlaylist();
         _midStreamRetries = 0;
         return;
@@ -1268,8 +1305,9 @@ class LibraryScreenState extends State<LibraryScreen>
       _detachPlaylist();
       await _player.setAudioSource(source, initialPosition: resumeAt);
       if (gen != _playGen) return;
-      unawaited(_applyPlaybackModes());
-      await _player.play();
+      await _applyPlaybackModes();
+      if (!mounted || gen != _playGen) return;
+      _startAudio();
       _midStreamRetries = 0;
     }
 
@@ -1286,8 +1324,9 @@ class LibraryScreenState extends State<LibraryScreen>
       _playlist = source;
       _expectedPlayerIndex = null;
       _followPlayerIndex = true;
-      unawaited(_applyPlaybackModes());
-      await _player.play();
+      await _applyPlaybackModes();
+      if (!mounted || gen != _playGen) return;
+      _startAudio();
       _midStreamRetries = 0;
     }
 
@@ -1320,7 +1359,7 @@ class LibraryScreenState extends State<LibraryScreen>
           );
           if (gen != _playGen) return;
           unawaited(_applyPlaybackModes());
-          await _player.play();
+          _startAudio();
           _midStreamRetries = 0;
           unawaited(_cache.replaceForPhone(song, _api!));
           return;
@@ -1514,12 +1553,19 @@ class LibraryScreenState extends State<LibraryScreen>
     return Scaffold(
       appBar: AppBar(
         leading: homeBackLeading(context),
-        title: Text(_total > 0 ? '$_total songs' : 'Library'),
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Music', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 21)),
+            Text(_total > 0 ? '$_total tracks in library' : 'Your library',
+                style: const TextStyle(color: AppColors.muted, fontSize: 11)),
+          ],
+        ),
         bottom: TabBar(
           controller: _tabController,
           indicatorColor: AppColors.accent,
           labelColor: AppColors.accent,
-          unselectedLabelColor: Colors.white38,
+          unselectedLabelColor: AppColors.muted,
           tabs: const [
             Tab(icon: Icon(Icons.queue_music), text: 'Songs'),
             Tab(icon: Icon(Icons.person), text: 'Artists'),
@@ -1550,7 +1596,14 @@ class LibraryScreenState extends State<LibraryScreen>
           ),
         ],
       ),
-      body: Column(
+      body: DecoratedBox(
+        decoration: const BoxDecoration(
+          gradient: RadialGradient(
+            center: Alignment.topRight, radius: 1.4,
+            colors: [Color(0xFF21102D), AppColors.bg],
+          ),
+        ),
+        child: Column(
         children: [
           // ── Status banners ──────────────────────────────────────────────
           if (_reconnecting)
@@ -1725,7 +1778,7 @@ class LibraryScreenState extends State<LibraryScreen>
             ),
 
           // ── Mini players ─────────────────────────────────────────────────
-          if (_source == _PlaySource.phone && _playingSong != null)
+          if (_source == _PlaySource.phone && _playingSong != null && _playback != null)
             MiniPlayer(
               player: _playback!,
               song: _playingSong!,
@@ -1751,6 +1804,7 @@ class LibraryScreenState extends State<LibraryScreen>
               onSeek: (v) => _sendControl('seek', value: v),
             ),
         ],
+      ),
       ),
     );
   }

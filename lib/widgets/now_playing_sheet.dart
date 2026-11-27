@@ -82,6 +82,7 @@ class NowPlayingSheet extends StatefulWidget {
 
 class _NowPlayingSheetState extends State<NowPlayingSheet> {
   double _volume = 1.0;
+  double? _seekPreview;
   NowPlayingSnapshot? _snap;
 
   @override
@@ -104,7 +105,10 @@ class _NowPlayingSheetState extends State<NowPlayingSheet> {
 
   void _onSnapshot() {
     if (!mounted) return;
-    setState(() => _snap = widget.snapshot.value);
+    setState(() {
+      if (_snap?.song.id != widget.snapshot.value?.song.id) _seekPreview = null;
+      _snap = widget.snapshot.value;
+    });
   }
 
   @override
@@ -126,7 +130,7 @@ class _NowPlayingSheetState extends State<NowPlayingSheet> {
       builder: (context, scrollController) {
         return Container(
           decoration: const BoxDecoration(
-            color: AppColors.bg,
+            gradient: LinearGradient(colors: [Color(0xFF29183D), AppColors.bg], begin: Alignment.topCenter, end: Alignment.bottomCenter),
             borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
             border: Border(top: BorderSide(color: AppColors.border)),
           ),
@@ -165,7 +169,10 @@ class _NowPlayingSheetState extends State<NowPlayingSheet> {
                 ],
               ),
               const SizedBox(height: 8),
-              AspectRatio(
+              Center(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 260),
+                  child: AspectRatio(
                 aspectRatio: 1,
                 child: Container(
                   decoration: BoxDecoration(
@@ -181,6 +188,8 @@ class _NowPlayingSheetState extends State<NowPlayingSheet> {
                     size: 96,
                     color: AppColors.accentGlow,
                   ),
+                ),
+              ),
                 ),
               ),
               const SizedBox(height: 28),
@@ -215,7 +224,7 @@ class _NowPlayingSheetState extends State<NowPlayingSheet> {
                       ? duration.inMilliseconds.toDouble()
                       : 1.0;
                   final value =
-                      position.inMilliseconds.toDouble().clamp(0.0, maxMs);
+                      (_seekPreview ?? position.inMilliseconds.toDouble()).clamp(0.0, maxMs);
                   return Column(
                     children: [
                       SliderTheme(
@@ -230,9 +239,10 @@ class _NowPlayingSheetState extends State<NowPlayingSheet> {
                           max: maxMs,
                           activeColor: AppColors.accent,
                           inactiveColor: Colors.white24,
-                          onChanged: (v) {
-                            widget.player
-                                .seek(Duration(milliseconds: v.round()));
+                          onChanged: duration > Duration.zero ? (v) => setState(() => _seekPreview = v) : null,
+                          onChangeEnd: (v) {
+                            setState(() => _seekPreview = null);
+                            widget.player.seek(Duration(milliseconds: v.round()));
                           },
                         ),
                       ),
@@ -242,7 +252,7 @@ class _NowPlayingSheetState extends State<NowPlayingSheet> {
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
                             Text(
-                              formatDuration(position.inSeconds),
+                              formatDuration((value / 1000).floor()),
                               style: const TextStyle(
                                 color: Colors.white54,
                                 fontSize: 12,
@@ -263,7 +273,9 @@ class _NowPlayingSheetState extends State<NowPlayingSheet> {
                 },
               ),
               const SizedBox(height: 16),
-              Row(
+              FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   IconButton(
@@ -287,7 +299,7 @@ class _NowPlayingSheetState extends State<NowPlayingSheet> {
                   StreamBuilder<PlayerState>(
                     stream: widget.player.playerStateStream,
                     builder: (context, snapshot) {
-                      final playing = snapshot.data?.playing ?? false;
+                      final playing = (snapshot.data?.playing ?? false) && snapshot.data?.processingState != ProcessingState.completed;
                       return IconButton(
                         iconSize: 64,
                         icon: Icon(
@@ -325,6 +337,7 @@ class _NowPlayingSheetState extends State<NowPlayingSheet> {
                     onPressed: widget.onToggleRepeat,
                   ),
                 ],
+              ),
               ),
               const SizedBox(height: 20),
               Row(
