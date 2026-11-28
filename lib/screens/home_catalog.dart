@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'live_server_screen.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../services/home_tabs.dart';
@@ -376,6 +377,14 @@ class _HomeCatalogState extends State<HomeCatalog> {
                                 icon: _customize ? Icons.check_rounded : Icons.tune_rounded,
                                 onPressed: _toggleCustomize,
                                 selected: _customize,
+                              ),
+                              const SizedBox(width: 6),
+                              _CatalogIconButton(
+                                tooltip: 'Live Server',
+                                icon: Icons.wifi_tethering_rounded,
+                                onPressed: () => Navigator.of(context).push(
+                                  MaterialPageRoute(builder: (_) => const LiveServerScreen()),
+                                ),
                               ),
                               const SizedBox(width: 6),
                               _CatalogIconButton(
