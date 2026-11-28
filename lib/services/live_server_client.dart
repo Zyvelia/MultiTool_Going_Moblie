@@ -34,7 +34,7 @@ class LiveServerClient {
     return Uri(scheme: 'http', host: uri.host, port: uri.port);
   }
 
-  Future<Map<String, dynamic>> _get(String path, {bool authenticated = true, bool pairing = false, bool post = false, Map<String, String>? query}) async {
+  Future<Map<String, dynamic>> _get(String path, {bool authenticated = true, bool pairing = false, bool post = false, Map<String, String>? query, List<int>? payload, String? contentType}) async {
     final client = HttpClient()
       ..findProxy = (_) => 'DIRECT'
       ..connectionTimeout = const Duration(seconds: 5)
@@ -44,14 +44,18 @@ class LiveServerClient {
           .timeout(const Duration(seconds: 6));
       request.followRedirects = false;
       request.headers.set(HttpHeaders.acceptHeader, 'application/json');
-      if (post) request.contentLength = 0;
+      if (post) {
+        request.contentLength = payload?.length ?? 0;
+        if (contentType != null) request.headers.set(HttpHeaders.contentTypeHeader, contentType);
+      }
       if (pairing) {
         request.contentLength = 0;
         request.headers.set('X-Pairing-Code', _code);
       } else if (authenticated) {
         request.headers.set(HttpHeaders.authorizationHeader, 'Bearer $_code');
       }
-      final response = await request.close().timeout(const Duration(seconds: 6));
+      if (payload != null) request.add(payload);
+      final response = await request.close().timeout(payload == null ? const Duration(seconds: 6) : const Duration(minutes: 2));
       if (response.statusCode == 401) {
         throw const LiveServerException('Access code expired, revoked or incorrect. Pair again from ZMT.');
       }
@@ -139,6 +143,43 @@ class LiveServerException implements Exception {
       if (id != null) 'id': id,
       if (value != null) 'value': '$value',
     });
+  }
+
+  static const maxTransfer = 20 * 1024 * 1024;
+  Future<Map<String,dynamic>> notes({int offset = 0}) =>
+      _get('/api/v1/notes/list', query: {'offset': '$offset'});
+  Future<Map<String,dynamic>> note(String id) =>
+      _get('/api/v1/notes/get', query: {'id': id});
+  Future<Map<String,dynamic>> saveNote(String title, String body, {String? id, String? revision}) =>
+      _get('/api/v1/notes/save', post: true, contentType: 'application/json',
+        payload: utf8.encode(jsonEncode({'id':id,'title':title,'body':body,'revision':revision})));
+  Future<Map<String,dynamic>> files() => _get('/api/v1/files/list');
+  Future<void> upload(String name, List<int> bytes) async {
+    if (bytes.length > maxTransfer) throw const FormatException('Maximum file size is 20 MiB.');
+    await _get('/api/v1/files/upload', post: true, query: {'name':name},
+      payload: bytes, contentType: 'application/octet-stream');
+  }
+  Future<List<int>> download(String id) async {
+    if (!validTrackId(id)) throw const FormatException('Invalid file ID.');
+    final client = HttpClient()..findProxy = (_) => 'DIRECT'
+      ..connectionTimeout = const Duration(seconds: 5)..autoUncompress = false;
+    try {
+      final req = await client.getUrl(base.replace(path:'/api/v1/files/download', queryParameters:{'id':id}))
+          .timeout(const Duration(seconds: 10));
+      req.followRedirects = false;
+      req.headers.set(HttpHeaders.authorizationHeader, 'Bearer $_code');
+      final res = await req.close().timeout(const Duration(seconds: 15));
+      if (res.statusCode != 200 || res.contentLength < 0 || res.contentLength > maxTransfer) {
+        throw const LiveServerException('File unavailable or download permission denied.');
+      }
+      final bytes = <int>[];
+      await res.forEach((chunk) {
+        if (bytes.length + chunk.length > maxTransfer) throw const LiveServerException('File too large.');
+        bytes.addAll(chunk);
+      }).timeout(const Duration(minutes: 2));
+      if (bytes.length != res.contentLength) throw const LiveServerException('Incomplete transfer.');
+      return bytes;
+    } finally { client.close(force:true); }
   }
 
   Future<Map<String, dynamic>> state() async {

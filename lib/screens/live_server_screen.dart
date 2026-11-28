@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/live_server_client.dart';
 import 'live_music_screen.dart';
+import 'live_exchange_screen.dart';
 
 class LiveServerScreen extends StatefulWidget {
   const LiveServerScreen({super.key});
@@ -267,6 +268,24 @@ class _LiveServerScreenState extends State<LiveServerScreen> with WidgetsBinding
             icon: const Icon(Icons.library_music_outlined),
             label: const Text('Open live music'),
           ),
+          OutlinedButton.icon(
+            onPressed: () async {
+              final client = _client;
+              if (client == null) return;
+              _timer?.cancel();
+              await Navigator.of(context).push(MaterialPageRoute(
+                builder: (_) => LiveExchangeScreen(client: client, notes: true)));
+              if (mounted) _schedule(Duration.zero);
+            }, icon: const Icon(Icons.note_alt_outlined), label: const Text('Open live notes')),
+          OutlinedButton.icon(
+            onPressed: () async {
+              final client = _client;
+              if (client == null) return;
+              _timer?.cancel();
+              await Navigator.of(context).push(MaterialPageRoute(
+                builder: (_) => LiveExchangeScreen(client: client, notes: false)));
+              if (mounted) _schedule(Duration.zero);
+            }, icon: const Icon(Icons.swap_horiz), label: const Text('Open live Quick Send')),
           Text('Desktop · v${data['version']}', style: Theme.of(context).textTheme.titleLarge),
           const SizedBox(height: 8),
           Card(child: ListTile(leading: const Icon(Icons.music_note),
@@ -282,7 +301,7 @@ class _LiveServerScreenState extends State<LiveServerScreen> with WidgetsBinding
               subtitle: Text('v${module['version'] ?? '?'}'),
               trailing: Text(module['active'] == true ? 'Active' : 'Installed'))),
           const SizedBox(height: 12),
-          const Text('Protocol 1 · Music is available with a paired device and separate PC permissions. Other modules currently expose status only.'),
+          const Text('Protocol 1 · Music is available with a paired device and separate PC permissions. Notes and Quick Send require separate sharing permissions.'),
         ],
         const SizedBox(height: 12),
         const Text('Pairing credentials are saved in secure storage; session codes are not. Revoke devices on PC. Use only your private Tailscale network; never forward this port.'),
