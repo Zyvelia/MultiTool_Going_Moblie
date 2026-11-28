@@ -4,7 +4,7 @@ import '../models/ai_message.dart';
 import '../services/ai_api_service.dart';
 import '../services/settings_service.dart';
 import '../services/user_facing_error.dart';
-import '../theme/app_colors.dart';
+import '../theme/appearance.dart';
 import 'ai_approvals_screen.dart';
 import 'home_leading.dart';
 
@@ -217,7 +217,7 @@ class _ChatScreenState extends State<ChatScreen> {
     final ok = await showModalBottomSheet<bool>(
       context: context,
       isScrollControlled: true,
-      backgroundColor: AppColors.surface,
+      backgroundColor: Appearance.of(context).surface,
       builder: (ctx) {
         return Padding(
           padding: EdgeInsets.fromLTRB(16, 16, 16, 16 + MediaQuery.of(ctx).viewInsets.bottom),
@@ -229,9 +229,9 @@ class _ChatScreenState extends State<ChatScreen> {
                 children: [
                   const Text('Connect to the PC model', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
                   const SizedBox(height: 6),
-                  const Text(
+                  Text(
                     'Hosted key is saved on this phone only. The PC keeps it in memory for this session.',
-                    style: TextStyle(color: AppColors.muted, fontSize: 12),
+                    style: TextStyle(color: Appearance.of(context).muted, fontSize: 12),
                   ),
                   const SizedBox(height: 12),
                   SegmentedButton<String>(
@@ -260,11 +260,11 @@ class _ChatScreenState extends State<ChatScreen> {
                       decoration: const InputDecoration(labelText: 'API key', border: OutlineInputBorder()),
                     ),
                   ] else
-                    const Padding(
+                    Padding(
                       padding: EdgeInsets.only(top: 12),
                       child: Text(
                         'Uses the local model already picked in AI Chat on the PC (Ollama / llama.cpp).',
-                        style: TextStyle(color: AppColors.muted, fontSize: 12),
+                        style: TextStyle(color: Appearance.of(context).muted, fontSize: 12),
                       ),
                     ),
                   const SizedBox(height: 14),
@@ -354,14 +354,14 @@ class _ChatScreenState extends State<ChatScreen> {
             if (subtitle.isNotEmpty)
               Text(
                 subtitle,
-                style: const TextStyle(fontSize: 11, color: AppColors.muted, fontWeight: FontWeight.normal),
+                style: TextStyle(fontSize: 11, color: Appearance.of(context).muted, fontWeight: FontWeight.normal),
               ),
           ],
         ),
         actions: [
           Row(
             children: [
-              const Text('Agent', style: TextStyle(fontSize: 12, color: AppColors.muted)),
+              Text('Agent', style: TextStyle(fontSize: 12, color: Appearance.of(context).muted)),
               Switch(
                 value: _agent,
                 onChanged: _sending ? null : (v) => setState(() => _agent = v),
@@ -388,10 +388,10 @@ class _ChatScreenState extends State<ChatScreen> {
         children: [
           if (_error != null)
             Material(
-              color: AppColors.wine,
+              color: Appearance.of(context).wine,
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
-                child: Text(_error!, style: const TextStyle(color: AppColors.onSurface, fontSize: 13)),
+                child: Text(_error!, style: TextStyle(color: Appearance.of(context).onSurface, fontSize: 13)),
               ),
             ),
           Expanded(
@@ -419,9 +419,9 @@ class _ChatScreenState extends State<ChatScreen> {
                             itemCount: _messages.length + (_sending ? 1 : 0),
                             itemBuilder: (context, i) {
                               if (i == _messages.length) {
-                                return const Padding(
+                                return Padding(
                                   padding: EdgeInsets.all(12),
-                                  child: Text('Thinking on the PC…', style: TextStyle(color: AppColors.muted)),
+                                  child: Text('Thinking on the PC…', style: TextStyle(color: Appearance.of(context).muted)),
                                 );
                               }
                               return _Bubble(message: _messages[i]);
@@ -446,7 +446,7 @@ class _ChatScreenState extends State<ChatScreen> {
                       decoration: InputDecoration(
                         hintText: 'Ask, or /build … /help',
                         filled: true,
-                        fillColor: AppColors.card,
+                        fillColor: Appearance.of(context).card,
                         contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                         border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(20),
@@ -458,7 +458,7 @@ class _ChatScreenState extends State<ChatScreen> {
                   const SizedBox(width: 8),
                   IconButton(
                     icon: const Icon(Icons.send),
-                    color: AppColors.accent,
+                    color: Appearance.of(context).accent,
                     onPressed: _sending ? null : _send,
                   ),
                 ],
@@ -489,14 +489,14 @@ class _Bubble extends StatelessWidget {
           color: isTool
               ? const Color(0xFF2A1830)
               : isUser
-                  ? AppColors.wine
-                  : AppColors.card,
+                  ? Appearance.of(context).wine
+                  : Appearance.of(context).card,
           borderRadius: BorderRadius.circular(16),
         ),
         child: Text(
           message.content,
           style: TextStyle(
-            color: isTool ? const Color(0xFFD2A8FF) : AppColors.onSurface,
+            color: isTool ? Appearance.of(context).accentGlow : Appearance.of(context).onSurface,
             fontSize: isTool ? 12 : 14,
           ),
         ),

@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import '../theme/app_colors.dart';
+import '../theme/appearance.dart';
 import 'home_leading.dart';
 import '../models/vault_entry.dart';
 import '../services/settings_service.dart';
@@ -338,7 +338,7 @@ class _VaultScreenState extends State<VaultScreen> with WidgetsBindingObserver {
                           },
                         ),
                   filled: true,
-                  fillColor: AppColors.card,
+                  fillColor: Appearance.of(context).card,
                   isDense: true,
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(12),
@@ -346,11 +346,11 @@ class _VaultScreenState extends State<VaultScreen> with WidgetsBindingObserver {
                   ),
                   enabledBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(12),
-                    borderSide: const BorderSide(color: AppColors.border),
+                    borderSide: BorderSide(color: Appearance.of(context).border),
                   ),
                   focusedBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(12),
-                    borderSide: const BorderSide(color: AppColors.accent, width: 1.5),
+                    borderSide: BorderSide(color: Appearance.of(context).accent, width: 1.5),
                   ),
                 ),
               ),
@@ -386,7 +386,7 @@ class _VaultScreenState extends State<VaultScreen> with WidgetsBindingObserver {
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
       child: Material(
-        color: open ? AppColors.accentMuted : AppColors.card,
+        color: open ? Appearance.of(context).accentMuted : Appearance.of(context).card,
         borderRadius: BorderRadius.circular(12),
         child: InkWell(
           borderRadius: BorderRadius.circular(12),
@@ -394,7 +394,7 @@ class _VaultScreenState extends State<VaultScreen> with WidgetsBindingObserver {
           child: Container(
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: open ? AppColors.accent : AppColors.border),
+              border: Border.all(color: open ? Appearance.of(context).accent : Appearance.of(context).border),
             ),
             padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
             child: Column(
@@ -426,7 +426,7 @@ class _VaultScreenState extends State<VaultScreen> with WidgetsBindingObserver {
                           if (row.subtitle.isNotEmpty)
                             Text(
                               row.subtitle,
-                              style: const TextStyle(color: AppColors.muted, fontSize: 13),
+                              style: TextStyle(color: Appearance.of(context).muted, fontSize: 13),
                               overflow: TextOverflow.ellipsis,
                             ),
                         ],
@@ -439,7 +439,7 @@ class _VaultScreenState extends State<VaultScreen> with WidgetsBindingObserver {
                     const SizedBox(height: 12),
                     Row(
                       children: [
-                        const Text('••••••••', style: TextStyle(color: AppColors.muted, letterSpacing: 1)),
+                        Text('••••••••', style: TextStyle(color: Appearance.of(context).muted, letterSpacing: 1)),
                         const Spacer(),
                         TextButton(
                           onPressed: () => _copyToClipboard(row.entry!.password, autoClear: true),
@@ -481,7 +481,7 @@ class _VaultScreenState extends State<VaultScreen> with WidgetsBindingObserver {
                       fontSize: 26,
                       fontWeight: FontWeight.w600,
                       letterSpacing: revealed ? 3 : 2,
-                      color: revealed ? AppColors.accent : Colors.white38,
+                      color: revealed ? Appearance.of(context).accent : Colors.white38,
                     ),
                   ),
                 ),
@@ -503,8 +503,8 @@ class _VaultScreenState extends State<VaultScreen> with WidgetsBindingObserver {
             child: LinearProgressIndicator(
               value: fraction,
               minHeight: 3,
-              backgroundColor: AppColors.border,
-              color: AppColors.accent,
+              backgroundColor: Appearance.of(context).border,
+              color: Appearance.of(context).accent,
             ),
           ),
           const SizedBox(height: 6),
@@ -512,7 +512,7 @@ class _VaultScreenState extends State<VaultScreen> with WidgetsBindingObserver {
             revealed
                 ? 'Hides in ${_revealSecondsLeft(code.id)}s · ${_secondsRemaining}s left'
                 : '${_secondsRemaining}s left',
-            style: const TextStyle(color: AppColors.muted, fontSize: 12),
+            style: TextStyle(color: Appearance.of(context).muted, fontSize: 12),
           ),
         ],
       ),
@@ -526,7 +526,7 @@ class _VaultScreenState extends State<VaultScreen> with WidgetsBindingObserver {
       height: 28,
       alignment: Alignment.center,
       decoration: BoxDecoration(
-        color: AppColors.wine,
+        color: Appearance.of(context).wine,
         borderRadius: BorderRadius.circular(8),
       ),
       child: Text(letter, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),

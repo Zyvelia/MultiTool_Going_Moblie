@@ -19,7 +19,7 @@ import '../services/phone_playback.dart';
 import '../services/playback_order.dart';
 import '../services/settings_service.dart';
 import '../services/user_facing_error.dart';
-import '../theme/app_colors.dart';
+import '../theme/appearance.dart';
 import '../widgets/mini_player.dart';
 import '../widgets/now_playing_sheet.dart';
 import '../widgets/pc_mini_player.dart';
@@ -776,7 +776,7 @@ class LibraryScreenState extends State<LibraryScreen>
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        backgroundColor: AppColors.card,
+        backgroundColor: Appearance.of(context).card,
         title: const Text('Download all songs?', style: TextStyle(color: Colors.white)),
         content: Text(
           _query.isEmpty
@@ -1558,14 +1558,14 @@ class LibraryScreenState extends State<LibraryScreen>
           children: [
             const Text('Music', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 21)),
             Text(_total > 0 ? '$_total tracks in library' : 'Your library',
-                style: const TextStyle(color: AppColors.muted, fontSize: 11)),
+                style: TextStyle(color: Appearance.of(context).muted, fontSize: 11)),
           ],
         ),
         bottom: TabBar(
           controller: _tabController,
-          indicatorColor: AppColors.accent,
-          labelColor: AppColors.accent,
-          unselectedLabelColor: AppColors.muted,
+          indicatorColor: Appearance.of(context).accent,
+          labelColor: Appearance.of(context).accent,
+          unselectedLabelColor: Appearance.of(context).muted,
           tabs: const [
             Tab(icon: Icon(Icons.queue_music), text: 'Songs'),
             Tab(icon: Icon(Icons.person), text: 'Artists'),
@@ -1597,10 +1597,10 @@ class LibraryScreenState extends State<LibraryScreen>
         ],
       ),
       body: DecoratedBox(
-        decoration: const BoxDecoration(
+        decoration: BoxDecoration(
           gradient: RadialGradient(
             center: Alignment.topRight, radius: 1.4,
-            colors: [Color(0xFF21102D), AppColors.bg],
+            colors: [Color.alphaBlend(Appearance.of(context).accent.withValues(alpha: Appearance.of(context).glow * 0.3), Appearance.of(context).bg],
           ),
         ),
         child: Column(
@@ -1630,7 +1630,7 @@ class LibraryScreenState extends State<LibraryScreen>
               message: _indexSyncTotal > 0
                   ? 'Syncing library metadata $_indexSyncDone / $_indexSyncTotal…'
                   : 'Syncing library metadata for Artists…',
-              color: AppColors.accent,
+              color: Appearance.of(context).accent,
             )
           else if (_server != null)
             Padding(
@@ -1734,18 +1734,18 @@ class LibraryScreenState extends State<LibraryScreen>
                       )
                     : null,
                 filled: true,
-                fillColor: AppColors.card,
+                fillColor: Appearance.of(context).card,
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
                   borderSide: BorderSide.none,
                 ),
                 enabledBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
-                  borderSide: const BorderSide(color: AppColors.border, width: 1),
+                  borderSide: BorderSide(color: Appearance.of(context).border, width: 1),
                 ),
                 focusedBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
-                  borderSide: const BorderSide(color: AppColors.accent, width: 1.5),
+                  borderSide: BorderSide(color: Appearance.of(context).accent, width: 1.5),
                 ),
                 isDense: true,
                 contentPadding: const EdgeInsets.symmetric(vertical: 12, horizontal: 12),
@@ -1932,13 +1932,13 @@ class LibraryScreenState extends State<LibraryScreen>
                   border: Border(
                     bottom: BorderSide(
                       color: isExpanded
-                          ? AppColors.accent.withValues(alpha: 0.3)
-                          : AppColors.border,
+                          ? Appearance.of(context).accent.withValues(alpha: 0.3)
+                          : Appearance.of(context).border,
                       width: 0.5,
                     ),
                   ),
                   color: isExpanded
-                      ? AppColors.accentMuted
+                      ? Appearance.of(context).accentMuted
                       : null,
                 ),
                 child: Row(
@@ -1947,10 +1947,10 @@ class LibraryScreenState extends State<LibraryScreen>
                       width: 36,
                       height: 36,
                       decoration: BoxDecoration(
-                        color: AppColors.wine,
+                        color: Appearance.of(context).wine,
                         borderRadius: BorderRadius.circular(18),
                       ),
-                      child: const Icon(Icons.person, color: AppColors.accent, size: 18),
+                      child: Icon(Icons.person, color: Appearance.of(context).accent, size: 18),
                     ),
                     const SizedBox(width: 12),
                     Expanded(
@@ -1960,7 +1960,7 @@ class LibraryScreenState extends State<LibraryScreen>
                           Text(
                             artist,
                             style: TextStyle(
-                              color: isExpanded ? AppColors.accent : Colors.white,
+                              color: isExpanded ? Appearance.of(context).accent : Colors.white,
                               fontWeight: isExpanded
                                   ? FontWeight.w600
                                   : FontWeight.normal,
@@ -1979,13 +1979,13 @@ class LibraryScreenState extends State<LibraryScreen>
                               ),
                               if (cachedCount > 0) ...[
                                 const SizedBox(width: 6),
-                                const Icon(Icons.offline_pin,
-                                    size: 11, color: AppColors.accent),
+                                Icon(Icons.offline_pin,
+                                    size: 11, color: Appearance.of(context).accent),
                                 const SizedBox(width: 2),
                                 Text(
                                   '$cachedCount',
-                                  style: const TextStyle(
-                                      color: AppColors.accent, fontSize: 12),
+                                  style: TextStyle(
+                                      color: Appearance.of(context).accent, fontSize: 12),
                                 ),
                               ],
                             ],
@@ -2003,7 +2003,7 @@ class LibraryScreenState extends State<LibraryScreen>
                               : 'Auto-download on Wi‑Fi (off)',
                           icon: Icon(
                             on ? Icons.wifi : Icons.wifi_off,
-                            color: on ? AppColors.accent : Colors.white38,
+                            color: on ? Appearance.of(context).accent : Colors.white38,
                             size: 22,
                           ),
                           onPressed: () async {
@@ -2024,15 +2024,15 @@ class LibraryScreenState extends State<LibraryScreen>
                     ),
                     IconButton(
                       tooltip: 'Play artist',
-                      icon: const Icon(Icons.play_circle_outline,
-                          color: AppColors.accent),
+                      icon: Icon(Icons.play_circle_outline,
+                          color: Appearance.of(context).accent),
                       onPressed: () =>
                           _playArtistCatalog(artist, shuffle: false),
                     ),
                     IconButton(
                       tooltip: 'Shuffle artist',
-                      icon: const Icon(Icons.shuffle,
-                          color: AppColors.accentGlow),
+                      icon: Icon(Icons.shuffle,
+                          color: Appearance.of(context).accentGlow),
                       onPressed: () =>
                           _playArtistCatalog(artist, shuffle: true),
                     ),
@@ -2052,10 +2052,10 @@ class LibraryScreenState extends State<LibraryScreen>
               ...songs.map((song) {
                 final active = _source == _PlaySource.phone && _isCurrentSong(song);
                 return Container(
-                  decoration: const BoxDecoration(
-                    color: AppColors.accentMuted,
+                  decoration: BoxDecoration(
+                    color: Appearance.of(context).accentMuted,
                     border: Border(
-                      bottom: BorderSide(color: AppColors.border, width: 0.5),
+                      bottom: BorderSide(color: Appearance.of(context).border, width: 0.5),
                     ),
                   ),
                   child: SongTile(
@@ -2089,8 +2089,8 @@ class LibraryScreenState extends State<LibraryScreen>
         Container(
           width: double.infinity,
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
-          decoration: const BoxDecoration(
-            border: Border(bottom: BorderSide(color: AppColors.border)),
+          decoration: BoxDecoration(
+            border: Border(bottom: BorderSide(color: Appearance.of(context).border)),
           ),
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,

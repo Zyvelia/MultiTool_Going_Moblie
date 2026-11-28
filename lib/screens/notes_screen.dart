@@ -9,7 +9,7 @@ import '../services/notes_api_service.dart';
 import '../services/notes_sync_service.dart';
 import '../services/connectivity_service.dart';
 import '../services/user_facing_error.dart';
-import '../theme/app_colors.dart';
+import '../theme/appearance.dart';
 import 'home_leading.dart';
 
 class NotesScreen extends StatefulWidget {
@@ -228,8 +228,8 @@ class _NotesScreenState extends State<NotesScreen> {
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
       child: Text(
         text,
-        style: const TextStyle(
-          color: AppColors.muted,
+        style: TextStyle(
+          color: Appearance.of(context).muted,
           fontSize: 12,
           fontWeight: FontWeight.w600,
         ),
@@ -262,7 +262,7 @@ class _NotesScreenState extends State<NotesScreen> {
                       note.body.trim(),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(color: AppColors.muted, fontSize: 13),
+                      style: TextStyle(color: Appearance.of(context).muted, fontSize: 13),
                     ),
                 ],
               ),
@@ -275,7 +275,7 @@ class _NotesScreenState extends State<NotesScreen> {
               ),
             Text(
               _noteWhen(note.updatedAt),
-              style: const TextStyle(color: AppColors.muted, fontSize: 12),
+              style: TextStyle(color: Appearance.of(context).muted, fontSize: 12),
             ),
           ],
         ),
@@ -395,7 +395,7 @@ class _NotesScreenState extends State<NotesScreen> {
                   hintText: 'Search notes…',
                   prefixIcon: const Icon(Icons.search),
                   filled: true,
-                  fillColor: AppColors.card,
+                  fillColor: Appearance.of(context).card,
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(10),
                     borderSide: BorderSide.none,
@@ -630,11 +630,11 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
               ),
             ),
             if (!_linksKnown)
-              const Padding(
+              Padding(
                 padding: EdgeInsets.only(bottom: 8),
                 child: Text(
                   'Links from the PC show up after this note syncs.',
-                  style: TextStyle(color: AppColors.muted, fontSize: 12),
+                  style: TextStyle(color: Appearance.of(context).muted, fontSize: 12),
                 ),
               ),
             Wrap(

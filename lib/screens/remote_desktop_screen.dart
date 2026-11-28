@@ -6,7 +6,7 @@ import 'package:flutter_webrtc/flutter_webrtc.dart';
 
 import '../services/stream_api_service.dart';
 import '../services/user_facing_error.dart';
-import '../theme/app_colors.dart';
+import '../theme/appearance.dart';
 
 class RemoteDesktopScreen extends StatefulWidget {
   final StreamApiService api;
@@ -244,7 +244,7 @@ class _RemoteDesktopScreenState extends State<RemoteDesktopScreen> {
           if (_error != null)
             Padding(
               padding: const EdgeInsets.all(8),
-              child: Text(_error!, style: const TextStyle(color: AppColors.accent)),
+              child: Text(_error!, style: TextStyle(color: Appearance.of(context).accent)),
             ),
           Expanded(
             child: LayoutBuilder(
@@ -278,19 +278,19 @@ class _RemoteDesktopScreenState extends State<RemoteDesktopScreen> {
             ),
           ),
           if (!widget.inputEnabled)
-            const Padding(
+            Padding(
               padding: EdgeInsets.all(12),
               child: Text(
                 'View-only — remote input is disabled on the PC.',
-                style: TextStyle(color: AppColors.muted, fontSize: 13),
+                style: TextStyle(color: Appearance.of(context).muted, fontSize: 13),
               ),
             )
           else
-            const Padding(
+            Padding(
               padding: EdgeInsets.all(12),
               child: Text(
                 'Drag to move the pointer. Double-tap for right click. Pinch to zoom.',
-                style: TextStyle(color: AppColors.muted, fontSize: 13),
+                style: TextStyle(color: Appearance.of(context).muted, fontSize: 13),
                 textAlign: TextAlign.center,
               ),
             ),

@@ -5,7 +5,7 @@ import '../services/stream_api_service.dart';
 import '../services/user_facing_error.dart';
 import '../services/wol_service.dart';
 import '../services/wol_relay_service.dart';
-import '../theme/app_colors.dart';
+import '../theme/appearance.dart';
 import 'home_leading.dart';
 import 'remote_desktop_screen.dart';
 
@@ -496,7 +496,7 @@ class _StreamServiceScreenState extends State<StreamServiceScreen> {
               padding: const EdgeInsets.all(16),
               children: [
                 if (_remoteError != null)
-                  Text(_remoteError!, style: const TextStyle(color: AppColors.muted, fontSize: 13)),
+                  Text(_remoteError!, style: TextStyle(color: Appearance.of(context).muted, fontSize: 13)),
                 _StatusCard(online: _online, status: _status, health: _health),
                 if (_wakeStatus != null)
                   Padding(
@@ -504,7 +504,7 @@ class _StreamServiceScreenState extends State<StreamServiceScreen> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        Text(_wakeStatus!, style: const TextStyle(color: AppColors.muted)),
+                        Text(_wakeStatus!, style: TextStyle(color: Appearance.of(context).muted)),
                         if (_wakeConnecting) ...[
                           const SizedBox(height: 8),
                           OutlinedButton(
@@ -534,15 +534,15 @@ class _StreamServiceScreenState extends State<StreamServiceScreen> {
                     _macController.text.trim().isEmpty
                         ? 'LAN wake not set up — tap the eye to enter MAC and broadcast.'
                         : 'LAN wake ready — details hidden. Tap the eye to view or edit.',
-                    style: const TextStyle(color: AppColors.muted, fontSize: 12),
+                    style: TextStyle(color: Appearance.of(context).muted, fontSize: 12),
                   ),
                   const SizedBox(height: 12),
                 ] else ...[
-                  const Text(
+                  Text(
                     'Phone must be on the same home Wi‑Fi as the PC. '
                     'Use your subnet broadcast (e.g. 192.168.1.255) — iOS may block 255.255.255.255. '
                     'Wake from sleep over Wi‑Fi depends on your adapter, driver, and Windows settings.',
-                    style: TextStyle(color: AppColors.muted, fontSize: 12),
+                    style: TextStyle(color: Appearance.of(context).muted, fontSize: 12),
                   ),
                   const SizedBox(height: 8),
                   TextField(
@@ -634,10 +634,10 @@ class _StreamServiceScreenState extends State<StreamServiceScreen> {
                 const SizedBox(height: 24),
                 Text('Home relay (away from Wi‑Fi)', style: Theme.of(context).textTheme.titleMedium),
                 const SizedBox(height: 6),
-                const Text(
+                Text(
                   'Your always-on laptop runs scripts/wol_relay.py on the home LAN and forwards wake packets. '
                   'Set its Tailscale name under Settings → WoL relay. Main hostname stays the desktop.',
-                  style: TextStyle(color: AppColors.muted, fontSize: 12),
+                  style: TextStyle(color: Appearance.of(context).muted, fontSize: 12),
                 ),
                 const SizedBox(height: 12),
                 OutlinedButton.icon(
@@ -667,9 +667,9 @@ class _StreamServiceScreenState extends State<StreamServiceScreen> {
                 Text('While PC is online (Tailscale)', style: Theme.of(context).textTheme.titleMedium),
                 const SizedBox(height: 8),
                 if (!_online)
-                  const Text(
+                  Text(
                     'Power buttons need the PC awake and Stream Service live (Remote Hub → Go Live).',
-                    style: TextStyle(color: AppColors.muted),
+                    style: TextStyle(color: Appearance.of(context).muted),
                   ),
                 if (_online && _caps != null && _caps!.remoteScreen) ...[
                   FilledButton.icon(
@@ -732,7 +732,7 @@ class _StatusCard extends StatelessWidget {
           children: [
             Icon(
               online ? Icons.cloud_done : Icons.cloud_off,
-              color: online ? AppColors.accentGlow : AppColors.muted,
+              color: online ? Appearance.of(context).accentGlow : Appearance.of(context).muted,
             ),
             const SizedBox(width: 12),
             Expanded(
@@ -743,7 +743,7 @@ class _StatusCard extends StatelessWidget {
                   if (status != null)
                     Text(
                       '${status!.hostname} · WoL ${status!.wolConfigured ? 'configured' : 'not set on PC'}',
-                      style: const TextStyle(color: AppColors.muted, fontSize: 13),
+                      style: TextStyle(color: Appearance.of(context).muted, fontSize: 13),
                     ),
                   if (online && health != null) ...[
                     const SizedBox(height: 6),
@@ -751,18 +751,18 @@ class _StatusCard extends StatelessWidget {
                       'Screen ${health!.screenStream ? 'on' : 'off'} · '
                       'Input ${health!.remoteInput ? 'on' : 'off'} · '
                       'WebRTC ${health!.webrtcAvailable ? (health!.webrtcActive ? 'live' : 'ready') : 'unavailable'}',
-                      style: const TextStyle(color: AppColors.muted, fontSize: 12),
+                      style: TextStyle(color: Appearance.of(context).muted, fontSize: 12),
                     ),
                     if (health!.webrtcError != null)
                       Text(
                         health!.webrtcError!,
-                        style: const TextStyle(color: AppColors.accent, fontSize: 11),
+                        style: TextStyle(color: Appearance.of(context).accent, fontSize: 11),
                       ),
                   ],
                   if (!online)
-                    const Text(
+                    Text(
                       'Tailscale / Stream Service not reachable — wake the PC or start remote on the desktop.',
-                      style: TextStyle(color: AppColors.muted, fontSize: 12),
+                      style: TextStyle(color: Appearance.of(context).muted, fontSize: 12),
                     ),
                 ],
               ),
