@@ -34,22 +34,25 @@ class LiveServerClient {
     return Uri(scheme: 'http', host: uri.host, port: uri.port);
   }
 
-  Future<Map<String, dynamic>> _get(String path, {bool authenticated = true}) async {
+  Future<Map<String, dynamic>> _get(String path, {bool authenticated = true, bool pairing = false}) async {
     final client = HttpClient()
       ..findProxy = (_) => 'DIRECT'
       ..connectionTimeout = const Duration(seconds: 5)
       ..autoUncompress = false;
     try {
-      final request = await client.getUrl(base.replace(path: path))
+      final request = await client.openUrl(pairing ? 'POST' : 'GET', base.replace(path: path))
           .timeout(const Duration(seconds: 6));
       request.followRedirects = false;
       request.headers.set(HttpHeaders.acceptHeader, 'application/json');
-      if (authenticated) {
+      if (pairing) {
+        request.contentLength = 0;
+        request.headers.set('X-Pairing-Code', _code);
+      } else if (authenticated) {
         request.headers.set(HttpHeaders.authorizationHeader, 'Bearer $_code');
       }
       final response = await request.close().timeout(const Duration(seconds: 6));
       if (response.statusCode == 401) {
-        throw const LiveServerException('Access code expired or incorrect. Copy the current code from ZMT.');
+        throw const LiveServerException('Access code expired, revoked or incorrect. Pair again from ZMT.');
       }
       if (response.statusCode != 200) {
         throw LiveServerException('Live Server returned HTTP ${response.statusCode}.');
@@ -69,6 +72,20 @@ class LiveServerClient {
     } finally {
       client.close(force: true);
     }
+  }
+
+  Future<Map<String, dynamic>> pair() async {
+    final status = await _get('/api/v1/status', authenticated: false);
+    if (status['protocol'] != 1 || status['auth_required'] != true) {
+      throw const LiveServerException('This is not a compatible ZMT Live Server.');
+    }
+    final data = await _get('/api/v1/pair', authenticated: false, pairing: true);
+    if (data['token'] is! String || data['device_id'] is! String) {
+      throw const LiveServerException('Invalid pairing response.');
+    }
+    // Validate before passing the credential to the secure store.
+    LiveServerClient(base.toString(), data['token'] as String);
+    return data;
   }
 
   Future<Map<String, dynamic>> connect() async {

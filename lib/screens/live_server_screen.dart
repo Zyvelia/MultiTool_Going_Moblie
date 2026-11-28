@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'dart:convert';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/live_server_client.dart';
@@ -15,6 +17,13 @@ class _LiveServerScreenState extends State<LiveServerScreen> with WidgetsBinding
   LiveServerClient? _client;
   Map<String, dynamic>? _state;
   Timer? _timer;
+  static const _storage = FlutterSecureStorage(
+    aOptions: AndroidOptions(migrateWithBackup: true),
+    iOptions: IOSOptions(accessibility: KeychainAccessibility.first_unlock),
+  );
+  static const _pairKey = 'zmt_live_pair_v1';
+  bool _paired = false;
+  bool _ready = false;
   bool _busy = false;
   bool _foreground = true;
   bool _showCode = false;
@@ -35,6 +44,21 @@ class _LiveServerScreenState extends State<LiveServerScreen> with WidgetsBinding
         _url.text = prefs.getString('live_server_url_v1') ?? '';
       }
     } catch (_) { /* Address persistence is optional. */ }
+    try {
+      final raw = await _storage.read(key: _pairKey);
+      if (!mounted) return;
+      if (raw != null) {
+        final saved = jsonDecode(raw) as Map<String, dynamic>;
+        final client = LiveServerClient(saved['url'] as String, saved['token'] as String);
+        _url.text = client.base.toString();
+        setState(() { _client = client; _paired = true; });
+        _schedule(Duration.zero);
+      }
+    } catch (_) {
+      if (mounted) setState(() { _paired = true; _error = 'Saved pairing could not be read. Forget pairing and pair again.'; });
+    } finally {
+      if (mounted) setState(() => _ready = true);
+    }
   }
 
   @override
@@ -60,13 +84,23 @@ class _LiveServerScreenState extends State<LiveServerScreen> with WidgetsBinding
     return 'Cannot reach ZMT. Check Tailscale on both devices, the server URL, and Windows firewall permissions.';
   }
 
-  Future<void> _connect() async {
+  Future<void> _connect({bool pair = false}) async {
     if (_busy) return;
     FocusScope.of(context).unfocus();
     final epoch = ++_epoch;
     setState(() { _busy = true; _error = null; _state = null; });
     try {
-      final client = LiveServerClient(_url.text, _code.text);
+      var client = LiveServerClient(_url.text, _code.text);
+      if (pair) {
+        final result = await client.pair();
+        client = LiveServerClient(client.base.toString(), result['token'] as String);
+        if (!mounted || epoch != _epoch) return;
+        await _storage.write(key: _pairKey, value: jsonEncode({
+          'url': client.base.toString(), 'token': result['token'],
+        }));
+        if (!mounted || epoch != _epoch) return;
+        setState(() { _paired = true; _client = client; });
+      }
       final data = await client.connect();
       if (!mounted || epoch != _epoch) return;
       setState(() { _client = client; _state = data; _code.clear(); _showCode = false; });
@@ -102,6 +136,7 @@ class _LiveServerScreenState extends State<LiveServerScreen> with WidgetsBinding
           _error = _message(e);
           if (e is LiveServerException && e.message.startsWith('Access code')) {
             _client = null;
+            // Keep the saved credential until the user explicitly forgets it.
           }
         });
       }
@@ -110,6 +145,37 @@ class _LiveServerScreenState extends State<LiveServerScreen> with WidgetsBinding
         setState(() => _busy = false);
         _schedule(_error == null ? const Duration(seconds: 3) : const Duration(seconds: 8));
       }
+    }
+  }
+
+  Future<void> _forgetPairing() async {
+    if (_busy) return;
+    _disconnect();
+    setState(() => _busy = true);
+    try {
+      await _storage.delete(key: _pairKey);
+      if (mounted) setState(() { _paired = false; _error = 'Local pairing forgotten. Revoke the device on PC too.'; });
+    } catch (_) {
+      if (mounted) setState(() => _error = 'Could not erase saved pairing.');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _reconnect() async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    try {
+      final raw = await _storage.read(key: _pairKey);
+      if (!mounted) return;
+      if (raw == null) throw const FormatException('No saved pairing. Pair again.');
+      final saved = jsonDecode(raw) as Map<String, dynamic>;
+      final client = LiveServerClient(saved['url'] as String, saved['token'] as String);
+      setState(() { _client = client; _url.text = client.base.toString(); _error = null; });
+    } catch (e) {
+      if (mounted) setState(() => _error = _message(e));
+    } finally {
+      if (mounted) { setState(() => _busy = false); _schedule(Duration.zero); }
     }
   }
 
@@ -140,6 +206,7 @@ class _LiveServerScreenState extends State<LiveServerScreen> with WidgetsBinding
 
   @override
   Widget build(BuildContext context) {
+    if (!_ready) return Scaffold(appBar: AppBar(title: const Text('ZMT Live Server')), body: const Center(child: CircularProgressIndicator()));
     final data = _state;
     final modules = (data?['modules'] as List? ?? const []).whereType<Map>();
     final media = data?['media'] as Map?;
@@ -153,26 +220,33 @@ class _LiveServerScreenState extends State<LiveServerScreen> with WidgetsBinding
             Text(data != null ? 'Connected' : connected ? 'Reconnecting' : 'Private connection',
                 style: Theme.of(context).textTheme.headlineSmall),
             const SizedBox(height: 8),
-            const Text('Connect both devices to Tailscale. On PC open ZMT → Live Server, select its Tailscale adapter, start the server and copy its URL and code.'),
+            const Text('Connect both devices to Tailscale. On PC open ZMT → Live Server, select its Tailscale adapter, start the server and copy its URL. Create a one-time pairing code under Paired devices.'),
             const SizedBox(height: 16),
-            if (!connected) ...[
+            if (!connected && !_paired) ...[
               TextField(controller: _url, enabled: !_busy,
                 keyboardType: TextInputType.url, autocorrect: false,
                 decoration: const InputDecoration(labelText: 'Live Server URL', hintText: 'http://100.64.1.23:8790', border: OutlineInputBorder())),
               const SizedBox(height: 12),
               TextField(controller: _code, enabled: !_busy, obscureText: !_showCode,
                 autocorrect: false, enableSuggestions: false,
-                decoration: InputDecoration(labelText: 'Session access code', border: const OutlineInputBorder(),
+                decoration: InputDecoration(labelText: 'Pairing or session code', border: const OutlineInputBorder(),
                   suffixIcon: IconButton(tooltip: _showCode ? 'Hide code' : 'Show code',
                     icon: Icon(_showCode ? Icons.visibility_off : Icons.visibility),
                     onPressed: () => setState(() => _showCode = !_showCode)))),
               const SizedBox(height: 12),
-              FilledButton.icon(onPressed: _busy ? null : _connect,
-                icon: const Icon(Icons.link), label: Text(_busy ? 'Connecting…' : 'Connect')),
-            ] else ...[
+              FilledButton.icon(onPressed: _busy ? null : () => _connect(pair: true),
+                icon: const Icon(Icons.link), label: Text(_busy ? 'Connecting…' : 'Pair this phone')),
+              TextButton(onPressed: _busy ? null : () => _connect(), child: const Text('Connect for this session only')),
+            ] else if (connected) ...[
               Text(_client!.base.toString()),
               const SizedBox(height: 8),
               OutlinedButton.icon(onPressed: _disconnect, icon: const Icon(Icons.link_off), label: const Text('Disconnect')),
+            ],
+            if (_paired) ...[
+              const SizedBox(height: 8),
+              const Text('Saved pairing · reconnects after PC restart'),
+              if (!connected) FilledButton(onPressed: _busy ? null : _reconnect, child: const Text('Reconnect saved device')),
+              TextButton(onPressed: _busy ? null : _forgetPairing, child: const Text('Forget pairing on phone')),
             ],
             if (_error != null) ...[const SizedBox(height: 12), Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.error))],
           ],
@@ -197,7 +271,7 @@ class _LiveServerScreenState extends State<LiveServerScreen> with WidgetsBinding
           const Text('Protocol 1 · Read-only status. Library streaming, remote actions and module data sync are not available yet.'),
         ],
         const SizedBox(height: 12),
-        const Text('The code is kept only while this screen is open. The PC rotates it on each server restart. Do not forward this port to the internet.'),
+        const Text('Pairing credentials are saved in secure storage; session codes are not. Revoke devices on PC. Use only your private Tailscale network; never forward this port.'),
       ]),
     );
   }
