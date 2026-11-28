@@ -12,6 +12,7 @@ import 'services/alarm_service.dart';
 import 'services/schedule_bootstrap.dart';
 import 'services/ai_push_service.dart';
 import 'theme/app_theme.dart';
+import 'theme/appearance.dart';
 
 /// App-wide navigator handle. Not used directly for the notification
 /// deep-link (switching tabs happens through [homeShellKey] instead,
@@ -93,10 +94,17 @@ class _MultiToolRemoteAppState extends State<MultiToolRemoteApp>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    AppearanceController.instance.addListener(_appearanceChanged);
+    unawaited(AppearanceController.instance.load());
+  }
+
+  void _appearanceChanged() {
+    if (mounted) setState(() {});
   }
 
   @override
   void dispose() {
+    AppearanceController.instance.removeListener(_appearanceChanged);
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
@@ -110,23 +118,28 @@ class _MultiToolRemoteAppState extends State<MultiToolRemoteApp>
 
   @override
   Widget build(BuildContext context) {
+    final appearance = AppearanceController.instance.value;
     return MaterialApp(
       navigatorKey: navigatorKey,
       title: "Zs Multi Tool Remote",
       debugShowCheckedModeBanner: false,
-      theme: AppTheme.dark(),
+      theme: AppTheme.dark(appearance),
+      themeAnimationDuration: appearance.animations ? const Duration(milliseconds: 180) : Duration.zero,
       scrollBehavior: const MaterialScrollBehavior().copyWith(
         physics: const BouncingScrollPhysics(),
       ),
       builder: (context, child) {
         return AnnotatedRegion<SystemUiOverlayStyle>(
-          value: const SystemUiOverlayStyle(
+          value: SystemUiOverlayStyle(
             statusBarColor: Colors.transparent,
             statusBarIconBrightness: Brightness.light,
-            systemNavigationBarColor: Color(0xFF10060C),
+            systemNavigationBarColor: appearance.surface,
             systemNavigationBarIconBrightness: Brightness.light,
           ),
-          child: child ?? const SizedBox.shrink(),
+          child: MediaQuery(
+            data: MediaQuery.of(context).copyWith(disableAnimations: MediaQuery.of(context).disableAnimations || !appearance.animations),
+            child: child ?? const SizedBox.shrink(),
+          ),
         );
       },
       home: HomeShell(key: homeShellKey),

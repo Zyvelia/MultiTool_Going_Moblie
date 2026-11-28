@@ -2,45 +2,46 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import 'app_colors.dart';
+import 'appearance.dart';
 
 class AppTheme {
   AppTheme._();
 
-  static ThemeData dark() {
-    const scheme = ColorScheme(
+  static ThemeData dark([Appearance palette = const Appearance()]) {
+    scheme = ColorScheme(
       brightness: Brightness.dark,
-      primary: AppColors.accent,
-      onPrimary: Color(0xFFFFFFFF),
-      primaryContainer: AppColors.wine,
-      onPrimaryContainer: AppColors.accentGlow,
-      secondary: AppColors.accentGlow,
+      primary: palette.accent,
+      onPrimary: palette.onAccent,
+      primaryContainer: palette.wine,
+      onPrimaryContainer: palette.accentGlow,
+      secondary: palette.accentGlow,
       onSecondary: Color(0xFF1A0010),
-      secondaryContainer: AppColors.accentMuted,
-      onSecondaryContainer: AppColors.accentGlow,
+      secondaryContainer: palette.accentMuted,
+      onSecondaryContainer: palette.accentGlow,
       tertiary: Color(0xFFF38BDB),
       onTertiary: Color(0xFF1A0010),
       error: Color(0xFFFF4D6D),
       onError: Color(0xFFFFFFFF),
-      surface: AppColors.card,
-      onSurface: AppColors.onSurface,
-      onSurfaceVariant: AppColors.muted,
-      outline: AppColors.border,
+      surface: palette.card,
+      onSurface: palette.onSurface,
+      onSurfaceVariant: palette.muted,
+      outline: palette.border,
       outlineVariant: Color(0xFF2A1C3A),
       shadow: Color(0xFF000000),
       scrim: Color(0xFF000000),
-      inverseSurface: AppColors.onSurface,
-      onInverseSurface: AppColors.bg,
-      inversePrimary: Color(0xFF6528A1),
-      surfaceTint: AppColors.accent,
+      inverseSurface: palette.onSurface,
+      onInverseSurface: palette.bg,
+      inversePrimary: palette.accent,
+      surfaceTint: palette.accent,
     );
 
     return ThemeData(
       useMaterial3: true,
+      extensions: [palette],
       brightness: Brightness.dark,
       colorScheme: scheme,
       visualDensity: VisualDensity.adaptivePlatformDensity,
-      pageTransitionsTheme: const PageTransitionsTheme(
+      pageTransitionsTheme: palette.animations ? PageTransitionsTheme(
         builders: {
           TargetPlatform.android: ZoomPageTransitionsBuilder(),
           TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
@@ -48,162 +49,172 @@ class AppTheme {
           TargetPlatform.windows: FadeUpwardsPageTransitionsBuilder(),
           TargetPlatform.linux: FadeUpwardsPageTransitionsBuilder(),
         },
-      ),
-      scaffoldBackgroundColor: AppColors.bg,
-      canvasColor: AppColors.bg,
-      dividerColor: AppColors.border,
-      splashColor: const Color(0x33B96BFF),
-      highlightColor: const Color(0x22B96BFF),
-      iconTheme: const IconThemeData(color: AppColors.onSurface),
-      appBarTheme: const AppBarTheme(
-        backgroundColor: AppColors.surface,
-        foregroundColor: AppColors.onSurface,
+      ) : PageTransitionsTheme(builders: {
+        for (final platform in TargetPlatform.values) platform: const _InstantTransitions(),
+      }),
+      scaffoldBackgroundColor: palette.bg,
+      canvasColor: palette.bg,
+      dividerColor: palette.border,
+      splashColor: palette.accent.withValues(alpha: 0.20),
+      highlightColor: palette.accent.withValues(alpha: 0.13),
+      iconTheme: IconThemeData(color: palette.onSurface),
+      appBarTheme: AppBarTheme(
+        backgroundColor: palette.surface,
+        foregroundColor: palette.onSurface,
         elevation: 0,
         centerTitle: false,
-        titleTextStyle: TextStyle(color: AppColors.onSurface, fontSize: 21, fontWeight: FontWeight.w700),
+        titleTextStyle: TextStyle(color: palette.onSurface, fontSize: 21, fontWeight: FontWeight.w700),
         surfaceTintColor: Colors.transparent,
         systemOverlayStyle: SystemUiOverlayStyle(
           statusBarColor: Colors.transparent,
           statusBarIconBrightness: Brightness.light,
-          systemNavigationBarColor: AppColors.surface,
+          systemNavigationBarColor: palette.surface,
           systemNavigationBarIconBrightness: Brightness.light,
         ),
       ),
-      cardTheme: const CardThemeData(
-        color: AppColors.card,
+      cardTheme: CardThemeData(
+        color: palette.card,
         elevation: 0,
         surfaceTintColor: Colors.transparent,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.all(Radius.circular(16)),
-          side: BorderSide(color: AppColors.border),
+          side: BorderSide(color: palette.border),
         ),
       ),
-      dialogTheme: const DialogThemeData(
-        backgroundColor: AppColors.card,
+      dialogTheme: DialogThemeData(
+        backgroundColor: palette.card,
         surfaceTintColor: Colors.transparent,
       ),
-      bottomSheetTheme: const BottomSheetThemeData(
-        backgroundColor: AppColors.card,
+      bottomSheetTheme: BottomSheetThemeData(
+        backgroundColor: palette.card,
         surfaceTintColor: Colors.transparent,
         showDragHandle: true,
       ),
       navigationBarTheme: NavigationBarThemeData(
-        backgroundColor: AppColors.surface,
-        indicatorColor: AppColors.wine,
+        backgroundColor: palette.surface,
+        indicatorColor: palette.wine,
         surfaceTintColor: Colors.transparent,
         labelBehavior: NavigationDestinationLabelBehavior.onlyShowSelected,
         iconTheme: WidgetStateProperty.resolveWith((states) {
           if (states.contains(WidgetState.selected)) {
-            return const IconThemeData(color: AppColors.accent);
+            return IconThemeData(color: palette.accent);
           }
-          return const IconThemeData(color: AppColors.muted);
+          return IconThemeData(color: palette.muted);
         }),
         labelTextStyle: WidgetStateProperty.resolveWith((states) {
           final selected = states.contains(WidgetState.selected);
           return TextStyle(
-            color: selected ? AppColors.accent : AppColors.muted,
+            color: selected ? palette.accent : palette.muted,
             fontSize: 12,
             fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
           );
         }),
       ),
       chipTheme: ChipThemeData(
-        backgroundColor: AppColors.card,
-        disabledColor: AppColors.card,
-        selectedColor: AppColors.accentMuted,
-        secondarySelectedColor: AppColors.accentMuted,
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+        backgroundColor: palette.card,
+        disabledColor: palette.card,
+        selectedColor: palette.accentMuted,
+        secondarySelectedColor: palette.accentMuted,
+        padding: EdgeInsets.symmetric(horizontal: 8, vertical: 2),
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(14),
-          side: const BorderSide(color: AppColors.border),
+          side: BorderSide(color: palette.border),
         ),
-        labelStyle: const TextStyle(color: AppColors.onSurface),
-        secondaryLabelStyle: const TextStyle(color: AppColors.accent),
+        labelStyle: TextStyle(color: palette.onSurface),
+        secondaryLabelStyle: TextStyle(color: palette.accent),
         brightness: Brightness.dark,
       ),
-      floatingActionButtonTheme: const FloatingActionButtonThemeData(
-        backgroundColor: AppColors.accent,
-        foregroundColor: Colors.white,
+      floatingActionButtonTheme: FloatingActionButtonThemeData(
+        backgroundColor: palette.accent,
+        foregroundColor: palette.onAccent,
       ),
       filledButtonTheme: FilledButtonThemeData(
         style: FilledButton.styleFrom(
-          backgroundColor: AppColors.accent,
-          foregroundColor: Colors.white,
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          backgroundColor: palette.accent,
+          foregroundColor: palette.onAccent,
+          padding: EdgeInsets.symmetric(horizontal: 16, vertical: 14),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         ),
       ),
       outlinedButtonTheme: OutlinedButtonThemeData(
         style: OutlinedButton.styleFrom(
-          foregroundColor: AppColors.onSurface,
-          side: const BorderSide(color: AppColors.border),
-          backgroundColor: AppColors.card,
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          foregroundColor: palette.onSurface,
+          side: BorderSide(color: palette.border),
+          backgroundColor: palette.card,
+          padding: EdgeInsets.symmetric(horizontal: 16, vertical: 14),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         ),
       ),
       elevatedButtonTheme: ElevatedButtonThemeData(
         style: ElevatedButton.styleFrom(
-          backgroundColor: AppColors.accent,
-          foregroundColor: Colors.white,
+          backgroundColor: palette.accent,
+          foregroundColor: palette.onAccent,
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         ),
       ),
-      listTileTheme: const ListTileThemeData(
-        iconColor: AppColors.accentGlow,
-        textColor: AppColors.onSurface,
+      listTileTheme: ListTileThemeData(
+        iconColor: palette.accentGlow,
+        textColor: palette.onSurface,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.all(Radius.circular(12)),
         ),
       ),
-      progressIndicatorTheme: const ProgressIndicatorThemeData(
-        color: AppColors.accent,
+      progressIndicatorTheme: ProgressIndicatorThemeData(
+        color: palette.accent,
       ),
-      sliderTheme: const SliderThemeData(
-        activeTrackColor: AppColors.accent,
-        thumbColor: AppColors.accent,
-        inactiveTrackColor: Color(0x44B96BFF),
+      sliderTheme: SliderThemeData(
+        activeTrackColor: palette.accent,
+        thumbColor: palette.accent,
+        inactiveTrackColor: palette.accent.withValues(alpha: 0.27),
       ),
       switchTheme: SwitchThemeData(
         thumbColor: WidgetStateProperty.resolveWith((states) {
-          if (states.contains(WidgetState.selected)) return AppColors.accent;
-          return AppColors.muted;
+          if (states.contains(WidgetState.selected)) return palette.accent;
+          return palette.muted;
         }),
         trackColor: WidgetStateProperty.resolveWith((states) {
-          if (states.contains(WidgetState.selected)) return AppColors.wine;
-          return AppColors.border;
+          if (states.contains(WidgetState.selected)) return palette.wine;
+          return palette.border;
         }),
       ),
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
-        fillColor: AppColors.card,
-        hintStyle: const TextStyle(color: AppColors.muted),
-        prefixIconColor: AppColors.muted,
-        suffixIconColor: AppColors.muted,
-        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+        fillColor: palette.card,
+        hintStyle: TextStyle(color: palette.muted),
+        prefixIconColor: palette.muted,
+        suffixIconColor: palette.muted,
+        contentPadding: EdgeInsets.symmetric(horizontal: 14, vertical: 14),
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(16),
           borderSide: BorderSide.none,
         ),
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(16),
-          borderSide: const BorderSide(color: AppColors.border),
+          borderSide: BorderSide(color: palette.border),
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(16),
-          borderSide: const BorderSide(color: AppColors.accent, width: 1.4),
+          borderSide: BorderSide(color: palette.accent, width: 1.4),
         ),
       ),
-      snackBarTheme: const SnackBarThemeData(
-        backgroundColor: AppColors.card,
-        contentTextStyle: TextStyle(color: AppColors.onSurface),
+      snackBarTheme: SnackBarThemeData(
+        backgroundColor: palette.card,
+        contentTextStyle: TextStyle(color: palette.onSurface),
         behavior: SnackBarBehavior.floating,
       ),
-      dividerTheme: const DividerThemeData(color: AppColors.border),
+      dividerTheme: DividerThemeData(color: palette.border),
       scrollbarTheme: ScrollbarThemeData(
-        thumbColor: WidgetStateProperty.all(const Color(0x88B96BFF)),
-        radius: const Radius.circular(999),
+        thumbColor: WidgetStateProperty.all(palette.accent.withValues(alpha: 0.53)),
+        radius: Radius.circular(999),
       ),
     );
   }
+}
+
+class _InstantTransitions extends PageTransitionsBuilder {
+  const _InstantTransitions();
+
+  @override
+  Widget buildTransitions<T>(PageRoute<T> route, BuildContext context,
+      Animation<double> animation, Animation<double> secondaryAnimation, Widget child) => child;
 }

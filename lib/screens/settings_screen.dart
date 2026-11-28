@@ -1,3 +1,4 @@
+import 'appearance_screen.dart';
 import 'package:flutter/material.dart';
 import '../models/server_profile.dart';
 import '../services/device_trust_service.dart';
@@ -218,6 +219,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
       body: ListView(
         padding: const EdgeInsets.all(20),
         children: [
+          Card(
+            margin: const EdgeInsets.only(bottom: 20),
+            clipBehavior: Clip.antiAlias,
+            child: ListTile(
+              leading: Icon(Icons.palette_outlined, color: Theme.of(context).colorScheme.primary),
+              title: const Text('Appearance Studio', style: TextStyle(fontWeight: FontWeight.w700)),
+              subtitle: const Text('Themes, accent colors, glow and motion'),
+              trailing: const Icon(Icons.chevron_right_rounded),
+              onTap: () => Navigator.of(context).push(MaterialPageRoute(
+                builder: (_) => const AppearanceScreen(),
+              )),
+            ),
+          ),
           const Text(
             'Enter your PC\'s Tailscale hostname — the same one shown in '
             'each module\'s Settings tab when Remote Access is on. '
