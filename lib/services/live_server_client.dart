@@ -34,16 +34,17 @@ class LiveServerClient {
     return Uri(scheme: 'http', host: uri.host, port: uri.port);
   }
 
-  Future<Map<String, dynamic>> _get(String path, {bool authenticated = true, bool pairing = false}) async {
+  Future<Map<String, dynamic>> _get(String path, {bool authenticated = true, bool pairing = false, bool post = false, Map<String, String>? query}) async {
     final client = HttpClient()
       ..findProxy = (_) => 'DIRECT'
       ..connectionTimeout = const Duration(seconds: 5)
       ..autoUncompress = false;
     try {
-      final request = await client.openUrl(pairing ? 'POST' : 'GET', base.replace(path: path))
+      final request = await client.openUrl(pairing || post ? 'POST' : 'GET', base.replace(path: path, queryParameters: query))
           .timeout(const Duration(seconds: 6));
       request.followRedirects = false;
       request.headers.set(HttpHeaders.acceptHeader, 'application/json');
+      if (post) request.contentLength = 0;
       if (pairing) {
         request.contentLength = 0;
         request.headers.set('X-Pairing-Code', _code);
@@ -98,6 +99,46 @@ class LiveServerClient {
       throw const LiveServerException('Unsupported protocol version.');
     }
     return state();
+  }
+
+  Future<Map<String, dynamic>> capabilities() => _get('/api/v1/capabilities');
+
+  Future<Map<String, dynamic>> musicLibrary({String query = '', int offset = 0}) =>
+      _get('/api/v1/music/library', query: {'q': query, 'offset': '$offset', 'limit': '50'});
+
+  static bool validTrackId(String id) => RegExp(r'^[0-9a-f]{64}
+    final data = await _get('/api/v1/state');
+    if (data['version'] is! String || data['modules'] is! List ||
+        (data['media'] != null && data['media'] is! Map)) {
+      throw const LiveServerException('Invalid Live Server state.');
+    }
+    return data;
+  }
+}
+
+class LiveServerException implements Exception {
+  const LiveServerException(this.message);
+  final String message;
+  @override
+  String toString() => message;
+}
+).hasMatch(id);
+  Uri musicUri(String id) {
+    if (!validTrackId(id)) throw const FormatException('Invalid track ID.');
+    return base.replace(path: '/api/v1/music/stream', queryParameters: {'id': id});
+  }
+  Map<String, String> get musicHeaders => {'Authorization': 'Bearer $_code'};
+
+  Future<void> musicControl(String action, {String? id, double? value}) async {
+    if (!const {'play','pause','next','previous','seek','play_track'}.contains(action)) {
+      throw const FormatException('Unknown music action.');
+    }
+    if (id != null && !validTrackId(id)) throw const FormatException('Invalid track ID.');
+    await _get('/api/v1/music/control', post: true, query: {
+      'action': action,
+      if (id != null) 'id': id,
+      if (value != null) 'value': '$value',
+    });
   }
 
   Future<Map<String, dynamic>> state() async {

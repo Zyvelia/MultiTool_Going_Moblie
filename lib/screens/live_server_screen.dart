@@ -4,6 +4,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/live_server_client.dart';
+import 'live_music_screen.dart';
 
 class LiveServerScreen extends StatefulWidget {
   const LiveServerScreen({super.key});
@@ -253,6 +254,19 @@ class _LiveServerScreenState extends State<LiveServerScreen> with WidgetsBinding
         ))),
         if (data != null) ...[
           const SizedBox(height: 12),
+          FilledButton.icon(
+            onPressed: () async {
+              final client = _client;
+              if (client == null) return;
+              _timer?.cancel();
+              await Navigator.of(context).push(MaterialPageRoute(
+                builder: (_) => LiveMusicScreen(client: client),
+              ));
+              if (mounted) _schedule(Duration.zero);
+            },
+            icon: const Icon(Icons.library_music_outlined),
+            label: const Text('Open live music'),
+          ),
           Text('Desktop · v${data['version']}', style: Theme.of(context).textTheme.titleLarge),
           const SizedBox(height: 8),
           Card(child: ListTile(leading: const Icon(Icons.music_note),
@@ -268,7 +282,7 @@ class _LiveServerScreenState extends State<LiveServerScreen> with WidgetsBinding
               subtitle: Text('v${module['version'] ?? '?'}'),
               trailing: Text(module['active'] == true ? 'Active' : 'Installed'))),
           const SizedBox(height: 12),
-          const Text('Protocol 1 · Read-only status. Library streaming, remote actions and module data sync are not available yet.'),
+          const Text('Protocol 1 · Music is available with a paired device and separate PC permissions. Other modules currently expose status only.'),
         ],
         const SizedBox(height: 12),
         const Text('Pairing credentials are saved in secure storage; session codes are not. Revoke devices on PC. Use only your private Tailscale network; never forward this port.'),
