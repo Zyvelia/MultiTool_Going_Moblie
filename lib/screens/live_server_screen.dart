@@ -1,5 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
+import 'package:flutter/services.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -22,6 +24,10 @@ class _LiveServerScreenState extends State<LiveServerScreen> with WidgetsBinding
   final _code = TextEditingController();
   LiveServerClient? _client;
   Map<String, dynamic>? _state;
+  Map<String,dynamic> _caps = {};
+  bool _childOpen = false;
+  int _failures = 0;
+  int? _latency;
   Timer? _timer;
   static const _storage = FlutterSecureStorage(
     aOptions: AndroidOptions(migrateWithBackup: true),
@@ -79,7 +85,7 @@ class _LiveServerScreenState extends State<LiveServerScreen> with WidgetsBinding
 
   void _schedule([Duration delay = const Duration(seconds: 3)]) {
     _timer?.cancel();
-    if (mounted && _foreground && _client != null) {
+    if (mounted && _foreground && !_childOpen && _client != null) {
       _timer = Timer(delay, () => unawaited(_refresh()));
     }
   }
@@ -87,6 +93,8 @@ class _LiveServerScreenState extends State<LiveServerScreen> with WidgetsBinding
   String _message(Object e) {
     if (e is FormatException) return e.message;
     if (e is LiveServerException) return e.message;
+    if (e is HandshakeException) return 'HTTPS certificate verification failed. Check the trusted certificate and IP match. No HTTP fallback.';
+    if (e is TimeoutException) return 'Connection timed out. Check Tailscale, PC listener and Windows firewall.';
     return 'Cannot reach ZMT. Check Tailscale on both devices, the server URL, and Windows firewall permissions.';
   }
 
@@ -107,9 +115,11 @@ class _LiveServerScreenState extends State<LiveServerScreen> with WidgetsBinding
         if (!mounted || epoch != _epoch) return;
         setState(() { _paired = true; _client = client; });
       }
+      final watch = Stopwatch()..start();
       final data = await client.connect();
+      final caps = await client.capabilities();
       if (!mounted || epoch != _epoch) return;
-      setState(() { _client = client; _state = data; _code.clear(); _showCode = false; });
+      setState(() { _client = client; _state = data; _caps = caps; _failures = 0; _latency = watch.elapsedMilliseconds; _code.clear(); _showCode = false; });
       try {
         final prefs = await SharedPreferences.getInstance();
         await prefs.setString('live_server_url_v1', client.base.toString());
@@ -126,19 +136,21 @@ class _LiveServerScreenState extends State<LiveServerScreen> with WidgetsBinding
 
   Future<void> _refresh() async {
     final client = _client;
-    if (client == null || !_foreground) return;
+    if (client == null || !_foreground || _childOpen) return;
     if (_busy) { _schedule(); return; }
     final epoch = _epoch;
     _busy = true;
     try {
+      final watch = Stopwatch()..start();
       final data = await client.state();
+      final caps = await client.capabilities();
       if (mounted && epoch == _epoch) {
-        setState(() { _state = data; _error = null; });
+        setState(() { _state = data; _caps = caps; _error = null; _failures = 0; _latency = watch.elapsedMilliseconds; });
       }
     } catch (e) {
       if (mounted && epoch == _epoch) {
         setState(() {
-          _state = null;
+          _state = null; _caps = {}; _latency = null; _failures = (_failures + 1).clamp(0, 4).toInt();
           _error = _message(e);
           if (e is LiveServerException && e.message.startsWith('Access code')) {
             _client = null;
@@ -149,7 +161,7 @@ class _LiveServerScreenState extends State<LiveServerScreen> with WidgetsBinding
     } finally {
       if (mounted && epoch == _epoch) {
         setState(() => _busy = false);
-        _schedule(_error == null ? const Duration(seconds: 3) : const Duration(seconds: 8));
+        _schedule(_error == null ? const Duration(seconds: 3) : Duration(seconds: _error!.contains('throttled') ? 60 : 4 * (1 << _failures)));
       }
     }
   }
@@ -189,7 +201,7 @@ class _LiveServerScreenState extends State<LiveServerScreen> with WidgetsBinding
     ++_epoch;
     _timer?.cancel();
     setState(() {
-      _client = null; _state = null; _error = null; _busy = false;
+      _client = null; _state = null; _caps = {}; _latency = null; _failures = 0; _error = null; _busy = false;
       _code.clear(); _showCode = false;
     });
   }
@@ -210,6 +222,27 @@ class _LiveServerScreenState extends State<LiveServerScreen> with WidgetsBinding
     return '${s ~/ 60}:${(s % 60).toString().padLeft(2, '0')}';
   }
 
+  bool _has(String key) => _caps[key] == true;
+
+  Future<void> _open(Widget page) async {
+    if (_childOpen || !mounted) return;
+    _childOpen = true; _timer?.cancel();
+    try { await Navigator.of(context).push(MaterialPageRoute(builder: (_) => page)); }
+    finally { _childOpen = false; if (mounted) _schedule(Duration.zero); }
+  }
+
+  Future<void> _copyDiagnostics() async {
+    final text = 'Live Server protocol 1\n'
+      'Desktop version: ${_state?['version'] ?? 'Unavailable'}\n'
+      'Transport: ${_client?.base.scheme ?? 'Not connected'}\n'
+      'Status: ${_state != null ? 'Connected' : 'Disconnected'}\n'
+      'Last refresh: ${_latency == null ? 'Unavailable' : '$_latency ms'}\n'
+      'Paired: $_paired\n'
+      'Error: ${_error ?? 'None'}';
+    await Clipboard.setData(ClipboardData(text: text));
+    if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Redacted diagnostics copied.')));
+  }
+
   @override
   Widget build(BuildContext context) {
     if (!_ready) return Scaffold(appBar: AppBar(title: const Text('ZMT Live Server')), body: const Center(child: CircularProgressIndicator()));
@@ -218,7 +251,7 @@ class _LiveServerScreenState extends State<LiveServerScreen> with WidgetsBinding
     final media = data?['media'] as Map?;
     final connected = _client != null;
     return Scaffold(
-      appBar: AppBar(title: const Text('ZMT Live Server')),
+      appBar: AppBar(title: const Text('ZMT Live Server'), actions: [IconButton(tooltip: 'Copy connection diagnostics', onPressed: _copyDiagnostics, icon: const Icon(Icons.info_outline))]),
       body: ListView(padding: const EdgeInsets.all(16), children: [
         Card(child: Padding(padding: const EdgeInsets.all(16), child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -245,6 +278,7 @@ class _LiveServerScreenState extends State<LiveServerScreen> with WidgetsBinding
               TextButton(onPressed: _busy ? null : () => _connect(), child: const Text('Connect for this session only')),
             ] else if (connected) ...[
               Text(_client!.base.toString()),
+              Text('Transport: ${_client!.base.scheme.toUpperCase()} · ${_latency == null ? 'Waiting for response' : '$_latency ms refresh'}'),
               const SizedBox(height: 8),
               OutlinedButton.icon(onPressed: _disconnect, icon: const Icon(Icons.link_off), label: const Text('Disconnect')),
             ],
@@ -259,74 +293,54 @@ class _LiveServerScreenState extends State<LiveServerScreen> with WidgetsBinding
         ))),
         if (data != null) ...[
           const SizedBox(height: 12),
-          FilledButton.icon(
+          if (_has('music_streaming') || _has('remote_actions')) FilledButton.icon(
             onPressed: () async {
               final client = _client;
               if (client == null) return;
-              _timer?.cancel();
-              await Navigator.of(context).push(MaterialPageRoute(
-                builder: (_) => LiveMusicScreen(client: client),
-              ));
-              if (mounted) _schedule(Duration.zero);
+              await _open(LiveMusicScreen(client: client));
             },
             icon: const Icon(Icons.library_music_outlined),
             label: const Text('Open live music'),
           ),
-          OutlinedButton.icon(
+          if (_has('notes_read') || _has('notes_edit')) OutlinedButton.icon(
             onPressed: () async {
               final client = _client;
               if (client == null) return;
-              _timer?.cancel();
-              await Navigator.of(context).push(MaterialPageRoute(
-                builder: (_) => LiveExchangeScreen(client: client, notes: true)));
-              if (mounted) _schedule(Duration.zero);
+              await _open(LiveExchangeScreen(client: client, notes: true));
             }, icon: const Icon(Icons.note_alt_outlined), label: const Text('Open live notes')),
-          OutlinedButton.icon(
+          if (_has('files_download') || _has('files_upload')) OutlinedButton.icon(
             onPressed: () async {
               final client = _client;
               if (client == null) return;
-              _timer?.cancel();
-              await Navigator.of(context).push(MaterialPageRoute(
-                builder: (_) => LiveExchangeScreen(client: client, notes: false)));
-              if (mounted) _schedule(Duration.zero);
+              await _open(LiveExchangeScreen(client: client, notes: false));
             }, icon: const Icon(Icons.swap_horiz), label: const Text('Open live Quick Send')),
-          OutlinedButton.icon(
+          if (_has('hardware_read')) OutlinedButton.icon(
             onPressed: () async {
               final client = _client;
               if (client == null) return;
-              _timer?.cancel();
-              await Navigator.of(context).push(MaterialPageRoute(
-                builder: (_) => LiveHardwareScreen(client: client)));
-              if (mounted) _schedule(Duration.zero);
+              await _open(LiveHardwareScreen(client: client));
             }, icon: const Icon(Icons.monitor_heart_outlined),
             label: const Text('Open live system monitor')),
-          OutlinedButton.icon(
+          if (_has('ai_chat')) OutlinedButton.icon(
             onPressed: () async {
               final client = _client;
               if (client == null) return;
-              _timer?.cancel();
-              await Navigator.of(context).push(MaterialPageRoute(
-                builder: (_) => LiveAiScreen(client: client)));
-              if (mounted) _schedule(Duration.zero);
+              await _open(LiveAiScreen(client: client));
             }, icon: const Icon(Icons.chat_bubble_outline), label: const Text('Open live AI chat')),
-          OutlinedButton.icon(
+          if (_has('games_read') || _has('roms_read')) OutlinedButton.icon(
             onPressed: () async {
               final client = _client;
               if (client == null) return;
-              _timer?.cancel();
-              await Navigator.of(context).push(MaterialPageRoute(
-                builder: (_) => LiveGamingScreen(client: client)));
-              if (mounted) _schedule(Duration.zero);
+              await _open(LiveGamingScreen(client: client));
             }, icon: const Icon(Icons.sports_esports_outlined), label: const Text('Open live gaming')),
-          OutlinedButton.icon(
+          if (_has('servers_read')) OutlinedButton.icon(
             onPressed: () async {
               final client = _client;
               if (client == null) return;
-              _timer?.cancel();
-              await Navigator.of(context).push(MaterialPageRoute(
-                builder: (_) => LiveGameServersScreen(client: client)));
-              if (mounted) _schedule(Duration.zero);
+              await _open(LiveGameServersScreen(client: client));
             }, icon: const Icon(Icons.dns_outlined), label: const Text('Open live game servers')),
+          if (!_caps.entries.any((entry) => const {'music_streaming','remote_actions','notes_read','notes_edit','files_download','files_upload','hardware_read','ai_chat','games_read','roms_read','servers_read'}.contains(entry.key) && entry.value == true))
+            const Text('No remote tools enabled. Grant device permissions and enable sharing on the PC.'),
           Text('Desktop · v${data['version']}', style: Theme.of(context).textTheme.titleLarge),
           const SizedBox(height: 8),
           Card(child: ListTile(leading: const Icon(Icons.music_note),

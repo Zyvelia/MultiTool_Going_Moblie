@@ -19,11 +19,11 @@ class LiveServerClient {
   static Uri parseAddress(String input) {
     final value = input.trim();
     final uri = Uri.tryParse(value);
-    if (uri == null || uri.scheme != 'http' || !uri.hasAuthority ||
+    if (uri == null || (uri.scheme != 'http' && uri.scheme != 'https') || !uri.hasAuthority ||
         uri.userInfo.isNotEmpty || uri.hasQuery || uri.hasFragment ||
         (uri.path.isNotEmpty && uri.path != '/') || !uri.hasPort ||
         uri.port < 1024 || uri.port > 65535) {
-      throw const FormatException('Use the exact HTTP Tailscale URL and port shown by ZMT.');
+      throw const FormatException('Use the exact HTTP or HTTPS Tailscale URL and port shown by ZMT.');
     }
     final ip = InternetAddress.tryParse(uri.host);
     final bytes = ip?.rawAddress;
@@ -31,7 +31,7 @@ class LiveServerClient {
         bytes[1] < 64 || bytes[1] > 127 || ip!.address != uri.host) {
       throw const FormatException('Only literal Tailscale IPv4 addresses (100.64.0.0/10) are supported.');
     }
-    return Uri(scheme: 'http', host: uri.host, port: uri.port);
+    return Uri(scheme: uri.scheme, host: uri.host, port: uri.port);
   }
 
   Future<Map<String, dynamic>> _get(String path, {bool authenticated = true, bool pairing = false, bool post = false, Map<String, String>? query, List<int>? payload, String? contentType}) async {
@@ -59,6 +59,12 @@ class LiveServerClient {
       if (response.statusCode == 401) {
         throw const LiveServerException('Access code expired, revoked or incorrect. Pair again from ZMT.');
       }
+      if (response.statusCode == 429) {
+        throw const LiveServerException('Server busy or authentication throttled. Wait one minute before retrying.');
+      }
+      if (response.statusCode == 403) {
+        throw const LiveServerException('Permission denied. Check the device and session sharing switches on PC.');
+      }
       if (response.statusCode != 200) {
         throw LiveServerException('Live Server returned HTTP ${response.statusCode}.');
       }
@@ -80,7 +86,7 @@ class LiveServerClient {
   }
 
   Future<Map<String, dynamic>> pair() async {
-    final status = await _get('/api/v1/status', authenticated: false);
+    final status = await diagnosticStatus();
     if (status['protocol'] != 1 || status['auth_required'] != true) {
       throw const LiveServerException('This is not a compatible ZMT Live Server.');
     }
@@ -94,39 +100,38 @@ class LiveServerClient {
   }
 
   Future<Map<String, dynamic>> connect() async {
-    final status = await _get('/api/v1/status', authenticated: false);
+    final status = await diagnosticStatus();
     if (status['protocol'] != 1 || status['status'] != 'ok' || status['auth_required'] != true) {
       throw const LiveServerException('This is not a compatible ZMT Live Server.');
     }
-    final capabilities = await _get('/api/v1/capabilities');
+    final capabilities = await this.capabilities();
     if (capabilities['protocol'] != 1) {
       throw const LiveServerException('Unsupported protocol version.');
     }
     return state();
   }
 
-  Future<Map<String, dynamic>> capabilities() => _get('/api/v1/capabilities');
+  Future<Map<String, dynamic>> capabilities() async {
+    final data = await _get('/api/v1/capabilities');
+    if (data['protocol'] != 1) throw const LiveServerException('Unsupported Live Server protocol. Update ZMT and mobile together.');
+    return data;
+  }
+
+  Future<Map<String, dynamic>> diagnosticStatus() async {
+    final data = await _get('/api/v1/status', authenticated: false);
+    if (data['protocol'] != 1 || data['status'] != 'ok' || data['auth_required'] != true) {
+      throw const LiveServerException('Incompatible Live Server protocol.');
+    }
+    if (data['transport'] != null && data['transport'] != base.scheme) {
+      throw const LiveServerException('Transport mismatch.');
+    }
+    return data;
+  }
 
   Future<Map<String, dynamic>> musicLibrary({String query = '', int offset = 0}) =>
       _get('/api/v1/music/library', query: {'q': query, 'offset': '$offset', 'limit': '50'});
 
-  static bool validTrackId(String id) => RegExp(r'^[0-9a-f]{64}
-    final data = await _get('/api/v1/state');
-    if (data['version'] is! String || data['modules'] is! List ||
-        (data['media'] != null && data['media'] is! Map)) {
-      throw const LiveServerException('Invalid Live Server state.');
-    }
-    return data;
-  }
-}
-
-class LiveServerException implements Exception {
-  const LiveServerException(this.message);
-  final String message;
-  @override
-  String toString() => message;
-}
-).hasMatch(id);
+  static bool validTrackId(String id) => RegExp(r'^[0-9a-f]{64}$').hasMatch(id);
   Uri musicUri(String id) {
     if (!validTrackId(id)) throw const FormatException('Invalid track ID.');
     return base.replace(path: '/api/v1/music/stream', queryParameters: {'id': id});
@@ -188,25 +193,7 @@ class LiveServerException implements Exception {
       contentType: 'application/json',
       payload: utf8.encode(jsonEncode({'model':model,'messages':messages})));
     final id = result['id'];
-    if (id is! String || !RegExp(r'^[0-9a-f]{32} => _get('/api/v1/hardware');
-
-  Future<Map<String, dynamic>> state() async {
-    final data = await _get('/api/v1/state');
-    if (data['version'] is! String || data['modules'] is! List ||
-        (data['media'] != null && data['media'] is! Map)) {
-      throw const LiveServerException('Invalid Live Server state.');
-    }
-    return data;
-  }
-}
-
-class LiveServerException implements Exception {
-  const LiveServerException(this.message);
-  final String message;
-  @override
-  String toString() => message;
-}
-).hasMatch(id)) {
+    if (id is! String || !RegExp(r'^[0-9a-f]{32}$').hasMatch(id)) {
       throw const LiveServerException('Invalid generation ID.');
     }
     return id;
