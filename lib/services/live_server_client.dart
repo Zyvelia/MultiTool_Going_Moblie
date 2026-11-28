@@ -217,6 +217,17 @@ class LiveServerException implements Exception {
     await _get('/api/v1/ai/cancel', post:true,query:{'id':id});
   }
 
+  Future<Map<String,dynamic>> games(String kind,{String query='',int offset=0}) {
+    if (!const {'games','roms'}.contains(kind)) throw const FormatException('Invalid library.');
+    return _get('/api/v1/gaming/library',query:{'kind':kind,'q':query,'offset':'$offset'});
+  }
+  Future<void> requestGame(String kind,String id) async {
+    if (!const {'games','roms'}.contains(kind) || !validTrackId(id)) {
+      throw const FormatException('Invalid game.');
+    }
+    await _get('/api/v1/gaming/request',post:true,query:{'kind':kind,'id':id});
+  }
+
   Future<Map<String, dynamic>> hardware() => _get('/api/v1/hardware');
 
   Future<Map<String, dynamic>> state() async {
