@@ -182,6 +182,41 @@ class LiveServerException implements Exception {
     } finally { client.close(force:true); }
   }
 
+  Future<Map<String,dynamic>> aiModels() => _get('/api/v1/ai/models');
+  Future<String> aiStart(String model, List<Map<String,String>> messages) async {
+    final result = await _get('/api/v1/ai/start', post: true,
+      contentType: 'application/json',
+      payload: utf8.encode(jsonEncode({'model':model,'messages':messages})));
+    final id = result['id'];
+    if (id is! String || !RegExp(r'^[0-9a-f]{32} => _get('/api/v1/hardware');
+
+  Future<Map<String, dynamic>> state() async {
+    final data = await _get('/api/v1/state');
+    if (data['version'] is! String || data['modules'] is! List ||
+        (data['media'] != null && data['media'] is! Map)) {
+      throw const LiveServerException('Invalid Live Server state.');
+    }
+    return data;
+  }
+}
+
+class LiveServerException implements Exception {
+  const LiveServerException(this.message);
+  final String message;
+  @override
+  String toString() => message;
+}
+).hasMatch(id)) {
+      throw const LiveServerException('Invalid generation ID.');
+    }
+    return id;
+  }
+  Future<Map<String,dynamic>> aiResult(String id) =>
+    _get('/api/v1/ai/result', query:{'id':id});
+  Future<void> aiCancel(String id) async {
+    await _get('/api/v1/ai/cancel', post:true,query:{'id':id});
+  }
+
   Future<Map<String, dynamic>> hardware() => _get('/api/v1/hardware');
 
   Future<Map<String, dynamic>> state() async {

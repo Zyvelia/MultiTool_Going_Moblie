@@ -7,6 +7,7 @@ import '../services/live_server_client.dart';
 import 'live_music_screen.dart';
 import 'live_exchange_screen.dart';
 import 'live_hardware_screen.dart';
+import 'live_ai_screen.dart';
 
 class LiveServerScreen extends StatefulWidget {
   const LiveServerScreen({super.key});
@@ -297,6 +298,15 @@ class _LiveServerScreenState extends State<LiveServerScreen> with WidgetsBinding
               if (mounted) _schedule(Duration.zero);
             }, icon: const Icon(Icons.monitor_heart_outlined),
             label: const Text('Open live system monitor')),
+          OutlinedButton.icon(
+            onPressed: () async {
+              final client = _client;
+              if (client == null) return;
+              _timer?.cancel();
+              await Navigator.of(context).push(MaterialPageRoute(
+                builder: (_) => LiveAiScreen(client: client)));
+              if (mounted) _schedule(Duration.zero);
+            }, icon: const Icon(Icons.chat_bubble_outline), label: const Text('Open live AI chat')),
           Text('Desktop · v${data['version']}', style: Theme.of(context).textTheme.titleLarge),
           const SizedBox(height: 8),
           Card(child: ListTile(leading: const Icon(Icons.music_note),
