@@ -9,6 +9,7 @@ import 'live_exchange_screen.dart';
 import 'live_hardware_screen.dart';
 import 'live_ai_screen.dart';
 import 'live_gaming_screen.dart';
+import 'live_game_servers_screen.dart';
 
 class LiveServerScreen extends StatefulWidget {
   const LiveServerScreen({super.key});
@@ -317,6 +318,15 @@ class _LiveServerScreenState extends State<LiveServerScreen> with WidgetsBinding
                 builder: (_) => LiveGamingScreen(client: client)));
               if (mounted) _schedule(Duration.zero);
             }, icon: const Icon(Icons.sports_esports_outlined), label: const Text('Open live gaming')),
+          OutlinedButton.icon(
+            onPressed: () async {
+              final client = _client;
+              if (client == null) return;
+              _timer?.cancel();
+              await Navigator.of(context).push(MaterialPageRoute(
+                builder: (_) => LiveGameServersScreen(client: client)));
+              if (mounted) _schedule(Duration.zero);
+            }, icon: const Icon(Icons.dns_outlined), label: const Text('Open live game servers')),
           Text('Desktop · v${data['version']}', style: Theme.of(context).textTheme.titleLarge),
           const SizedBox(height: 8),
           Card(child: ListTile(leading: const Icon(Icons.music_note),

@@ -228,6 +228,14 @@ class LiveServerException implements Exception {
     await _get('/api/v1/gaming/request',post:true,query:{'kind':kind,'id':id});
   }
 
+  Future<Map<String,dynamic>> gameServers() => _get('/api/v1/servers/list');
+  Future<void> requestServerAction(String id,String action) async {
+    if (!validTrackId(id) || !const {'start','stop'}.contains(action)) {
+      throw const FormatException('Invalid server action.');
+    }
+    await _get('/api/v1/servers/request',post:true,query:{'id':id,'action':action});
+  }
+
   Future<Map<String, dynamic>> hardware() => _get('/api/v1/hardware');
 
   Future<Map<String, dynamic>> state() async {
