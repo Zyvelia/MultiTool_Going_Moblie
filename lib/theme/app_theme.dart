@@ -8,7 +8,7 @@ class AppTheme {
   AppTheme._();
 
   static ThemeData dark([Appearance palette = const Appearance()]) {
-    scheme = ColorScheme(
+    final scheme = ColorScheme(
       brightness: Brightness.dark,
       primary: palette.accent,
       onPrimary: palette.onAccent,
