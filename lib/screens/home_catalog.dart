@@ -2,6 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../services/home_tabs.dart';
+import '../theme/appearance.dart';
+import '../services/dashboard_service.dart';
+import '../widgets/dashboard_status.dart';
 
 enum HomeToolGroup { media, remote, productivity, utility }
 
@@ -115,10 +118,14 @@ class HomeCatalog extends StatefulWidget {
     super.key,
     required this.onOpen,
     required this.onSettings,
+    this.dashboardLoader,
+    this.active = true,
   });
 
   final ValueChanged<int> onOpen;
   final VoidCallback onSettings;
+  final Future<DashboardSnapshot> Function()? dashboardLoader;
+  final bool active;
 
   @override
   State<HomeCatalog> createState() => _HomeCatalogState();
@@ -313,6 +320,7 @@ class _HomeCatalogState extends State<HomeCatalog> {
 
   @override
   Widget build(BuildContext context) {
+    final palette = Appearance.of(context);
     final filtered = _filteredTools;
     final pinned = _fromIds(_order.where(_pinned.contains));
     final recent = _fromIds(_recent);
@@ -323,15 +331,15 @@ class _HomeCatalogState extends State<HomeCatalog> {
     };
 
     return Scaffold(
-      backgroundColor: _CatalogPalette.background,
+      backgroundColor: palette.bg,
       body: SafeArea(
         bottom: false,
         child: DecoratedBox(
-          decoration: const BoxDecoration(
+          decoration: BoxDecoration(
             gradient: RadialGradient(
               center: Alignment.topRight,
               radius: 1.2,
-              colors: [Color(0xFF21102D), _CatalogPalette.background],
+              colors: [Color.alphaBlend(palette.accent.withValues(alpha: palette.glow * 0.30), palette.bg), palette.bg],
             ),
           ),
           child: Center(
@@ -353,13 +361,13 @@ class _HomeCatalogState extends State<HomeCatalog> {
                                     : _destination == 3 ? Icons.history_rounded
                                     : Icons.grid_view_rounded,
                                 size: 27,
-                                color: _CatalogPalette.accent,
+                                color: palette.accentGlow,
                               ),
                               const SizedBox(width: 11),
                               Expanded(
-                                child: Text(title, style: const TextStyle(
+                                child: Text(title, style: TextStyle(
                                   fontSize: 25, fontWeight: FontWeight.w700,
-                                  color: _CatalogPalette.text,
+                                  color: palette.onSurface,
                                   letterSpacing: -0.5,
                                 )),
                               ),
@@ -383,14 +391,14 @@ class _HomeCatalogState extends State<HomeCatalog> {
                               controller: _searchController,
                               onChanged: (value) => setState(() => _query = value),
                               textInputAction: TextInputAction.search,
-                              style: const TextStyle(color: _CatalogPalette.text),
+                              style: TextStyle(color: palette.onSurface),
                               decoration: InputDecoration(
                                 hintText: 'Search tools, modules, features…',
-                                hintStyle: const TextStyle(color: _CatalogPalette.muted, fontSize: 13),
+                                hintStyle: TextStyle(color: palette.muted, fontSize: 13),
                                 filled: true,
-                                fillColor: _CatalogPalette.panel,
+                                fillColor: palette.surface,
                                 isDense: true,
-                                prefixIcon: const Icon(Icons.search_rounded, color: _CatalogPalette.muted),
+                                prefixIcon: Icon(Icons.search_rounded, color: palette.muted),
                                 suffixIcon: _query.isEmpty ? null : IconButton(
                                   tooltip: 'Clear search',
                                   onPressed: () {
@@ -401,11 +409,11 @@ class _HomeCatalogState extends State<HomeCatalog> {
                                 ),
                                 enabledBorder: OutlineInputBorder(
                                   borderRadius: BorderRadius.circular(16),
-                                  borderSide: const BorderSide(color: _CatalogPalette.border),
+                                  borderSide: BorderSide(color: palette.border),
                                 ),
                                 focusedBorder: OutlineInputBorder(
                                   borderRadius: BorderRadius.circular(16),
-                                  borderSide: const BorderSide(color: _CatalogPalette.accent),
+                                  borderSide: BorderSide(color: palette.accentGlow),
                                 ),
                               ),
                             ),
@@ -425,14 +433,28 @@ class _HomeCatalogState extends State<HomeCatalog> {
                             else
                               Row(
                                 children: [
-                                  const Expanded(child: Text('TOOL CATALOG', style: _CatalogPalette.eyebrow)),
-                                  Text('${filtered.length} tools', style: const TextStyle(
-                                    color: _CatalogPalette.muted, fontSize: 12,
+                                  Expanded(child: Text('TOOL CATALOG', style: _eyebrow(palette))),
+                                  Text('${filtered.length} tools', style: TextStyle(
+                                    color: palette.muted, fontSize: 12,
                                   )),
                                 ],
                               ),
                           ] else ...[
                             const SizedBox(height: 14),
+                            if (_destination == 0) ...[
+                              _HomeOverview(pinned: pinned.length, recent: recent.length, onBrowse: () => _navigate(1)),
+                              const SizedBox(height: 12),
+                              if (widget.dashboardLoader != null) ...[
+                                DashboardStatus(
+                                  load: widget.dashboardLoader!, active: widget.active,
+                                  onRemote: () => _openTool(homeTools.firstWhere((t) => t.id == 'pc')),
+                                  onMusic: () => _openTool(homeTools.firstWhere((t) => t.id == 'music')),
+                                  onSend: () => _openTool(homeTools.firstWhere((t) => t.id == 'send')),
+                                  onSettings: widget.onSettings,
+                                ),
+                                const SizedBox(height: 12),
+                              ],
+                            ],
                             _CatalogNotice(
                               icon: _destination == 0 ? Icons.bolt_rounded : Icons.history_rounded,
                               text: _destination == 0
@@ -478,7 +500,7 @@ class _HomeCatalogState extends State<HomeCatalog> {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              const Text('PINNED TOOLS', style: _CatalogPalette.eyebrow),
+                              Text('PINNED TOOLS', style: _eyebrow(palette)),
                               const SizedBox(height: 10),
                               if (pinned.isEmpty)
                                 const _CatalogNotice(icon: Icons.star_border_rounded, text: 'Pin tools from the Tools tab.')
@@ -495,7 +517,7 @@ class _HomeCatalogState extends State<HomeCatalog> {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            const Text('RECENTLY OPENED', style: _CatalogPalette.eyebrow),
+                            Text('RECENTLY OPENED', style: _eyebrow(palette)),
                             const SizedBox(height: 10),
                             if (recent.isEmpty)
                               const _CatalogNotice(icon: Icons.history_rounded, text: 'Open a tool to see it here.')
@@ -524,24 +546,24 @@ class _HomeCatalogState extends State<HomeCatalog> {
         minimum: const EdgeInsets.fromLTRB(12, 4, 12, 8),
         child: Container(
           decoration: BoxDecoration(
-            color: _CatalogPalette.panel,
+            color: palette.surface,
             borderRadius: BorderRadius.circular(24),
-            border: Border.all(color: _CatalogPalette.border),
+            border: Border.all(color: palette.border),
           ),
           clipBehavior: Clip.antiAlias,
           child: NavigationBarTheme(
             data: NavigationBarThemeData(
               backgroundColor: Colors.transparent,
               surfaceTintColor: Colors.transparent,
-              indicatorColor: const Color(0xFF49216D),
+              indicatorColor: palette.wine,
               labelTextStyle: WidgetStateProperty.resolveWith((states) => TextStyle(
                 fontSize: 11,
-                color: states.contains(WidgetState.selected) ? _CatalogPalette.accent : _CatalogPalette.muted,
+                color: states.contains(WidgetState.selected) ? palette.accentGlow : palette.muted,
                 fontWeight: FontWeight.w600,
               )),
               iconTheme: WidgetStateProperty.resolveWith((states) => IconThemeData(
                 size: 23,
-                color: states.contains(WidgetState.selected) ? _CatalogPalette.accent : _CatalogPalette.muted,
+                color: states.contains(WidgetState.selected) ? palette.accentGlow : palette.muted,
               )),
             ),
             child: NavigationBar(
@@ -564,17 +586,11 @@ class _HomeCatalogState extends State<HomeCatalog> {
   }
 }
 
-class _CatalogPalette {
-  static const background = Color(0xFF090710);
-  static const panel = Color(0xFF151020);
-  static const border = Color(0xFF392749);
-  static const accent = Color(0xFFD28AFF);
-  static const text = Color(0xFFF8F2FF);
-  static const muted = Color(0xFFB9AFCB);
-  static const eyebrow = TextStyle(
-    color: muted, fontSize: 11, fontWeight: FontWeight.w700, letterSpacing: 1.4,
-  );
+TextStyle _eyebrow(Appearance palette) => TextStyle(
+  color: palette.muted, fontSize: 11, fontWeight: FontWeight.w700, letterSpacing: 1.4,
+);
 
+class _CatalogPalette {
   static Color tool(HomeTool tool) => switch (tool.id) {
     'music' => const Color(0xFFF38BDB),
     'vault' => const Color(0xFFFFB568),
@@ -601,20 +617,23 @@ class _CatalogIconButton extends StatelessWidget {
   final bool selected;
 
   @override
-  Widget build(BuildContext context) => IconButton(
+  Widget build(BuildContext context) {
+    final palette = Appearance.of(context);
+    return IconButton(
     tooltip: tooltip,
     onPressed: onPressed,
     icon: Icon(icon, size: 21),
     style: IconButton.styleFrom(
-      foregroundColor: selected ? _CatalogPalette.accent : _CatalogPalette.text,
-      backgroundColor: _CatalogPalette.panel,
+      foregroundColor: selected ? palette.accentGlow : palette.onSurface,
+      backgroundColor: palette.surface,
       minimumSize: const Size(44, 44),
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(13),
-        side: BorderSide(color: selected ? _CatalogPalette.accent : _CatalogPalette.border),
+        side: BorderSide(color: selected ? palette.accentGlow : palette.border),
       ),
     ),
   );
+  }
 }
 
 class _CatalogFilters extends StatelessWidget {
@@ -624,6 +643,7 @@ class _CatalogFilters extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final palette = Appearance.of(context);
     const items = <(String, HomeToolGroup?)>[
       ('All', null),
       ('Media', HomeToolGroup.media),
@@ -643,14 +663,14 @@ class _CatalogFilters extends StatelessWidget {
                 selected: selected == item.$2,
                 onSelected: (_) => onChanged(item.$2),
                 showCheckmark: false,
-                backgroundColor: _CatalogPalette.panel,
-                selectedColor: const Color(0xFF6528A1),
+                backgroundColor: palette.surface,
+                selectedColor: palette.wine,
                 labelStyle: TextStyle(
                   fontSize: 12,
                   fontWeight: FontWeight.w600,
-                  color: selected == item.$2 ? Colors.white : _CatalogPalette.muted,
+                  color: selected == item.$2 ? Colors.white : palette.muted,
                 ),
-                side: BorderSide(color: selected == item.$2 ? _CatalogPalette.accent : _CatalogPalette.border),
+                side: BorderSide(color: selected == item.$2 ? palette.accentGlow : palette.border),
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
               ),
             ),
@@ -673,6 +693,7 @@ class _NeonToolRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final palette = Appearance.of(context);
     final tint = _CatalogPalette.tool(tool);
     final radius = BorderRadius.circular(16);
     return Material(
@@ -682,9 +703,9 @@ class _NeonToolRow extends StatelessWidget {
       child: Ink(
         decoration: BoxDecoration(
           borderRadius: radius,
-          border: Border.all(color: lifted ? tint : _CatalogPalette.border),
+          border: Border.all(color: lifted ? tint : palette.border),
           gradient: LinearGradient(
-            colors: [Color.alphaBlend(tint.withValues(alpha: 0.09), _CatalogPalette.panel), _CatalogPalette.panel],
+            colors: [Color.alphaBlend(tint.withValues(alpha: 0.03 + palette.glass * 0.10), palette.surface), palette.surface],
           ),
         ),
         child: Row(
@@ -706,7 +727,7 @@ class _NeonToolRow extends StatelessWidget {
                             tint.withValues(alpha: 0.07),
                           ], begin: Alignment.topLeft, end: Alignment.bottomRight),
                           border: Border.all(color: tint.withValues(alpha: 0.28)),
-                          boxShadow: [BoxShadow(color: tint.withValues(alpha: 0.12), blurRadius: 12)],
+                          boxShadow: palette.glow == 0 ? [] : [BoxShadow(color: tint.withValues(alpha: palette.glow * 0.30), blurRadius: 8 + palette.glow * 10)],
                         ),
                         child: Icon(tool.icon, color: tint, size: 23),
                       ),
@@ -716,8 +737,8 @@ class _NeonToolRow extends StatelessWidget {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Row(children: [
-                              Flexible(child: Text(tool.name, style: const TextStyle(
-                                color: _CatalogPalette.text, fontSize: 15, fontWeight: FontWeight.w700,
+                              Flexible(child: Text(tool.name, style: TextStyle(
+                                color: palette.onSurface, fontSize: 15, fontWeight: FontWeight.w700,
                               ))),
                               if (pinned) ...[
                                 const SizedBox(width: 5),
@@ -725,8 +746,8 @@ class _NeonToolRow extends StatelessWidget {
                               ],
                             ]),
                             const SizedBox(height: 3),
-                            Text(tool.line, style: const TextStyle(
-                              color: _CatalogPalette.muted, fontSize: 12, height: 1.25,
+                            Text(tool.line, style: TextStyle(
+                              color: palette.muted, fontSize: 12, height: 1.25,
                             )),
                           ],
                         ),
@@ -749,7 +770,7 @@ class _NeonToolRow extends StatelessWidget {
               IconButton(
                 tooltip: 'Move ${tool.name}',
                 onPressed: onMove,
-                icon: Icon(Icons.drag_indicator_rounded, color: lifted ? tint : _CatalogPalette.muted),
+                icon: Icon(Icons.drag_indicator_rounded, color: lifted ? tint : palette.muted),
               ),
             ],
           ],
@@ -765,17 +786,72 @@ class _CatalogNotice extends StatelessWidget {
   final String text;
 
   @override
-  Widget build(BuildContext context) => Container(
+  Widget build(BuildContext context) {
+    final palette = Appearance.of(context);
+    return Container(
     padding: const EdgeInsets.all(13),
     decoration: BoxDecoration(
-      color: _CatalogPalette.panel,
+      color: palette.surface,
       borderRadius: BorderRadius.circular(14),
-      border: Border.all(color: _CatalogPalette.border),
+      border: Border.all(color: palette.border),
     ),
     child: Row(children: [
-      Icon(icon, color: _CatalogPalette.accent),
+      Icon(icon, color: palette.accentGlow),
       const SizedBox(width: 10),
-      Expanded(child: Text(text, style: const TextStyle(color: _CatalogPalette.muted, fontSize: 13))),
+      Expanded(child: Text(text, style: TextStyle(color: palette.muted, fontSize: 13))),
     ]),
   );
+  }
+}
+
+class _HomeOverview extends StatelessWidget {
+  const _HomeOverview({required this.pinned, required this.recent, required this.onBrowse});
+  final int pinned, recent;
+  final VoidCallback onBrowse;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = Appearance.of(context);
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(colors: [p.wine, p.surface], begin: Alignment.topRight, end: Alignment.bottomLeft),
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: p.border),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          Icon(Icons.bolt_rounded, size: 30, color: p.accentGlow),
+          const SizedBox(width: 10),
+          Expanded(child: Text("Z's MultiTool", style: TextStyle(color: p.onSurface, fontSize: 24, fontWeight: FontWeight.w700))),
+        ]),
+        const SizedBox(height: 8),
+        Text('Your mobile command center', style: TextStyle(color: p.muted)),
+        const SizedBox(height: 16),
+        Wrap(spacing: 8, runSpacing: 8, children: [
+          _OverviewStat(value: homeTools.length, label: 'Tools'),
+          _OverviewStat(value: pinned, label: 'Pinned'),
+          _OverviewStat(value: recent, label: 'Recent'),
+        ]),
+        const SizedBox(height: 12),
+        FilledButton.icon(onPressed: onBrowse, icon: const Icon(Icons.grid_view_rounded), label: const Text('Browse tools')),
+      ]),
+    );
+  }
+}
+
+class _OverviewStat extends StatelessWidget {
+  const _OverviewStat({required this.value, required this.label});
+  final int value;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = Appearance.of(context);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+      decoration: BoxDecoration(color: p.bg.withValues(alpha: 0.65), borderRadius: BorderRadius.circular(12)),
+      child: Text('$value $label', style: TextStyle(color: p.onSurface, fontWeight: FontWeight.w600)),
+    );
+  }
 }
