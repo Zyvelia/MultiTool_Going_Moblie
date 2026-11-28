@@ -3,6 +3,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../services/home_tabs.dart';
 import '../theme/appearance.dart';
+import '../services/dashboard_service.dart';
+import '../widgets/dashboard_status.dart';
 
 enum HomeToolGroup { media, remote, productivity, utility }
 
@@ -116,10 +118,14 @@ class HomeCatalog extends StatefulWidget {
     super.key,
     required this.onOpen,
     required this.onSettings,
+    this.dashboardLoader,
+    this.active = true,
   });
 
   final ValueChanged<int> onOpen;
   final VoidCallback onSettings;
+  final Future<DashboardSnapshot> Function()? dashboardLoader;
+  final bool active;
 
   @override
   State<HomeCatalog> createState() => _HomeCatalogState();
@@ -438,6 +444,16 @@ class _HomeCatalogState extends State<HomeCatalog> {
                             if (_destination == 0) ...[
                               _HomeOverview(pinned: pinned.length, recent: recent.length, onBrowse: () => _navigate(1)),
                               const SizedBox(height: 12),
+                              if (widget.dashboardLoader != null) ...[
+                                DashboardStatus(
+                                  load: widget.dashboardLoader!, active: widget.active,
+                                  onRemote: () => _openTool(homeTools.firstWhere((t) => t.id == 'pc')),
+                                  onMusic: () => _openTool(homeTools.firstWhere((t) => t.id == 'music')),
+                                  onSend: () => _openTool(homeTools.firstWhere((t) => t.id == 'send')),
+                                  onSettings: widget.onSettings,
+                                ),
+                                const SizedBox(height: 12),
+                              ],
                             ],
                             _CatalogNotice(
                               icon: _destination == 0 ? Icons.bolt_rounded : Icons.history_rounded,

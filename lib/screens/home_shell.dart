@@ -13,6 +13,7 @@ import 'stream_service_screen.dart';
 import '../services/settings_service.dart';
 import '../services/app_navigation.dart';
 import '../services/home_tabs.dart';
+import '../services/dashboard_service.dart';
 import 'ai_approvals_screen.dart';
 import 'home_catalog.dart';
 
@@ -35,6 +36,7 @@ class HomeShellState extends State<HomeShell> {
   int? _open;
   final _visited = <int>{};
   final _settings = SettingsService();
+  final _dashboard = DashboardService();
   bool _checked = false;
 
   bool get toolIsOpen => _open != null;
@@ -134,6 +136,8 @@ class HomeShellState extends State<HomeShell> {
         children: [
           HomeCatalog(
             onOpen: selectTab,
+            dashboardLoader: _dashboard.load,
+            active: _open == null,
             onSettings: () => selectTab(HomeTabs.settings),
           ),
           IndexedStack(
