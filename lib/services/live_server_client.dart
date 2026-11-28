@@ -182,6 +182,8 @@ class LiveServerException implements Exception {
     } finally { client.close(force:true); }
   }
 
+  Future<Map<String, dynamic>> hardware() => _get('/api/v1/hardware');
+
   Future<Map<String, dynamic>> state() async {
     final data = await _get('/api/v1/state');
     if (data['version'] is! String || data['modules'] is! List ||
